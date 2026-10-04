@@ -71,4 +71,11 @@ if (fs.existsSync(staticSrc)) {
   copyRecursive(staticSrc, staticDest);
 }
 
+// Also place server.js at .next/server.js and root server.js to satisfy any platform path convention
+if (fs.existsSync(directServerJs)) {
+  const nextServerJs = path.join(rootDir, '.next', 'server.js');
+  fs.copyFileSync(directServerJs, nextServerJs);
+  console.log('[postbuild] Copied server.js to .next/server.js');
+}
+
 console.log('[postbuild] Done. Standalone server verified at:', directServerJs, 'Exists:', fs.existsSync(directServerJs));
