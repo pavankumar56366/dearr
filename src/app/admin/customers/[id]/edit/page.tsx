@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { BASE_CUSTOMERS } from "@/lib/admin-customers";
 import { AdminCustomerForm } from "@/components/admin/customers/AdminCustomerForm";
 
 interface EditCustomerPageProps {
@@ -8,15 +7,11 @@ interface EditCustomerPageProps {
   }>;
 }
 
+export const dynamic = "force-dynamic";
 export const dynamicParams = true;
 
-/**
- * Pre-generate static routes for editing base demo customers.
- */
 export async function generateStaticParams() {
-  return BASE_CUSTOMERS.map((customer) => ({
-    id: customer.id,
-  }));
+  return [];
 }
 
 export const metadata: Metadata = {
@@ -37,13 +32,6 @@ export default async function EditCustomerPage({
 }: EditCustomerPageProps) {
   const { id } = await params;
   const decodedId = decodeURIComponent(id);
-  const initialCustomer =
-    BASE_CUSTOMERS.find((c) => c.id === decodedId) ?? null;
 
-  return (
-    <AdminCustomerForm
-      customerId={decodedId}
-      initialCustomer={initialCustomer}
-    />
-  );
+  return <AdminCustomerForm customerId={decodedId} />;
 }

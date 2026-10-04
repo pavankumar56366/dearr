@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   AdminCustomer,
   CustomerStatus,
-  getAdminCustomerById,
-  updateAdminCustomer,
 } from "@/lib/admin-customers";
 import {
   ArrowLeftIcon,
@@ -41,7 +39,7 @@ export function AdminCustomerForm({
   const [customer, setCustomer] = useState<AdminCustomer | null>(
     initialCustomer ?? null
   );
-  const [loading, setLoading] = useState(!initialCustomer);
+  const [loading, setLoading] = useState(true);
 
   // Form Fields
   const [name, setName] = useState("");
@@ -67,32 +65,49 @@ export function AdminCustomerForm({
   const [showDiscardModal, setShowDiscardModal] = useState(false);
   const [pendingNavigationUrl, setPendingNavigationUrl] = useState<string | null>(null);
 
-  // Sync on mount
+  // Sync on mount from API
   useEffect(() => {
-    const found = getAdminCustomerById(customerId);
-    setCustomer(found);
-    if (found) {
-      setName(found.name);
-      setEmail(found.email);
-      setPhone(found.phone);
-      setStatus(found.status);
-      setNotes(found.notes || "");
+    let isMounted = true;
+    async function loadCustomer() {
+      try {
+        setLoading(true);
+        const res = await fetch(`/api/admin/customers/${customerId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const found = data.customer;
+          if (isMounted && found) {
+            setCustomer(found);
+            setName(found.name);
+            setEmail(found.email);
+            setPhone(found.phone);
+            setStatus(found.status);
+            setNotes(found.notes || "");
 
-      if (found.defaultAddress) {
-        setAddressFullName(found.defaultAddress.fullName || found.name);
-        setAddressPhone(found.defaultAddress.phone || found.phone);
-        setAddressLine1(found.defaultAddress.addressLine1 || "");
-        setAddressLine2(found.defaultAddress.addressLine2 || "");
-        setCity(found.defaultAddress.city || "");
-        setAddressState(found.defaultAddress.state || "");
-        setPostalCode(found.defaultAddress.postalCode || "");
-        setCountry(found.defaultAddress.country || "India");
-      } else {
-        setAddressFullName(found.name);
-        setAddressPhone(found.phone);
+            if (found.defaultAddress) {
+              setAddressFullName(found.defaultAddress.fullName || found.name);
+              setAddressPhone(found.defaultAddress.phone || found.phone);
+              setAddressLine1(found.defaultAddress.addressLine1 || "");
+              setAddressLine2(found.defaultAddress.addressLine2 || "");
+              setCity(found.defaultAddress.city || "");
+              setAddressState(found.defaultAddress.state || "");
+              setPostalCode(found.defaultAddress.postalCode || "");
+              setCountry(found.defaultAddress.country || "India");
+            } else {
+              setAddressFullName(found.name);
+              setAddressPhone(found.phone);
+            }
+          }
+        }
+      } catch {
+        if (isMounted) setCustomer(null);
+      } finally {
+        if (isMounted) setLoading(false);
       }
     }
-    setLoading(false);
+    loadCustomer();
+    return () => {
+      isMounted = false;
+    };
   }, [customerId]);
 
   // Dirty State Calculation
@@ -206,7 +221,7 @@ export function AdminCustomerForm({
   };
 
   // Form submission
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setTouched({
       name: true,
@@ -226,29 +241,40 @@ export function AdminCustomerForm({
       addressState.trim() ||
       postalCode.trim();
 
-    const updated = updateAdminCustomer(customer.id, {
-      name: name.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      status,
-      notes: notes.trim() || undefined,
-      defaultAddress: hasAddress
-        ? {
-            fullName: addressFullName.trim() || name.trim(),
-            phone: addressPhone.trim() || phone.trim(),
-            addressLine1: addressLine1.trim(),
-            addressLine2: addressLine2.trim() || undefined,
-            city: city.trim(),
-            state: addressState.trim(),
-            postalCode: postalCode.trim(),
-            country: country.trim() || "India",
-          }
-        : undefined,
-    });
+    try {
+      const res = await fetch(`/api/admin/customers/${customer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+          status,
+          notes: notes.trim() || undefined,
+          defaultAddress: hasAddress
+            ? {
+                fullName: addressFullName.trim() || name.trim(),
+                phone: addressPhone.trim() || phone.trim(),
+                addressLine1: addressLine1.trim(),
+                addressLine2: addressLine2.trim() || undefined,
+                city: city.trim(),
+                state: addressState.trim(),
+                postalCode: postalCode.trim(),
+                country: country.trim() || "India",
+              }
+            : undefined,
+        }),
+      });
 
-    if (updated) {
-      router.push(`/admin/customers/${customer.id}`);
-    } else {
+      if (res.ok) {
+        router.push(`/admin/customers/${customer.id}`);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Failed to update customer");
+        setIsSubmitting(false);
+      }
+    } catch {
+      alert("Network error updating customer");
       setIsSubmitting(false);
     }
   };

@@ -6,9 +6,6 @@ import Image from "next/image";
 import {
   AdminReview,
   ReviewStatus,
-  BASE_REVIEWS,
-  getAllAdminReviews,
-  updateAdminReviewStatus,
   getReviewMetrics,
 } from "@/lib/admin-reviews";
 import { getAllAdminProducts } from "@/lib/admin-catalog";
@@ -38,7 +35,9 @@ type PurchaseFilter = "ALL" | "VERIFIED" | "UNVERIFIED";
 type DateFilter = "ALL" | "TODAY" | "7DAYS" | "30DAYS";
 
 export function AdminReviewsList() {
-  const [reviews, setReviews] = useState<AdminReview[]>(BASE_REVIEWS);
+  const [reviews, setReviews] = useState<AdminReview[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"ALL" | ReviewStatus>("ALL");
   const [selectedRating, setSelectedRating] = useState<RatingFilter>("ALL");
@@ -67,9 +66,29 @@ export function AdminReviewsList() {
     }, 3000);
   };
 
-  // Sync reviews on mount
+  const fetchReviews = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch("/api/admin/reviews");
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("Admin authorization required to view reviews.");
+        }
+        throw new Error("Failed to load customer reviews.");
+      }
+      const data = await res.json();
+      setReviews(data.reviews || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to load reviews.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sync reviews on mount from real API
   useEffect(() => {
-    setReviews(getAllAdminReviews());
+    fetchReviews();
   }, []);
 
   // Outside click & ESC listeners
@@ -214,23 +233,38 @@ export function AdminReviewsList() {
     setModerationNote(review.adminNote || "");
   };
 
-  // Confirm moderation status update
-  const handleConfirmModeration = () => {
+  // Confirm moderation status update via API
+  const handleConfirmModeration = async () => {
     if (!reviewToModerate) return;
 
-    const updated = updateAdminReviewStatus(
-      reviewToModerate.id,
-      targetStatus,
-      moderationNote.trim() || undefined
-    );
+    try {
+      const res = await fetch(`/api/admin/reviews/${reviewToModerate.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: targetStatus,
+          adminNote: moderationNote.trim() || undefined,
+        }),
+      });
 
-    if (updated) {
-      setReviews(getAllAdminReviews());
-      showToast(
-        `Review marked as ${targetStatus.toUpperCase()}`
-      );
+      if (!res.ok) {
+        throw new Error("Failed to update review status");
+      }
+
+      const data = await res.json();
+      if (data.ok && data.review) {
+        setReviews((prev) =>
+          prev.map((r) => (r.id === data.review.id ? data.review : r))
+        );
+        showToast(
+          `Review marked as ${targetStatus.toUpperCase()}`
+        );
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to update review status");
+    } finally {
+      setReviewToModerate(null);
     }
-    setReviewToModerate(null);
   };
 
   // Open Edit Note Modal
@@ -240,21 +274,35 @@ export function AdminReviewsList() {
     setAdminNoteInput(review.adminNote || "");
   };
 
-  // Save Admin Note
-  const handleSaveAdminNote = () => {
+  // Save Admin Note via API
+  const handleSaveAdminNote = async () => {
     if (!reviewToEditNote) return;
 
-    const updated = updateAdminReviewStatus(
-      reviewToEditNote.id,
-      reviewToEditNote.status,
-      adminNoteInput.trim() || undefined
-    );
+    try {
+      const res = await fetch(`/api/admin/reviews/${reviewToEditNote.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminNote: adminNoteInput.trim() || undefined,
+        }),
+      });
 
-    if (updated) {
-      setReviews(getAllAdminReviews());
-      showToast("Admin moderation note updated");
+      if (!res.ok) {
+        throw new Error("Failed to update admin note");
+      }
+
+      const data = await res.json();
+      if (data.ok && data.review) {
+        setReviews((prev) =>
+          prev.map((r) => (r.id === data.review.id ? data.review : r))
+        );
+        showToast("Admin moderation note updated");
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to update admin note");
+    } finally {
+      setReviewToEditNote(null);
     }
-    setReviewToEditNote(null);
   };
 
   // Helper date formatter
@@ -379,8 +427,27 @@ export function AdminReviewsList() {
         </div>
       </div>
 
-      {showSkeletonDemo ? (
+      {loading || showSkeletonDemo ? (
         <AdminReviewsSkeleton />
+      ) : error ? (
+        <div className="p-8 rounded-2xl bg-surface border border-rose-200 text-center space-y-3">
+          <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <AlertCircleIcon size={20} />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-display text-sm font-bold text-neutral-900">
+              Failed to load reviews
+            </h3>
+            <p className="text-xs text-neutral-500 max-w-sm mx-auto">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchReviews()}
+            className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
+          >
+            Retry Loading
+          </button>
+        </div>
       ) : (
         <>
           {/* ====================================================================

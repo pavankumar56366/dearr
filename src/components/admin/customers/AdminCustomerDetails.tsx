@@ -5,12 +5,9 @@ import Link from "next/link";
 import {
   AdminCustomer,
   CustomerStatus,
-  getAdminCustomerById,
-  toggleAdminCustomerStatus,
 } from "@/lib/admin-customers";
 import {
   AdminOrder,
-  getAllAdminOrders,
 } from "@/lib/admin-orders";
 import {
   ArrowLeftIcon,
@@ -46,7 +43,7 @@ export function AdminCustomerDetails({
     initialCustomer ?? null
   );
   const [allOrders, setAllOrders] = useState<AdminOrder[]>([]);
-  const [loading, setLoading] = useState(!initialCustomer);
+  const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Status transition modal state
@@ -61,12 +58,36 @@ export function AdminCustomerDetails({
     }, 3000);
   };
 
-  // Sync customer and orders on mount
+  // Sync customer and orders from API on mount
   useEffect(() => {
-    const found = getAdminCustomerById(customerId);
-    setCustomer(found);
-    setAllOrders(getAllAdminOrders());
-    setLoading(false);
+    let isMounted = true;
+    async function loadData() {
+      try {
+        setLoading(true);
+        const [custRes, ordRes] = await Promise.all([
+          fetch(`/api/admin/customers/${customerId}`),
+          fetch("/api/admin/orders").catch(() => null),
+        ]);
+        if (custRes.ok) {
+          const custData = await custRes.json();
+          if (isMounted) setCustomer(custData.customer || null);
+        } else {
+          if (isMounted) setCustomer(null);
+        }
+        if (ordRes && ordRes.ok) {
+          const ordData = await ordRes.json();
+          if (isMounted) setAllOrders(ordData.orders || []);
+        }
+      } catch {
+        if (isMounted) setCustomer(null);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadData();
+    return () => {
+      isMounted = false;
+    };
   }, [customerId]);
 
   // Find orders placed by this customer
@@ -133,16 +154,28 @@ export function AdminCustomerDetails({
     setShowStatusModal(true);
   };
 
-  const handleConfirmStatusChange = () => {
+  const handleConfirmStatusChange = async () => {
     if (!customer) return;
-    const updated = toggleAdminCustomerStatus(
-      customer.id,
-      targetStatus,
-      statusChangeReason.trim() || undefined
-    );
-    if (updated) {
-      setCustomer(updated);
-      showToast(`Customer status updated to ${targetStatus.toUpperCase()}`);
+    try {
+      const res = await fetch(`/api/admin/customers/${customer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: targetStatus,
+          reason: statusChangeReason.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.customer) {
+          setCustomer(data.customer);
+          showToast(`Customer status updated to ${targetStatus.toUpperCase()}`);
+        }
+      } else {
+        showToast("Failed to update status");
+      }
+    } catch {
+      showToast("Failed to update status");
     }
     setShowStatusModal(false);
   };

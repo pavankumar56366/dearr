@@ -62,12 +62,40 @@ export function AdminSettingsPage() {
     }, 3500);
   };
 
-  // Sync settings on mount
+  // Sync settings on mount from API
   useEffect(() => {
-    const loaded = getAdminSettings();
-    setInitialSettings(loaded);
-    setFormData(loaded);
-    setLoading(false);
+    let isMounted = true;
+    async function loadSettings() {
+      try {
+        setLoading(true);
+        const res = await fetch("/api/admin/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.settings) {
+            setInitialSettings(data.settings);
+            setFormData(data.settings);
+          }
+        } else {
+          const loaded = getAdminSettings();
+          if (isMounted) {
+            setInitialSettings(loaded);
+            setFormData(loaded);
+          }
+        }
+      } catch {
+        const loaded = getAdminSettings();
+        if (isMounted) {
+          setInitialSettings(loaded);
+          setFormData(loaded);
+        }
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadSettings();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
   // Dirty State Calculation

@@ -6,8 +6,6 @@ import Image from "next/image";
 import {
   AdminReview,
   ReviewStatus,
-  getAdminReviewById,
-  updateAdminReviewStatus,
 } from "@/lib/admin-reviews";
 import { getAllAdminProducts } from "@/lib/admin-catalog";
 import { getAllAdminCustomers } from "@/lib/admin-customers";
@@ -40,7 +38,7 @@ export function AdminReviewDetails({
   const [review, setReview] = useState<AdminReview | null>(
     initialReview ?? null
   );
-  const [loading, setLoading] = useState(!initialReview);
+  const [loading, setLoading] = useState(true);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Status moderation modal state
@@ -59,10 +57,29 @@ export function AdminReviewDetails({
     }, 3000);
   };
 
+  // Sync review from API on mount
   useEffect(() => {
-    const found = getAdminReviewById(reviewId);
-    setReview(found);
-    setLoading(false);
+    let isMounted = true;
+    async function loadReview() {
+      try {
+        setLoading(true);
+        const res = await fetch(`/api/admin/reviews/${reviewId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) setReview(data.review || null);
+        } else {
+          if (isMounted) setReview(null);
+        }
+      } catch {
+        if (isMounted) setReview(null);
+      } finally {
+        if (isMounted) setLoading(false);
+      }
+    }
+    loadReview();
+    return () => {
+      isMounted = false;
+    };
   }, [reviewId]);
 
   // Product validation
@@ -85,16 +102,28 @@ export function AdminReviewDetails({
     setShowModerationModal(true);
   };
 
-  const handleConfirmModeration = () => {
+  const handleConfirmModeration = async () => {
     if (!review) return;
-    const updated = updateAdminReviewStatus(
-      review.id,
-      targetStatus,
-      moderationReason.trim() || undefined
-    );
-    if (updated) {
-      setReview(updated);
-      showToast(`Review status updated to ${targetStatus.toUpperCase()}`);
+    try {
+      const res = await fetch(`/api/admin/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: targetStatus,
+          adminNote: moderationReason.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.review) {
+          setReview(data.review);
+          showToast(`Review status updated to ${targetStatus.toUpperCase()}`);
+        }
+      } else {
+        showToast("Failed to update status");
+      }
+    } catch {
+      showToast("Failed to update status");
     }
     setShowModerationModal(false);
   };
@@ -105,16 +134,27 @@ export function AdminReviewDetails({
     setShowEditNoteModal(true);
   };
 
-  const handleSaveAdminNote = () => {
+  const handleSaveAdminNote = async () => {
     if (!review) return;
-    const updated = updateAdminReviewStatus(
-      review.id,
-      review.status,
-      adminNoteInput.trim() || undefined
-    );
-    if (updated) {
-      setReview(updated);
-      showToast("Admin note saved");
+    try {
+      const res = await fetch(`/api/admin/reviews/${review.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminNote: adminNoteInput.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.review) {
+          setReview(data.review);
+          showToast("Admin note saved");
+        }
+      } else {
+        showToast("Failed to save note");
+      }
+    } catch {
+      showToast("Failed to save note");
     }
     setShowEditNoteModal(false);
   };

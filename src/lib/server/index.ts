@@ -233,3 +233,18 @@ export {
   type GoogleIdentityPayload,
   type GoogleOAuthConfig,
 } from "./google-oauth";
+
+export {
+  listAdminCustomers,
+  getAdminCustomerById,
+  updateAdminCustomerRecord,
+  type CustomerListFilters,
+} from "./customer";
+
+export {
+  listAdminReviews,
+  getAdminReviewById,
+  updateAdminReview,
+  type ReviewListFilters,
+} from "./review";
+

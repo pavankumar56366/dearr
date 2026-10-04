@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { BASE_REVIEWS } from "@/lib/admin-reviews";
 import { AdminReviewDetails } from "@/components/admin/reviews/AdminReviewDetails";
 
 interface ReviewDetailsPageProps {
@@ -8,15 +7,11 @@ interface ReviewDetailsPageProps {
   }>;
 }
 
+export const dynamic = "force-dynamic";
 export const dynamicParams = true;
 
-/**
- * Pre-generate static routes for base demo reviews.
- */
 export async function generateStaticParams() {
-  return BASE_REVIEWS.map((review) => ({
-    id: review.id,
-  }));
+  return [];
 }
 
 export const metadata: Metadata = {
@@ -37,10 +32,6 @@ export default async function ReviewDetailsPage({
 }: ReviewDetailsPageProps) {
   const { id } = await params;
   const decodedId = decodeURIComponent(id);
-  const initialReview =
-    BASE_REVIEWS.find((r) => r.id === decodedId) ?? null;
 
-  return (
-    <AdminReviewDetails reviewId={decodedId} initialReview={initialReview} />
-  );
+  return <AdminReviewDetails reviewId={decodedId} />;
 }

@@ -5,9 +5,6 @@ import Link from "next/link";
 import {
   AdminCustomer,
   CustomerStatus,
-  BASE_CUSTOMERS,
-  getAllAdminCustomers,
-  toggleAdminCustomerStatus,
   getCustomerMetrics,
 } from "@/lib/admin-customers";
 import {
@@ -35,7 +32,9 @@ type SpendingFilter = "ALL" | "ZERO" | "1_TO_999" | "1000_TO_4999" | "5000_PLUS"
 type DateFilter = "ALL" | "TODAY" | "7DAYS" | "30DAYS";
 
 export function AdminCustomersList() {
-  const [customers, setCustomers] = useState<AdminCustomer[]>(BASE_CUSTOMERS);
+  const [customers, setCustomers] = useState<AdminCustomer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"ALL" | CustomerStatus>("ALL");
   const [selectedActivity, setSelectedActivity] = useState<ActivityFilter>("ALL");
@@ -60,9 +59,29 @@ export function AdminCustomersList() {
     }, 3000);
   };
 
-  // Sync customers on mount
+  const fetchCustomers = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch("/api/admin/customers");
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          throw new Error("Admin authorization required to view customers.");
+        }
+        throw new Error("Failed to load customer accounts.");
+      }
+      const data = await res.json();
+      setCustomers(data.customers || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to load customers.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Sync customers on mount from real API
   useEffect(() => {
-    setCustomers(getAllAdminCustomers());
+    fetchCustomers();
   }, []);
 
   // Listen to outside clicks and escape key
@@ -203,23 +222,38 @@ export function AdminCustomersList() {
     setStatusChangeReason("");
   };
 
-  // Confirm status change
-  const handleConfirmStatusChange = () => {
+  // Confirm status change via API
+  const handleConfirmStatusChange = async () => {
     if (!customerToChangeStatus) return;
 
-    const updated = toggleAdminCustomerStatus(
-      customerToChangeStatus.id,
-      targetStatus,
-      statusChangeReason.trim() || undefined
-    );
+    try {
+      const res = await fetch(`/api/admin/customers/${customerToChangeStatus.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: targetStatus,
+          reason: statusChangeReason.trim() || undefined,
+        }),
+      });
 
-    if (updated) {
-      setCustomers(getAllAdminCustomers());
-      showToast(
-        `Customer "${customerToChangeStatus.name}" marked as ${targetStatus.toUpperCase()}`
-      );
+      if (!res.ok) {
+        throw new Error("Failed to update customer status");
+      }
+
+      const data = await res.json();
+      if (data.ok && data.customer) {
+        setCustomers((prev) =>
+          prev.map((c) => (c.id === data.customer.id ? data.customer : c))
+        );
+        showToast(
+          `Customer "${customerToChangeStatus.name}" marked as ${targetStatus.toUpperCase()}`
+        );
+      }
+    } catch (err: any) {
+      showToast(err.message || "Failed to update customer status");
+    } finally {
+      setCustomerToChangeStatus(null);
     }
-    setCustomerToChangeStatus(null);
   };
 
   // Helper date formatter
@@ -309,8 +343,27 @@ export function AdminCustomersList() {
         </div>
       </div>
 
-      {showSkeletonDemo ? (
+      {loading || showSkeletonDemo ? (
         <AdminCustomersSkeleton />
+      ) : error ? (
+        <div className="p-8 rounded-2xl bg-surface border border-rose-200 text-center space-y-3">
+          <div className="w-10 h-10 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center mx-auto">
+            <AlertCircleIcon size={20} />
+          </div>
+          <div className="space-y-1">
+            <h3 className="font-display text-sm font-bold text-neutral-900">
+              Failed to load customers
+            </h3>
+            <p className="text-xs text-neutral-500 max-w-sm mx-auto">{error}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchCustomers()}
+            className="px-4 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold transition-all cursor-pointer shadow-2xs"
+          >
+            Retry Loading
+          </button>
+        </div>
       ) : (
         <>
           {/* ====================================================================
