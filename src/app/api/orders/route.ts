@@ -1,0 +1,81 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireUser, handleAuthError } from "@/lib/server/auth";
+import {
+  createOrderFromCart,
+  listCustomerOrders,
+  OrderValidationError,
+} from "@/lib/server/order";
+
+/**
+ * POST /api/orders — Create a new order from the customer's active cart.
+ *
+ * Body: { shippingFullName, shippingPhone, shippingAddressLine1, shippingAddressLine2?,
+ *         shippingCity, shippingState, shippingPostalCode, shippingCountry? }
+ *
+ * Server-side authoritative flow:
+ * - Prices, discounts, stock, totals computed from MySQL (NEVER from browser).
+ * - Payment status starts as 'pending' (B-18 Razorpay handles actual payment).
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const user = await requireUser();
+    const body = await request.json();
+
+    const order = await createOrderFromCart(user.id, {
+      shippingFullName: body.shippingFullName,
+      shippingPhone: body.shippingPhone,
+      shippingAddressLine1: body.shippingAddressLine1,
+      shippingAddressLine2: body.shippingAddressLine2 || null,
+      shippingCity: body.shippingCity,
+      shippingState: body.shippingState,
+      shippingPostalCode: body.shippingPostalCode,
+      shippingCountry: body.shippingCountry || "India",
+    });
+
+    return NextResponse.json(
+      { ok: true, order },
+      { status: 201 }
+    );
+  } catch (err) {
+    if (err instanceof OrderValidationError) {
+      return NextResponse.json(
+        { ok: false, error: err.message },
+        { status: err.statusCode }
+      );
+    }
+    return handleAuthError(err, "Failed to create order");
+  }
+}
+
+/**
+ * GET /api/orders — List the authenticated customer's orders.
+ *
+ * Query params:
+ *   status? — filter by order status
+ *   paymentStatus? — filter by payment status
+ *   page? — pagination page (default 1)
+ *   limit? — items per page (default 20, max 50)
+ */
+export async function GET(request: NextRequest) {
+  try {
+    const user = await requireUser();
+    const url = new URL(request.url);
+
+    const result = await listCustomerOrders(user.id, {
+      status: (url.searchParams.get("status") as any) || undefined,
+      paymentStatus: (url.searchParams.get("paymentStatus") as any) || undefined,
+      page: parseInt(url.searchParams.get("page") || "1", 10),
+      limit: parseInt(url.searchParams.get("limit") || "20", 10),
+    });
+
+    return NextResponse.json({ ok: true, ...result });
+  } catch (err) {
+    if (err instanceof OrderValidationError) {
+      return NextResponse.json(
+        { ok: false, error: err.message },
+        { status: err.statusCode }
+      );
+    }
+    return handleAuthError(err, "Failed to fetch orders");
+  }
+}

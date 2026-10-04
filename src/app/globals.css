@@ -1,0 +1,339 @@
+@import "tailwindcss";
+
+/**
+ * Dearr V1 Design System Foundation
+ * Source of Truth: docs/4.DESIGN(1) (1).md
+ */
+
+:root {
+  /* Brand & Page Canvas Colors */
+  --color-primary: #A2CB8B;
+  --color-primary-hover: #91BC7A;
+  --color-secondary: #FFCB56;
+  --color-canvas: #FFFDF8;
+  --color-surface: #FFFFFF;
+
+  /* Neutrals */
+  --color-neutral-900: #202124;
+  --color-neutral-700: #4A4A4A;
+  --color-neutral-500: #777777;
+  --color-neutral-300: #D9D9D9;
+  --color-neutral-100: #F5F5F2;
+
+  /* Semantics */
+  --color-success: #2A7C13;
+  --color-warning: #C00707;
+  --color-error: #C00707;
+  --color-info: #2E6FA3;
+
+  /* Typography Fallbacks */
+  --font-telma: "Telma", cursive, serif;
+
+  /* 8px-based Spacing System */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+
+  /* Corner Radii */
+  --radius-control: 10px;
+  --radius-input: 12px;
+  --radius-button: 12px;
+  --radius-card: 16px;
+  --radius-modal: 20px;
+  --radius-sheet: 24px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-card: 0 2px 12px rgba(32, 33, 36, 0.06);
+  --shadow-modal: 0 8px 30px rgba(32, 33, 36, 0.12);
+}
+
+@theme {
+  /* Color Tokens */
+  --color-primary: #A2CB8B;
+  --color-primary-hover: #91BC7A;
+  --color-secondary: #FFCB56;
+  --color-canvas: #FFFDF8;
+  --color-surface: #FFFFFF;
+  --color-neutral-900: #202124;
+  --color-neutral-700: #4A4A4A;
+  --color-neutral-500: #777777;
+  --color-neutral-300: #D9D9D9;
+  --color-neutral-100: #F5F5F2;
+  --color-success: #2A7C13;
+  --color-warning: #C00707;
+  --color-error: #C00707;
+  --color-info: #2E6FA3;
+
+  /* Typography Tokens */
+  --font-inter: var(--font-inter);
+  --font-telma: var(--font-telma);
+  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-body: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-telma), "Telma", cursive, serif;
+
+  /* 8px Spacing Scale */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-14: 56px;
+  --spacing-16: 64px;
+
+  /* Radii Tokens */
+  --radius-control: 10px;
+  --radius-input: 12px;
+  --radius-button: 12px;
+  --radius-card: 16px;
+  --radius-modal: 20px;
+  --radius-sheet: 24px;
+  --radius-pill: 999px;
+
+  /* Elevation Tokens */
+  --shadow-card: 0 2px 12px rgba(32, 33, 36, 0.06);
+  --shadow-modal: 0 8px 30px rgba(32, 33, 36, 0.12);
+}
+
+/* ==========================================================================
+   Global Reset & Page Foundation
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  background-color: var(--color-canvas);
+  color: var(--color-neutral-700);
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--color-canvas);
+  color: var(--color-neutral-700);
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-neutral-900);
+  margin: 0;
+  font-weight: 700;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* ==========================================================================
+   Base Component Primitives
+   ========================================================================== */
+
+/* Button Primitives */
+.btn-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  border-radius: 12px;
+  padding-left: 20px;
+  padding-right: 20px;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  user-select: none;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.btn-base:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Primary Button: 48px height, 12px radius, Inter 15px / 600, #A2CB8B bg, #202124 text */
+.btn-primary {
+  background-color: var(--color-primary);
+  color: var(--color-neutral-900);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--color-primary-hover);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-primary:disabled {
+  background-color: var(--color-neutral-300);
+  color: var(--color-neutral-500);
+}
+
+/* Secondary Button: 48px height, 12px radius, 1px solid Primary, Neutral 900 text */
+.btn-secondary {
+  background-color: transparent;
+  border: 1px solid var(--color-primary);
+  color: var(--color-neutral-900);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background-color: rgba(162, 203, 139, 0.12);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.btn-secondary:disabled {
+  background-color: var(--color-neutral-100);
+  border-color: var(--color-neutral-300);
+  color: var(--color-neutral-500);
+}
+
+/* Destructive Button */
+.btn-destructive {
+  background-color: var(--color-error);
+  color: #FFFFFF;
+}
+
+.btn-destructive:hover:not(:disabled) {
+  background-color: #A00606;
+}
+
+.btn-destructive:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+/* Text Button */
+.btn-text {
+  background-color: transparent;
+  color: var(--color-neutral-900);
+  padding-left: 8px;
+  padding-right: 8px;
+  height: auto;
+}
+
+.btn-text:hover:not(:disabled) {
+  color: var(--color-neutral-700);
+  text-decoration: underline;
+}
+
+/* Input Primitives: 48px height, 12px radius, 1px #D9D9D9 border, 2px #A2CB8B focus ring */
+.input-base {
+  display: flex;
+  width: 100%;
+  height: 48px;
+  border-radius: 12px;
+  border: 1px solid var(--color-neutral-300);
+  background-color: var(--color-surface);
+  padding: 12px 14px;
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 24px;
+  color: var(--color-neutral-900);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.input-base::placeholder {
+  color: var(--color-neutral-500);
+}
+
+.input-base:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.input-base:disabled {
+  background-color: var(--color-neutral-100);
+  cursor: not-allowed;
+  color: var(--color-neutral-500);
+}
+
+.input-base.input-error,
+.input-base[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
+.input-base.input-error:focus,
+.input-base[aria-invalid="true"]:focus {
+  border-color: var(--color-error);
+  box-shadow: 0 0 0 2px var(--color-error);
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out both;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+
+/* ==========================================================================
+   Utility — hide scrollbar
+   ========================================================================== */
+
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
