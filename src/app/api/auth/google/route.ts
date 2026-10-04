@@ -41,9 +41,9 @@ export async function GET(request: Request): Promise<NextResponse> {
     return response;
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal server error";
-    console.error("[GET /api/auth/google]", message);
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "https://dearr.in";
     return NextResponse.redirect(
-      new URL("/login?error=oauth_config_error", request.url)
+      new URL("/login?error=oauth_config_error", baseUrl)
     );
   }
 }

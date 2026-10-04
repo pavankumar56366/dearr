@@ -36,6 +36,7 @@ import { findProfileById } from "@/lib/server/profile";
  * - Redirect destinations are limited to local paths only.
  */
 export async function GET(request: Request): Promise<NextResponse> {
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/$/, "") || "https://dearr.in";
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const stateParam = url.searchParams.get("state");
@@ -43,12 +44,12 @@ export async function GET(request: Request): Promise<NextResponse> {
 
   // Helper to redirect to login with a safe error message (no secrets, no stack traces)
   const loginError = (code: string) =>
-    NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(code)}`, request.url));
+    NextResponse.redirect(new URL(`/login?error=${encodeURIComponent(code)}`, baseUrl));
 
   // ── 1. Google-side errors (user denied, etc.) ──────────────────────────────
   if (errorParam) {
     if (errorParam === "access_denied") {
-      return NextResponse.redirect(new URL("/login?error=google_denied", request.url));
+      return NextResponse.redirect(new URL("/login?error=google_denied", baseUrl));
     }
     console.error("[Google Callback] Google returned error:", errorParam);
     return loginError("google_error");
@@ -81,7 +82,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   }
 
   // ── 4. Clear the state cookie immediately ──────────────────────────────────
-  const baseResponse = NextResponse.redirect(new URL("/account", request.url));
+  const baseResponse = NextResponse.redirect(new URL("/account", baseUrl));
   baseResponse.cookies.set(GOOGLE_STATE_COOKIE, "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -123,7 +124,7 @@ export async function GET(request: Request): Promise<NextResponse> {
           return NextResponse.redirect(
             new URL(
               "/login?error=email_exists_use_password",
-              request.url
+              baseUrl
             )
           );
         }
@@ -154,7 +155,7 @@ export async function GET(request: Request): Promise<NextResponse> {
     });
 
     // ── 11. Redirect to /account with the session cookie ────────────────────
-    const redirectResponse = NextResponse.redirect(new URL("/account", request.url));
+    const redirectResponse = NextResponse.redirect(new URL("/account", baseUrl));
 
     // Clear state cookie
     redirectResponse.cookies.set(GOOGLE_STATE_COOKIE, "", {
