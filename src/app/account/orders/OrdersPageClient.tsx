@@ -8,13 +8,13 @@ import {
   OrderHistory,
 } from "@/components/customer/account";
 import { useAuth } from "@/context/AuthContext";
-import { DEMO_ORDERS, getAllCustomerOrders } from "@/data/demo-orders";
 import type { DemoOrder } from "@/lib/order-model";
 
 export default function OrdersPageClient() {
   const router = useRouter();
   const { user, isLoading, logout } = useAuth();
-  const [orders, setOrders] = useState<DemoOrder[]>(DEMO_ORDERS);
+  const [orders, setOrders] = useState<DemoOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
   useEffect(() => {
@@ -31,10 +31,10 @@ export default function OrdersPageClient() {
                 status: o.status,
                 paymentStatus: o.paymentStatus,
                 paymentMethod: o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)",
-                subtotal: o.subtotal,
-                shippingAmount: o.shippingAmount || 0,
-                discountAmount: o.discountAmount || 0,
-                totalAmount: o.totalAmount,
+                subtotal: Number(o.subtotal || 0),
+                shippingAmount: Number(o.shippingAmount || 0),
+                discountAmount: Number(o.discountAmount || 0),
+                totalAmount: Number(o.totalAmount || 0),
                 currency: o.currency || "INR",
                 shippingFullName: o.customerName || user.fullName || "Customer",
                 shippingPhone: o.customerPhone || user.phone || "+91 98765 43210",
@@ -52,11 +52,13 @@ export default function OrdersPageClient() {
             }
           }
         } catch {}
+        setOrders([]);
       }
-      setOrders(getAllCustomerOrders());
     }
 
-    loadOrders();
+    if (user) {
+      loadOrders().finally(() => setOrdersLoading(false));
+    }
   }, [user]);
 
   React.useEffect(() => {
@@ -79,7 +81,7 @@ export default function OrdersPageClient() {
     router.push("/login");
   };
 
-  if (isLoading) {
+  if (isLoading || ordersLoading) {
     return (
       <AccountShell>
         <div className="flex gap-8 lg:gap-12 animate-pulse" aria-busy="true">

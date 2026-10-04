@@ -9,7 +9,6 @@ import React, {
   useEffect,
 } from "react";
 import type { SampleProduct, SampleProductVariant } from "@/data/sample-products";
-import { SAMPLE_PRODUCTS } from "@/data/sample-products";
 import { useAuth } from "./AuthContext";
 
 /**
@@ -60,47 +59,6 @@ interface CartContextType {
 
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
-// ─── Initial Demo Cart State (Guest Fallback) ───────────────────────────────
-function getInitialDemoCart(): CartItem[] {
-  const p1 = SAMPLE_PRODUCTS.find((p) => p.id === "sp-01");
-  const p2 = SAMPLE_PRODUCTS.find((p) => p.id === "sp-06");
-
-  const initial: CartItem[] = [];
-
-  if (p1) {
-    initial.push({
-      id: `${p1.id}-default`,
-      productId: p1.id,
-      slug: p1.slug,
-      name: p1.name,
-      image: p1.image,
-      category: p1.category,
-      price: p1.price,
-      compareAtPrice: p1.compareAtPrice,
-      quantity: 1,
-      stockQuantity: p1.stockQuantity,
-      isActive: p1.isActive,
-    });
-  }
-
-  if (p2) {
-    initial.push({
-      id: `${p2.id}-default`,
-      productId: p2.id,
-      slug: p2.slug,
-      name: p2.name,
-      image: p2.image,
-      category: p2.category,
-      price: p2.price,
-      compareAtPrice: p2.compareAtPrice,
-      quantity: 2,
-      stockQuantity: p2.stockQuantity,
-      isActive: p2.isActive,
-    });
-  }
-
-  return initial;
-}
 
 function mapApiCartItem(item: any): CartItem {
   const finalPrice =
@@ -134,7 +92,7 @@ function mapApiCartItem(item: any): CartItem {
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const { isLoggedIn, isLoading: isAuthLoading } = useAuth();
 
-  const [items, setItems] = useState<CartItem[]>(getInitialDemoCart);
+  const [items, setItems] = useState<CartItem[]>([]);
   const [serverTotals, setServerTotals] = useState<CartTotalsState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 

@@ -1,13 +1,11 @@
 "use client";
 
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
 import {
   AdminOrder,
   OrderStatus,
   PaymentStatus,
-  BASE_ORDERS,
-  getAllAdminOrders,
   updateAdminOrderStatus,
   updateAdminPaymentStatus,
   getOrderMetrics,
@@ -32,7 +30,7 @@ import {
 import { AdminOrdersSkeleton } from "./AdminOrdersSkeleton";
 
 export function AdminOrdersList() {
-  const [orders, setOrders] = useState<AdminOrder[]>(BASE_ORDERS);
+  const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrderStatus, setSelectedOrderStatus] = useState<"ALL" | OrderStatus>("ALL");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<"ALL" | PaymentStatus>("ALL");
@@ -62,60 +60,63 @@ export function AdminOrdersList() {
     }, 3000);
   };
 
-  // Sync orders from API and sessionStorage on mount
-  useEffect(() => {
-    async function loadOrders() {
-      try {
-        const res = await fetch("/api/admin/orders");
-        if (res.ok) {
-          const data = await res.json();
-          if (data.ok && Array.isArray(data.orders)) {
-            const mapped: AdminOrder[] = data.orders.map((o: any) => ({
-              id: o.id,
-              orderNumber: o.orderNumber,
-              customer: {
-                name: o.customerName || "Customer",
-                email: o.customerEmail || "customer@dearr.in",
-                phone: o.customerPhone || "+91 98765 43210",
-              },
-              items: [],
-              subtotal: Number(o.subtotal || 0),
-              discountAmount: Number(o.discountAmount || 0),
-              shippingAmount: Number(o.shippingAmount || 0),
-              totalAmount: Number(o.totalAmount || 0),
-              currency: o.currency || "INR",
-              orderStatus: o.status,
-              paymentStatus: o.paymentStatus,
-              paymentMethod: "Razorpay (Online)",
-              shippingAddress: {
-                fullName: o.customerName || "Customer",
-                phone: o.customerPhone || "",
-                addressLine1: "",
-                city: "",
-                state: "",
-                postalCode: "",
-                country: "India",
-              },
-              createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
-              updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
-            }));
+  const loadOrders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/orders?limit=100");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.orders)) {
+          const mapped: AdminOrder[] = data.orders.map((o: any) => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            customer: {
+              name: o.customerName || "Customer",
+              email: o.customerEmail || "customer@dearr.in",
+              phone: o.customerPhone || "+91 98765 43210",
+            },
+            items: (o.items || []).map((it: any) => ({
+              id: it.id,
+              name: it.productName,
+              variantName: it.variantName || undefined,
+              quantity: Number(it.quantity || 1),
+              unitPrice: Number(it.unitPrice || 0),
+              lineTotal: Number(it.lineTotal || 0),
+            })),
+            subtotal: Number(o.subtotal || 0),
+            discountAmount: Number(o.discountAmount || 0),
+            shippingAmount: Number(o.shippingAmount || 0),
+            totalAmount: Number(o.totalAmount || 0),
+            currency: o.currency || "INR",
+            orderStatus: o.status,
+            paymentStatus: o.paymentStatus,
+            paymentMethod: "Razorpay (Online)",
+            shippingAddress: {
+              fullName: o.customerName || "Customer",
+              phone: o.customerPhone || "",
+              addressLine1: "",
+              city: "",
+              state: "",
+              postalCode: "",
+              country: "India",
+            },
+            createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
+            updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
+          }));
 
-            // Merge with local session/base orders so demo orders still display if DB has few
-            const sessionOrders = getAllAdminOrders();
-            const existingOrderNumbers = new Set(mapped.map((m) => m.orderNumber));
-            const combined = [...mapped, ...sessionOrders.filter((so) => !existingOrderNumbers.has(so.orderNumber))];
-            setOrders(combined);
-            return;
-          }
+          setOrders(mapped);
+          return;
         }
-      } catch (err) {
-        console.warn("Could not fetch /api/admin/orders, falling back to local:", err);
       }
-      setOrders(getAllAdminOrders());
+    } catch (err) {
+      console.warn("Could not fetch /api/admin/orders:", err);
     }
-
-    loadOrders();
+    setOrders([]);
   }, []);
+
+  // Sync orders from API on mount
+  useEffect(() => {
+    loadOrders();
+  }, [loadOrders]);
 
   // Outside click & ESC listeners
   useEffect(() => {
@@ -227,17 +228,34 @@ export function AdminOrdersList() {
     setTargetStatus(order.orderStatus);
   };
 
-  const handleConfirmStatusUpdate = () => {
+  const handleConfirmStatusUpdate = async () => {
     if (!orderToUpdateStatus) return;
-    const updated = updateAdminOrderStatus(
-      orderToUpdateStatus.id,
-      targetStatus
-    );
-    if (updated) {
-      setOrders(getAllAdminOrders());
-      showToast(
-        `Order ${updated.orderNumber} updated to ${updated.orderStatus}`
+    try {
+      const res = await fetch(`/api/admin/orders/${encodeURIComponent(orderToUpdateStatus.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: targetStatus }),
+      });
+      if (res.ok) {
+        showToast(`Order status updated to ${targetStatus}`);
+        await loadOrders();
+      } else {
+        const data = await res.json();
+        showToast(data.error || "Failed to update order status");
+      }
+    } catch {
+      const updated = updateAdminOrderStatus(
+        orderToUpdateStatus.id,
+        targetStatus
       );
+      if (updated) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === updated.id ? { ...o, orderStatus: updated.orderStatus } : o))
+        );
+        showToast(
+          `Order ${updated.orderNumber} updated to ${updated.orderStatus}`
+        );
+      }
     }
     setOrderToUpdateStatus(null);
   };
@@ -256,7 +274,9 @@ export function AdminOrdersList() {
       targetPaymentStatus
     );
     if (updated) {
-      setOrders(getAllAdminOrders());
+      setOrders((prev) =>
+        prev.map((o) => (o.id === updated.id ? { ...o, paymentStatus: updated.paymentStatus } : o))
+      );
       showToast(
         `Payment for ${updated.orderNumber} updated to ${updated.paymentStatus}`
       );

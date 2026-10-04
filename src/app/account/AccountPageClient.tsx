@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import {
@@ -10,16 +10,18 @@ import {
   ProfileCard,
   OrderHistory,
 } from "@/components/customer/account";
-import { DEMO_CUSTOMER } from "@/data/demo-account";
-import { DEMO_ORDERS } from "@/data/demo-orders";
+import type { DemoProfile } from "@/data/demo-account";
+import type { DemoOrder } from "@/lib/order-model";
 
 export default function AccountPageClient() {
   const router = useRouter();
   const { user, isLoading, logout } = useAuth();
-  const [customer, setCustomer] = useState(DEMO_CUSTOMER);
+  const [customer, setCustomer] = useState<DemoProfile | null>(null);
+  const [orders, setOrders] = useState<DemoOrder[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (!isLoading) {
       if (!user) {
         router.replace("/login");
@@ -39,6 +41,51 @@ export default function AccountPageClient() {
     }
   }, [user, isLoading, router]);
 
+  useEffect(() => {
+    async function loadOrders() {
+      if (!user) return;
+      try {
+        const res = await fetch("/api/orders");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.orders)) {
+            const mapped: DemoOrder[] = data.orders.map((o: any) => ({
+              id: o.id,
+              orderNumber: o.orderNumber,
+              status: o.status,
+              paymentStatus: o.paymentStatus,
+              paymentMethod: o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)",
+              subtotal: Number(o.subtotal || 0),
+              shippingAmount: Number(o.shippingAmount || 0),
+              discountAmount: Number(o.discountAmount || 0),
+              totalAmount: Number(o.totalAmount || 0),
+              currency: o.currency || "INR",
+              shippingFullName: o.customerName || user.fullName || "Customer",
+              shippingPhone: o.customerPhone || user.phone || "",
+              shippingEmail: user.email,
+              shippingAddressLine1: "",
+              shippingCity: "",
+              shippingState: "",
+              shippingPostalCode: "",
+              shippingCountry: "India",
+              createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
+              items: [],
+            }));
+            setOrders(mapped);
+            return;
+          }
+        }
+      } catch {
+        // network failure
+      }
+      setOrders([]);
+    }
+
+    if (user) {
+      loadOrders().finally(() => setOrdersLoading(false));
+    }
+  }, [user]);
+
   const handleSignOut = () => {
     setShowSignOutConfirm(true);
   };
@@ -53,7 +100,7 @@ export default function AccountPageClient() {
     router.push("/login");
   };
 
-  if (isLoading) {
+  if (isLoading || !customer || ordersLoading) {
     return (
       <AccountShell>
         <div className="flex gap-8 lg:gap-12 animate-pulse" aria-busy="true">
@@ -65,10 +112,6 @@ export default function AccountPageClient() {
         </div>
       </AccountShell>
     );
-  }
-
-  if (!user) {
-    return null;
   }
 
   return (
@@ -129,13 +172,13 @@ export default function AccountPageClient() {
           </div>
 
           <AccountOverview
-            orders={DEMO_ORDERS}
+            orders={orders}
             customerName={customer.fullName}
           />
 
           <ProfileCard profile={customer} />
 
-          <OrderHistory orders={DEMO_ORDERS} compact />
+          <OrderHistory orders={orders} compact />
         </div>
       </div>
     </AccountShell>

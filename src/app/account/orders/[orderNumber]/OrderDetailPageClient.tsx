@@ -9,7 +9,6 @@ import {
   OrderNotFound,
 } from "@/components/customer/account";
 import { useAuth } from "@/context/AuthContext";
-import { getDemoOrderByNumber } from "@/data/demo-orders";
 import type { DemoOrder } from "@/lib/order-model";
 
 interface OrderDetailPageClientProps {
@@ -22,7 +21,8 @@ export default function OrderDetailPageClient({
   const router = useRouter();
   const { user, isLoading, logout } = useAuth();
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
-  const [order, setOrder] = useState<DemoOrder | null>(() => getDemoOrderByNumber(orderNumber));
+  const [order, setOrder] = useState<DemoOrder | null>(null);
+  const [isOrderLoading, setIsOrderLoading] = useState(true);
 
   React.useEffect(() => {
     async function loadOrder() {
@@ -38,10 +38,10 @@ export default function OrderDetailPageClient({
               status: o.status,
               paymentStatus: o.paymentStatus,
               paymentMethod: o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)",
-              subtotal: o.subtotal,
-              shippingAmount: o.shippingAmount || 0,
-              discountAmount: o.discountAmount || 0,
-              totalAmount: o.totalAmount,
+              subtotal: Number(o.subtotal || 0),
+              shippingAmount: Number(o.shippingAmount || 0),
+              discountAmount: Number(o.discountAmount || 0),
+              totalAmount: Number(o.totalAmount || 0),
               currency: o.currency || "INR",
               shippingFullName: o.shippingFullName,
               shippingPhone: o.shippingPhone,
@@ -59,23 +59,25 @@ export default function OrderDetailPageClient({
                 productName: it.productName,
                 variantName: it.variantName || undefined,
                 image: "/product-samples/1.jpeg",
-                unitPrice: it.unitPrice,
-                quantity: it.quantity,
-                discountAmount: it.discountAmount,
-                lineTotal: it.lineTotal,
+                unitPrice: Number(it.unitPrice || 0),
+                quantity: Number(it.quantity || 1),
+                discountAmount: Number(it.discountAmount || 0),
+                lineTotal: Number(it.lineTotal || 0),
               })),
             });
             return;
           }
         }
       } catch {}
-
-      const local = getDemoOrderByNumber(orderNumber);
-      if (local) setOrder(local);
+      setOrder(null);
     }
 
-    loadOrder();
-  }, [orderNumber, user]);
+    if (user) {
+      loadOrder().finally(() => setIsOrderLoading(false));
+    } else if (!isLoading) {
+      setIsOrderLoading(false);
+    }
+  }, [orderNumber, user, isLoading]);
 
   React.useEffect(() => {
     if (!isLoading && !user) {
@@ -97,7 +99,7 @@ export default function OrderDetailPageClient({
     router.push("/login");
   };
 
-  if (isLoading) {
+  if (isLoading || isOrderLoading) {
     return (
       <AccountShell>
         <div className="flex gap-8 lg:gap-12 animate-pulse" aria-busy="true">

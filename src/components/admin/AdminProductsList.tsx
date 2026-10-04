@@ -80,9 +80,42 @@ export function AdminProductsList() {
     };
   }, []);
 
-  // Sync products on mount with any demo-created or edited products in session
+  // Sync products on mount with API or session
   useEffect(() => {
-    setProducts(getAllAdminProducts());
+    async function loadProducts() {
+      try {
+        const res = await fetch("/api/admin/products?pageSize=100");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.products)) {
+            const mapped: SampleProduct[] = data.products.map((p: any) => ({
+              id: p.id,
+              name: p.name,
+              slug: p.slug,
+              price: Number(p.price || 0),
+              compareAtPrice: p.compareAtPrice ? Number(p.compareAtPrice) : null,
+              category: p.categoryName || p.categorySlug || "3D Printing",
+              image: p.primaryImage || (Array.isArray(p.images) && p.images[0]?.imageUrl) || "/product-samples/1.jpeg",
+              rating: Number(p.rating || 5.0),
+              reviewCount: Number(p.reviewCount || 0),
+              stockQuantity: Number(p.stockQuantity ?? 10),
+              isActive: Boolean(p.isActive),
+              badge: p.badge || null,
+              description: p.description || "",
+              details: p.details || [],
+              tags: p.tags || [],
+            }));
+            setProducts(mapped);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch /api/admin/products:", err);
+      }
+      setProducts(getAllAdminProducts());
+    }
+
+    loadProducts();
   }, []);
 
   // Unique categories derived dynamically from catalog and products

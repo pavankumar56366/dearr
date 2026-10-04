@@ -44,7 +44,23 @@ export function AdminCategoriesList() {
 
   // Sync categories on mount and listen to outside clicks
   useEffect(() => {
-    setCategories(getAllAdminCategories());
+    async function loadCategories() {
+      try {
+        const res = await fetch("/api/admin/categories");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.categories)) {
+            setCategories(data.categories);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch /api/admin/categories:", err);
+      }
+      setCategories(getAllAdminCategories());
+    }
+
+    loadCategories();
   }, []);
 
   useEffect(() => {

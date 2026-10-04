@@ -4,8 +4,6 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   AdminDiscount,
-  BASE_DISCOUNTS,
-  getAllAdminDiscounts,
   toggleAdminDiscountStatus,
   duplicateAdminDiscount,
   getDiscountStatus,
@@ -29,7 +27,7 @@ import { getAllAdminProducts, AdminProduct } from "@/lib/admin-catalog";
 import { getAllAdminCategories, AdminCategory } from "@/lib/admin-categories";
 
 export function AdminDiscountsList() {
-  const [discounts, setDiscounts] = useState<AdminDiscount[]>(BASE_DISCOUNTS);
+  const [discounts, setDiscounts] = useState<AdminDiscount[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedStatus, setSelectedStatus] = useState<"ALL" | "ACTIVE" | "SCHEDULED" | "EXPIRED" | "DEACTIVATED" | "DRAFT">("ALL");
   const [selectedType, setSelectedType] = useState<"ALL" | "PERCENTAGE" | "FIXED">("ALL");
@@ -85,16 +83,14 @@ export function AdminDiscountsList() {
               createdAt: d.createdAt,
               updatedAt: d.updatedAt,
             }));
-            if (mapped.length > 0) {
-              setDiscounts(mapped);
-              return;
-            }
+            setDiscounts(mapped);
+            return;
           }
         }
       } catch {
-        // Fallback to session
+        // Fallback to empty list
       }
-      setDiscounts(getAllAdminDiscounts());
+      setDiscounts([]);
     }
 
     setAllProducts(getAllAdminProducts());
@@ -214,7 +210,7 @@ export function AdminDiscountsList() {
     setOpenDropdownCode(null);
     const duplicated = duplicateAdminDiscount(code);
     if (duplicated) {
-      setDiscounts(getAllAdminDiscounts());
+      setDiscounts((prev) => [...prev, duplicated]);
       showToast(`Discount duplicated as ${duplicated.code}`);
     }
   };
