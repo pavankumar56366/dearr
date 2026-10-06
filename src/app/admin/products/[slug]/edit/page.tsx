@@ -11,6 +11,9 @@ export const metadata: Metadata = {
   },
 };
 
+export const dynamic = "force-dynamic";
+export const dynamicParams = true;
+
 export function generateStaticParams() {
   return SAMPLE_PRODUCTS.map((product) => ({
     slug: product.slug,

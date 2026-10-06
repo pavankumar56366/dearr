@@ -632,13 +632,13 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     if (input.categoryId && input.categoryId.trim()) {
       const cleanCatId = input.categoryId.trim();
       const [catRows] = await conn.execute(
-        "SELECT id FROM categories WHERE id = ? LIMIT 1",
-        [cleanCatId]
+        "SELECT id FROM categories WHERE id = ? OR slug = ? OR name = ? LIMIT 1",
+        [cleanCatId, cleanCatId, cleanCatId]
       );
       if ((catRows as any[]).length === 0) {
         throw new ProductValidationError(`Referenced category '${cleanCatId}' does not exist`, 400);
       }
-      categoryId = cleanCatId;
+      categoryId = (catRows as any[])[0].id;
     }
 
     // Insert Product row
@@ -812,14 +812,14 @@ export async function updateProduct(
       if (input.categoryId !== null && input.categoryId.trim() !== "") {
         const catId = input.categoryId.trim();
         const [catRows] = await conn.execute(
-          "SELECT id FROM categories WHERE id = ? LIMIT 1",
-          [catId]
+          "SELECT id FROM categories WHERE id = ? OR slug = ? OR name = ? LIMIT 1",
+          [catId, catId, catId]
         );
         if ((catRows as any[]).length === 0) {
           throw new ProductValidationError(`Referenced category '${catId}' does not exist`, 400);
         }
         fields.push("category_id = ?");
-        values.push(catId);
+        values.push((catRows as any[])[0].id);
       } else {
         fields.push("category_id = NULL");
       }

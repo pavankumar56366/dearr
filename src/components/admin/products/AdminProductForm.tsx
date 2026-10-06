@@ -8,7 +8,6 @@ import {
   type SampleProduct,
   type SampleProductVariant,
 } from "@/data/sample-products";
-import { saveAdminProductEdit } from "@/lib/admin-catalog";
 import { getAllAdminCategories } from "@/lib/admin-categories";
 import {
   ArrowLeftIcon,
@@ -123,10 +122,40 @@ export function AdminProductForm({
   const [categoriesList, setCategoriesList] = useState(SAMPLE_CATEGORIES);
 
   useEffect(() => {
-    const adminCats = getAllAdminCategories().filter((c) => c.isActive);
-    if (adminCats.length > 0) {
-      setCategoriesList(adminCats as any);
+    async function loadCategories() {
+      try {
+        const res = await fetch("/api/admin/categories");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.ok && Array.isArray(data.categories) && data.categories.length > 0) {
+            setCategoriesList(data.categories);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch /api/admin/categories:", err);
+      }
+
+      try {
+        const resPublic = await fetch("/api/categories");
+        if (resPublic.ok) {
+          const dataPublic = await resPublic.json();
+          if (dataPublic.ok && Array.isArray(dataPublic.categories) && dataPublic.categories.length > 0) {
+            setCategoriesList(dataPublic.categories);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch /api/categories:", err);
+      }
+
+      const adminCats = getAllAdminCategories().filter((c) => c.isActive);
+      if (adminCats.length > 0) {
+        setCategoriesList(adminCats as any);
+      }
     }
+
+    loadCategories();
   }, []);
 
   // Pricing State
@@ -454,7 +483,7 @@ export function AdminProductForm({
   };
 
   // Form submission handler
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setSaveErrorMessage(null);
 
@@ -465,79 +494,208 @@ export function AdminProductForm({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      // Check QA Error simulation path
-      if (simulateSaveError) {
-        setIsSubmitting(false);
-        setSaveErrorMessage(
-          "Unable to save changes in preview mode. Please try again."
-        );
-        return;
+    // Check QA Error simulation path
+    if (simulateSaveError) {
+      setIsSubmitting(false);
+      setSaveErrorMessage(
+        "Simulated save error (QA verification toggle active)."
+      );
+      return;
+    }
+
+    try {
+      // 1. Process and upload any new image files
+      const finalImages: Array<{
+        storagePath: string;
+        altText?: string | null;
+        sortOrder: number;
+      }> = [];
+
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        let storagePath = img.url;
+
+        // If the item has a fresh File object, upload it to the server
+        if (img.file instanceof File) {
+          const formData = new FormData();
+          formData.append("file", img.file);
+
+          const uploadRes = await fetch("/api/admin/products/images", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!uploadRes.ok) {
+            const uploadErr = await uploadRes.json().catch(() => null);
+            throw new Error(uploadErr?.error || `Failed to upload image "${img.name}"`);
+          }
+
+          const uploadData = await uploadRes.json();
+          if (uploadData.ok && uploadData.image?.url) {
+            storagePath = uploadData.image.url;
+          } else {
+            throw new Error(`Failed to upload image "${img.name}"`);
+          }
+        }
+
+        finalImages.push({
+          storagePath,
+          altText: img.name || title.trim(),
+          sortOrder: img.isPrimary ? 0 : i + 1,
+        });
       }
 
+      // Ensure proper sorting by sortOrder and re-index sequentially
+      finalImages.sort((a, b) => a.sortOrder - b.sortOrder);
+      finalImages.forEach((img, idx) => {
+        img.sortOrder = idx;
+      });
+
+      // 2. Resolve Category ID
+      const selectedCategoryObj = categoriesList.find(
+        (c: any) =>
+          c.id === category ||
+          c.name?.toLowerCase() === category?.toLowerCase() ||
+          c.slug?.toLowerCase() === category?.toLowerCase()
+      );
+      const categoryId = selectedCategoryObj?.id || null;
+
+      // 3. Format Variants
+      const formattedVariants = variants.map((v) => ({
+        name: v.name.trim(),
+        sku: v.sku.trim(),
+        price: v.price !== undefined && v.price !== null ? Number(v.price) : null,
+        stockQuantity: Number(v.stockQuantity || 0),
+        isActive: v.isActive !== false,
+      }));
+
+      // 4. Parse Pricing & Inventory
       const parsedPrice = parseFloat(price);
       const parsedCompareAt = compareAtPrice.trim() ? parseFloat(compareAtPrice) : null;
       const parsedStock = parseInt(stockQuantity, 10) || 0;
-      const categorySlug =
-        categoriesList.find((c) => c.name === category)?.slug ||
-        SAMPLE_CATEGORIES.find((c) => c.name === category)?.slug ||
-        slugify(category);
 
+      // 5. Send Real API Request
+      let res: Response;
+      if (isEdit && initialProduct) {
+        // PATCH /api/admin/products/:id
+        const patchPayload: Record<string, any> = {
+          name: title.trim(),
+          slug: slug.trim(),
+          description: description.trim(),
+          price: parsedPrice,
+          compareAtPrice: parsedCompareAt,
+          stockQuantity: parsedStock,
+          categoryId: categoryId,
+          isActive: isActive,
+          isFeatured: isFeatured,
+        };
+
+        if (finalImages.length > 0) {
+          patchPayload.images = finalImages;
+        }
+
+        if (formattedVariants.length > 0) {
+          patchPayload.variants = formattedVariants;
+        }
+
+        res = await fetch(`/api/admin/products/${encodeURIComponent(initialProduct.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patchPayload),
+        });
+      } else {
+        // POST /api/admin/products
+        const createPayload: Record<string, any> = {
+          name: title.trim(),
+          slug: slug.trim(),
+          description: description.trim(),
+          price: parsedPrice,
+          compareAtPrice: parsedCompareAt,
+          stockQuantity: parsedStock,
+          categoryId: categoryId,
+          isActive: isActive,
+          isFeatured: isFeatured,
+          images: finalImages,
+          variants: formattedVariants,
+        };
+
+        res = await fetch("/api/admin/products", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(createPayload),
+        });
+      }
+
+      const resData = await res.json().catch(() => null);
+
+      if (!res.ok || !resData?.ok) {
+        const errorMsg =
+          resData?.error ||
+          (res.status === 401
+            ? "Your session has expired. Please log in as an administrator."
+            : res.status === 403
+            ? "Access denied. Founder administrator privileges required."
+            : res.status === 409
+            ? "A product with this URL slug or SKU already exists. Please customize the slug."
+            : "Failed to save product to database. Please check required fields and try again.");
+        throw new Error(errorMsg);
+      }
+
+      const returnedProduct = resData.product;
       const primaryImg =
-        images.find((i) => i.isPrimary)?.url ||
-        images[0]?.url ||
+        (Array.isArray(returnedProduct.images) && returnedProduct.images[0]?.url) ||
+        returnedProduct.primaryImage ||
+        finalImages[0]?.storagePath ||
         "/product-samples/1.jpeg";
 
-      const productId =
-        isEdit && initialProduct
-          ? initialProduct.id
-          : `sp-new-${Date.now().toString(36)}`;
-
-      const productPayload: SampleProduct = {
-        id: productId,
-        name: title.trim(),
-        slug: slug.trim(),
-        description: description.trim(),
-        price: parsedPrice,
-        compareAtPrice: parsedCompareAt,
+      const mappedSuccessProduct: SampleProduct = {
+        id: returnedProduct.id,
+        name: returnedProduct.name,
+        slug: returnedProduct.slug,
+        description: returnedProduct.description,
+        price: Number(returnedProduct.price),
+        compareAtPrice:
+          returnedProduct.compareAtPrice !== null && returnedProduct.compareAtPrice !== undefined
+            ? Number(returnedProduct.compareAtPrice)
+            : null,
         image: primaryImg,
-        images: images.map((img) => img.url),
-        category: category,
-        categorySlug: categorySlug,
-        isFeatured: isFeatured,
-        isPopular: initialProduct ? initialProduct.isPopular : false,
-        isActive: isActive,
-        stockQuantity: parsedStock,
+        images:
+          Array.isArray(returnedProduct.images) && returnedProduct.images.length > 0
+            ? returnedProduct.images.map((img: any) => img.url || img.storagePath)
+            : finalImages.map((img) => img.storagePath),
+        category:
+          returnedProduct.category?.name ||
+          selectedCategoryObj?.name ||
+          category ||
+          "3D Printing",
+        categorySlug:
+          returnedProduct.category?.slug ||
+          selectedCategoryObj?.slug ||
+          slugify(category),
+        isFeatured: Boolean(returnedProduct.isFeatured),
+        isPopular: false,
+        isActive: Boolean(returnedProduct.isActive),
+        stockQuantity: Number(returnedProduct.stockQuantity),
         specifications: {
           material: material === "Other (Custom)" ? customMaterial : material,
           dimensions: dimensions.trim() || undefined,
           finish: finish.trim() || undefined,
           care: care.trim() || undefined,
-          process:
-            initialProduct?.specifications?.process ||
-            "High-Resolution FDM 3D Printing",
+          process: "High-Resolution FDM 3D Printing",
         },
-        variants: variants.length > 0 ? variants : undefined,
+        variants: returnedProduct.variants?.length > 0 ? returnedProduct.variants : undefined,
       };
 
-      if (isEdit) {
-        // Persist edits to session storage override
-        saveAdminProductEdit(productPayload);
-      } else {
-        // Prepend new product to session storage list
-        try {
-          const stored = sessionStorage.getItem("dearr_admin_new_products");
-          const list = stored ? JSON.parse(stored) : [];
-          list.unshift(productPayload);
-          sessionStorage.setItem("dearr_admin_new_products", JSON.stringify(list));
-        } catch {
-          // ignore storage quota issues
-        }
-      }
-
+      setSavedProduct(mappedSuccessProduct);
+      router.refresh();
+    } catch (err: unknown) {
+      console.error("[AdminProductForm Save Error]", err);
+      const msg = err instanceof Error ? err.message : "Failed to persist product. Please try again.";
+      setSaveErrorMessage(msg);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
       setIsSubmitting(false);
-      setSavedProduct(productPayload);
-    }, 600);
+    }
   };
 
   // Reset form to blank state for "Create Another" in create mode
@@ -625,8 +783,8 @@ export function AdminProductForm({
                 )}
               </div>
             ) : (
-              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200">
-                Preview Mode
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/20 text-neutral-900 border border-primary/30">
+                New Product
               </span>
             )}
           </div>
@@ -840,7 +998,7 @@ export function AdminProductForm({
                 2. Visual Gallery
               </h2>
               <span className="text-[10px] text-neutral-400 font-medium">
-                {isEdit ? "Manage Existing & New Images" : "Local Object Previews"}
+                {isEdit ? "Manage Existing & New Images" : "Upload Product Gallery"}
               </span>
             </div>
 
@@ -1488,9 +1646,7 @@ export function AdminProductForm({
                     id="success-modal-title"
                     className="font-bold text-base text-neutral-900"
                   >
-                    {isEdit
-                      ? "Product Updated (Preview Mode)"
-                      : "Product Created (Preview Mode)"}
+                    {isEdit ? "Product Updated" : "Product Created"}
                   </h3>
                   <span className="text-[10px] text-neutral-400 font-mono">
                     ID: {savedProduct.id}
@@ -1540,16 +1696,16 @@ export function AdminProductForm({
               </div>
             </div>
 
-            {/* Backend connection note */}
-            <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-950 space-y-1">
-              <div className="flex items-center gap-1.5 font-bold text-amber-900">
-                <ShieldCheckIcon size={14} className="text-amber-700" />
-                <span>Frontend Demo State Notice</span>
+            {/* Database Persistence Confirmation */}
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs text-emerald-950 space-y-1">
+              <div className="flex items-center gap-1.5 font-bold text-emerald-900">
+                <CheckCircleIcon size={14} className="text-emerald-700" />
+                <span>Saved to Hostinger MySQL Database</span>
               </div>
-              <p className="text-[11px] leading-relaxed text-amber-900/90">
+              <p className="text-[11px] leading-relaxed text-emerald-900/90">
                 {isEdit
-                  ? "Product updated in preview mode. Database persistence will be connected in the backend phase. Your changes are saved to session state and immediately reflected in your admin catalog."
-                  : "Product created in preview mode. Database persistence will be connected in the backend phase. This item is temporarily accessible in your local admin products list during this browser session."}
+                  ? "Your product changes have been saved successfully."
+                  : "Product has been saved successfully."}
               </p>
             </div>
 

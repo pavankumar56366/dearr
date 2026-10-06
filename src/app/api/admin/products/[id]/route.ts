@@ -3,6 +3,7 @@ import {
   requireAdmin,
   handleAuthError,
   findProductById,
+  findProductBySlug,
   updateProduct,
   deactivateProduct,
   ProductValidationError,
@@ -13,7 +14,7 @@ export const runtime = "nodejs";
 
 /**
  * GET /api/admin/products/[id]
- * Administrator endpoint to retrieve a single product by ID (including inactive).
+ * Administrator endpoint to retrieve a single product by ID or slug (including inactive).
  */
 export async function GET(
   _request: Request,
@@ -32,7 +33,10 @@ export async function GET(
       );
     }
 
-    const product = await findProductById(cleanId, true);
+    let product = await findProductById(cleanId, true);
+    if (!product) {
+      product = await findProductBySlug(cleanId, true);
+    }
 
     if (!product) {
       return NextResponse.json(
@@ -88,7 +92,15 @@ export async function PATCH(
       );
     }
 
-    const updated = await updateProduct(cleanId, {
+    let targetId = cleanId;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId)) {
+      const prodBySlug = await findProductBySlug(cleanId, true);
+      if (prodBySlug) {
+        targetId = prodBySlug.id;
+      }
+    }
+
+    const updated = await updateProduct(targetId, {
       categoryId: body.categoryId !== undefined ? body.categoryId : body.category_id,
       name: body.name,
       slug: body.slug,
@@ -146,7 +158,15 @@ export async function DELETE(
       );
     }
 
-    const success = await deactivateProduct(cleanId);
+    let targetId = cleanId;
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(cleanId)) {
+      const prodBySlug = await findProductBySlug(cleanId, true);
+      if (prodBySlug) {
+        targetId = prodBySlug.id;
+      }
+    }
+
+    const success = await deactivateProduct(targetId);
 
     if (!success) {
       return NextResponse.json(

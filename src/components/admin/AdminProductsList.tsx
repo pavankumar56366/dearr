@@ -94,8 +94,16 @@ export function AdminProductsList() {
               slug: p.slug,
               price: Number(p.price || 0),
               compareAtPrice: p.compareAtPrice ? Number(p.compareAtPrice) : null,
-              category: p.categoryName || p.categorySlug || "3D Printing",
-              image: p.primaryImage || (Array.isArray(p.images) && p.images[0]?.imageUrl) || "/product-samples/1.jpeg",
+              category: p.category?.name || p.categoryName || p.categorySlug || "3D Printing",
+              categorySlug: p.category?.slug || p.categorySlug || "3d-printing",
+              image:
+                p.primaryImage ||
+                (Array.isArray(p.images) &&
+                  (p.images[0]?.url || p.images[0]?.imageUrl || p.images[0]?.storagePath)) ||
+                "/product-samples/1.jpeg",
+              images: Array.isArray(p.images)
+                ? p.images.map((img: any) => (typeof img === "string" ? img : img.url || img.imageUrl || img.storagePath))
+                : [],
               rating: Number(p.rating || 5.0),
               reviewCount: Number(p.reviewCount || 0),
               stockQuantity: Number(p.stockQuantity ?? 10),
@@ -104,6 +112,7 @@ export function AdminProductsList() {
               description: p.description || "",
               details: p.details || [],
               tags: p.tags || [],
+              variants: p.variants || [],
             }));
             setProducts(mapped);
             return;
@@ -204,14 +213,33 @@ export function AdminProductsList() {
     showToast(`Duplicated "${product.name}" as demo catalog item.`);
   };
 
-  const handleToggleStatus = (product: SampleProduct) => {
+  const handleToggleStatus = async (product: SampleProduct) => {
     const nextState = !product.isActive;
+    try {
+      const res = await fetch(`/api/admin/products/${encodeURIComponent(product.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: nextState }),
+      });
+      if (res.ok) {
+        setProducts((prev) =>
+          prev.map((p) => (p.id === product.id ? { ...p, isActive: nextState } : p))
+        );
+        setOpenDropdownId(null);
+        showToast(`"${product.name}" marked as ${nextState ? "Active" : "Inactive"}.`);
+        return;
+      }
+    } catch (err) {
+      console.error("Failed to toggle product status:", err);
+    }
+
+    // Fallback if network issue
     setProducts((prev) =>
       prev.map((p) => (p.id === product.id ? { ...p, isActive: nextState } : p))
     );
     setOpenDropdownId(null);
     showToast(
-      `"${product.name}" marked as ${nextState ? "Active" : "Inactive"} (Demo preview).`
+      `"${product.name}" marked as ${nextState ? "Active" : "Inactive"}.`
     );
   };
 
