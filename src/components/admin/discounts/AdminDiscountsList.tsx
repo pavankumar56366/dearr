@@ -4,8 +4,6 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   AdminDiscount,
-  toggleAdminDiscountStatus,
-  duplicateAdminDiscount,
   getDiscountStatus,
   getDiscountMetrics,
   DiscountStatus,
@@ -177,41 +175,104 @@ export function AdminDiscountsList() {
 
   const executeToggle = async (code: string) => {
     const target = discounts.find((d) => d.code === code);
-    if (target) {
-      const isRealUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(target.id);
-      if (isRealUuid) {
-        try {
-          await fetch(`/api/admin/discounts/${target.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ isActive: !target.isActive }),
-          });
-        } catch (err) {
-          console.warn("Failed to patch discount active state:", err);
-        }
+    if (!target) return;
+
+    try {
+      const res = await fetch(`/api/admin/discounts/${target.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !target.isActive }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        setDiscounts((prev) =>
+          prev.map((d) => (d.code === code ? { ...d, isActive: !d.isActive } : d))
+        );
+        showToast(
+          !target.isActive
+            ? `Discount ${code} activated`
+            : `Discount ${code} deactivated`
+        );
+      } else {
+        showToast(data?.error || "Failed to update discount status");
       }
-    }
-    const updated = toggleAdminDiscountStatus(code);
-    if (updated) {
-      setDiscounts((prev) =>
-        prev.map((d) => (d.code === code ? { ...d, isActive: !d.isActive } : d))
-      );
-      showToast(
-        !target || !target.isActive
-          ? `Discount ${code} activated`
-          : `Discount ${code} deactivated`
-      );
+    } catch {
+      showToast("Network error while updating discount status");
     }
     setDiscountToDeactivate(null);
   };
 
   // Handle Duplicate
-  const handleDuplicate = (code: string) => {
+  const handleDuplicate = async (code: string) => {
     setOpenDropdownCode(null);
-    const duplicated = duplicateAdminDiscount(code);
-    if (duplicated) {
-      setDiscounts((prev) => [...prev, duplicated]);
-      showToast(`Discount duplicated as ${duplicated.code}`);
+    const target = discounts.find((d) => d.code === code);
+    if (!target) return;
+
+    const baseCode = target.code.replace(/_COPY\d*$/, "");
+    const randomSuffix = Math.floor(10 + Math.random() * 90);
+    const newCode = `${baseCode}_COPY${randomSuffix}`.slice(0, 50);
+
+    const apiScope = target.appliesTo === "all" ? "store" : target.appliesTo === "categories" ? "category" : "product";
+    const apiType = target.type === "fixed" ? "fixed_amount" : "percentage";
+    const categoryIds = (target.categorySlugs || [])
+      .map((slug) => allCategories.find((c) => c.slug === slug)?.id)
+      .filter(Boolean) as string[];
+
+    try {
+      const res = await fetch("/api/admin/discounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: `${target.name} (Copy)`,
+          code: newCode,
+          discountType: apiType,
+          value: target.value,
+          scope: apiScope,
+          startAt: target.startsAt,
+          endAt: target.endsAt || null,
+          isActive: false,
+          categoryId: categoryIds[0] || undefined,
+          categoryIds: categoryIds.length > 0 ? categoryIds : undefined,
+          productId: target.productIds?.[0] || undefined,
+          productIds: target.productIds && target.productIds.length > 0 ? target.productIds : undefined,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.ok) {
+        showToast(`Discount duplicated as ${newCode}`);
+        const refreshRes = await fetch("/api/admin/discounts");
+        if (refreshRes.ok) {
+          const refreshData = await refreshRes.json();
+          if (refreshData.ok && Array.isArray(refreshData.discounts)) {
+            const mapped: AdminDiscount[] = refreshData.discounts.map((d: any) => ({
+              id: d.id,
+              code: d.code || d.name.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10),
+              name: d.name,
+              type: d.discountType === "fixed_amount" ? "fixed" : "percentage",
+              value: Number(d.value),
+              startsAt: d.startAt ? d.startAt.split("T")[0] : undefined,
+              endsAt: d.endAt ? d.endAt.split("T")[0] : undefined,
+              appliesTo: d.scope === "store" ? "all" : d.scope === "category" ? "categories" : "products",
+              productIds: d.productIds || [],
+              categorySlugs: (d.categoryIds || []).map((catId: string) => {
+                const found = allCategories.find((c) => c.id === catId);
+                return found ? found.slug : catId;
+              }),
+              isActive: d.isActive,
+              usageLimit: null,
+              usageCount: 0,
+              createdAt: d.createdAt,
+              updatedAt: d.updatedAt,
+            }));
+            setDiscounts(mapped);
+          }
+        }
+      } else {
+        showToast(data?.error || "Failed to duplicate discount");
+      }
+    } catch {
+      showToast("Network error while duplicating discount");
     }
   };
 

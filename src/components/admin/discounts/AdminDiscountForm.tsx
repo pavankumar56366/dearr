@@ -7,8 +7,6 @@ import {
   DiscountType,
   DiscountScope,
   getAllAdminDiscounts,
-  saveAdminDiscount,
-  updateAdminDiscount,
   getDiscountStatus,
   toDateNumber,
 } from "@/lib/admin-discounts";
@@ -370,24 +368,26 @@ export function AdminDiscountForm({
         body: JSON.stringify(apiPayload),
       });
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => null);
-        if (res.status === 409 || res.status === 400) {
-          apiError = errJson?.error || "Failed to save discount";
-        }
-      } else {
-        const successData = await res.json().catch(() => null);
-        if (successData?.discount?.id) {
-          discountId = successData.discount.id;
-        }
-      }
-    } catch {
-      // Fallback to offline/demo mode seamlessly
-    }
+      const data = await res.json().catch(() => null);
 
-    if (apiError) {
-      setErrors((prev) => ({ ...prev, code: apiError! }));
+      if (!res.ok || !data?.ok) {
+        setIsSubmitting(false);
+        setErrors((prev) => ({
+          ...prev,
+          code: data?.error || "Failed to save discount. Please check code and details.",
+        }));
+        return;
+      }
+
+      if (data?.discount?.id) {
+        discountId = data.discount.id;
+      }
+    } catch (err: any) {
       setIsSubmitting(false);
+      setErrors((prev) => ({
+        ...prev,
+        code: err?.message || "Network error while saving discount",
+      }));
       return;
     }
 
@@ -411,12 +411,6 @@ export function AdminDiscountForm({
       createdAt: initialDiscount?.createdAt || now,
       updatedAt: now,
     };
-
-    if (isEdit && initialDiscount) {
-      updateAdminDiscount(initialDiscount.code, discountPayload);
-    } else {
-      saveAdminDiscount(discountPayload);
-    }
 
     setSavedDiscount(discountPayload);
     setIsSubmitting(false);
@@ -1363,7 +1357,7 @@ export function AdminDiscountForm({
                 {isEdit ? "Discount Updated Successfully" : "Discount Created Successfully"}
               </h3>
               <p className="text-xs text-neutral-600">
-                Coupon <span className="font-mono font-bold text-neutral-900">{savedDiscount.code}</span> has been saved into the admin demo state.
+                Coupon <span className="font-mono font-bold text-neutral-900">{savedDiscount.code}</span> has been saved to MySQL and is ready for customer redemption.
               </p>
             </div>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-2 pt-2">

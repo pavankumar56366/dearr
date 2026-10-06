@@ -6,8 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   AdminCategory,
   getAllAdminCategories,
-  saveAdminCategory,
-  updateAdminCategory,
 } from "@/lib/admin-categories";
 import {
   ArrowLeftIcon,
@@ -174,7 +172,7 @@ export function AdminCategoryForm({
   };
 
   // Handle Submit
-  const handleSubmit = (e?: React.FormEvent) => {
+  const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
 
     if (!validate()) {
@@ -183,32 +181,44 @@ export function AdminCategoryForm({
 
     setIsSubmitting(true);
 
-    setTimeout(() => {
-      const now = new Date().toISOString();
-      const categoryId = isEdit && initialCategory
-        ? initialCategory.id
-        : `cat-custom-${Date.now().toString(36)}`;
-
-      const categoryPayload: AdminCategory = {
-        id: categoryId,
+    try {
+      const payload = {
         name: name.trim(),
         slug: slug.trim(),
         description: description.trim(),
-        icon: initialCategory?.icon || "📁",
         isActive,
-        createdAt: initialCategory?.createdAt || now,
-        updatedAt: now,
       };
 
-      if (isEdit) {
-        updateAdminCategory(categoryPayload);
-      } else {
-        saveAdminCategory(categoryPayload);
+      const endpoint = isEdit && initialCategory
+        ? `/api/admin/categories/${initialCategory.id}`
+        : `/api/admin/categories`;
+      const method = isEdit && initialCategory ? "PATCH" : "POST";
+
+      const res = await fetch(endpoint, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setIsSubmitting(false);
+        setErrors((prev) => ({
+          ...prev,
+          slug: data.error || "Failed to save category. Please check details.",
+        }));
+        return;
       }
 
       setIsSubmitting(false);
-      setSavedCategory(categoryPayload);
-    }, 500);
+      setSavedCategory(data.category);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      setErrors((prev) => ({
+        ...prev,
+        slug: err?.message || "Network error while saving category.",
+      }));
+    }
   };
 
   // Handle Safe Navigation
@@ -535,12 +545,10 @@ export function AdminCategoryForm({
                 id="success-modal-title"
                 className="text-lg font-bold text-neutral-900"
               >
-                {isEdit
-                  ? "Category updated in preview mode"
-                  : "Category created in preview mode"}
+                {isEdit ? "Category Updated" : "Category Created"}
               </h3>
               <p className="text-xs text-neutral-500 mt-1">
-                &ldquo;{savedCategory.name}&rdquo; is now registered in the local admin session.
+                &ldquo;{savedCategory.name}&rdquo; has been saved to MySQL and is live in your catalog.
               </p>
             </div>
 

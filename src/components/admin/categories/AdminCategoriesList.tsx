@@ -4,10 +4,9 @@ import React, { useState, useMemo, useEffect, useRef } from "react";
 import Link from "next/link";
 import {
   AdminCategory,
+  CategoryMetrics,
   BASE_CATEGORIES,
   getAllAdminCategories,
-  toggleAdminCategoryStatus,
-  getCategoryMetrics,
 } from "@/lib/admin-categories";
 import {
   LayersIcon,
@@ -84,8 +83,16 @@ export function AdminCategoriesList() {
   }, []);
 
   // Live Summary Metrics
-  const metrics = useMemo(() => {
-    return getCategoryMetrics();
+  const metrics = useMemo<CategoryMetrics>(() => {
+    const totalCategories = categories.length;
+    const activeCategories = categories.filter((c) => c.isActive).length;
+    const inactiveCategories = totalCategories - activeCategories;
+    return {
+      totalCategories,
+      activeCategories,
+      inactiveCategories,
+      productsWithoutCategory: 0,
+    };
   }, [categories]);
 
   // Combined Search & Filter Logic
@@ -122,15 +129,28 @@ export function AdminCategoriesList() {
     executeToggle(cat);
   };
 
-  const executeToggle = (cat: AdminCategory) => {
-    const res = toggleAdminCategoryStatus(cat.id);
-    if (res.success) {
-      setCategories(getAllAdminCategories());
-      showToast(
-        res.newStatus
-          ? `Category "${cat.name}" activated`
-          : `Category "${cat.name}" deactivated`
-      );
+  const executeToggle = async (cat: AdminCategory) => {
+    try {
+      const res = await fetch(`/api/admin/categories/${cat.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !cat.isActive }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        setCategories((prev) =>
+          prev.map((c) => (c.id === cat.id ? { ...c, isActive: !cat.isActive } : c))
+        );
+        showToast(
+          !cat.isActive
+            ? `Category "${cat.name}" activated`
+            : `Category "${cat.name}" deactivated`
+        );
+      } else {
+        showToast(data.error || "Failed to update category status");
+      }
+    } catch {
+      showToast("Network error while updating category status");
     }
     setCategoryToDeactivate(null);
   };
