@@ -4,15 +4,16 @@
 
 | Item | Value |
 |---|---|
-| Current Version | v1.0.0 / Development |
+| Current Version | v1.1.0 |
 | Current Branch | main |
-| Latest Commit | 1839a9b |
+| Latest Commit | 2f958ba |
 
 ## Versions
 
 | Version | Date | Commit | Description |
 |---|---|---|---|
 | v1.0.0 | 2026-10-05 | fb4a2a7 | Initial stable release |
+| v1.1.0 | 2026-10-07 | 2f958ba | Dearr V1.1 release |
 
 ## Commit History
 
@@ -41,3 +42,4 @@
 | 21 | 84db3cf | 2026-10-06 | feat: restore persistent admin store settings |
 | 22 | 1daddd2 | 2026-10-06 | feat(payment): prepare Razorpay integration for Live Mode payments with dual-mode detection and security assurance |
 | 23 | 1839a9b | 2026-10-06 | fix: remove obsolete checkout prototype message |
+| 24 | 2f958ba | 2026-10-06 | docs: update git history |
