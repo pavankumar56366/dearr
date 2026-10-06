@@ -61,16 +61,7 @@ export default function CheckoutDemoSuccess({
         </div>
       </div>
 
-      {/* Phase 5 Notice Box */}
-      <div className="p-4 rounded-2xl bg-amber-50/80 border border-amber-200 text-xs text-amber-900 flex flex-col gap-1.5 leading-relaxed">
-        <div className="flex items-center gap-2 font-bold text-amber-950">
-          <ShieldCheckIcon size={16} className="text-amber-700" />
-          <span>V1 Frontend & Local State Milestone (Task C-16)</span>
-        </div>
-        <p>
-          This completes the client-side checkout experience. Form validation, item quantity aggregation, and address structuring strictly adhere to the future MySQL schema (<code>orders</code>, <code>order_items</code>, <code>addresses</code>). Real Razorpay modal launching and database persistence occur in Phase 5.
-        </p>
-      </div>
+
 
       {/* Order Snapshot & Delivery Details */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 import { ChevronRightIcon } from "@/components/customer/Icons";
 
 import CartItemRow from "./CartItemRow";
@@ -15,6 +17,8 @@ import CartEmptyState from "./CartEmptyState";
  * Flow Ref: docs/3.APPFLOW(1).md §4.6 (Cart Management)
  */
 export default function CartPageClient() {
+  const router = useRouter();
+  const { isLoggedIn } = useAuth();
   const {
     items,
     totalCount,
@@ -54,7 +58,15 @@ export default function CartPageClient() {
       showToast("Please remove out-of-stock items before proceeding");
       return;
     }
-    showToast("Checkout flow will be connected in Phase 4");
+    if (items.length === 0) {
+      showToast("Your cart is empty");
+      return;
+    }
+    if (isLoggedIn) {
+      router.push("/checkout");
+    } else {
+      router.push("/login?redirect=/checkout");
+    }
   };
 
   return (

@@ -97,8 +97,12 @@ export default function ProductActions({
       return;
     }
 
-    showToast("Buy Now: Checkout flow will be connected in Phase 4");
-    onBuyNow?.();
+    if (onBuyNow) {
+      onBuyNow();
+    } else {
+      onAddToCart?.();
+      router.push(isLoggedIn ? "/checkout" : "/login?redirect=/checkout");
+    }
   };
 
   const handleWishlistToggle = async () => {
