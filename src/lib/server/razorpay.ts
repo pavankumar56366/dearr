@@ -60,6 +60,14 @@ export function isRazorpayTestMode(): boolean {
 }
 
 /**
+ * Determines whether the configured credentials belong to Razorpay Live Mode.
+ */
+export function isRazorpayLiveMode(): boolean {
+  const keyId = getRawKeyId();
+  return keyId.startsWith("rzp_live_");
+}
+
+/**
  * Returns safe, non-sensitive Razorpay configuration metadata.
  * Note: NEVER includes the secret key.
  */
