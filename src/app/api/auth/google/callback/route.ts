@@ -145,6 +145,11 @@ export async function GET(request: Request): Promise<NextResponse> {
       return loginError("profile_error");
     }
 
+    // Check customer account status (admins are never blocked)
+    if (profile.role !== "admin" && profile.status === "suspended") {
+      return loginError("account_suspended");
+    }
+
     // ── 10. Create the standard Dearr session ────────────────────────────────
     // Reuses exact same session mechanism as email/password login.
     const token = await createSessionToken({

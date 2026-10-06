@@ -468,15 +468,15 @@ export function AdminCustomerForm({
 
                 <button
                   type="button"
-                  onClick={() => setStatus("blocked")}
+                  onClick={() => setStatus("suspended")}
                   className={`h-11 px-3 rounded-xl border text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
-                    status === "blocked"
+                    status === "blocked" || status === "suspended"
                       ? "bg-rose-50 border-rose-500 text-rose-900 shadow-2xs"
                       : "bg-surface border-neutral-200 text-neutral-600 hover:bg-neutral-50"
                   }`}
                 >
-                  <BanIcon size={14} className={status === "blocked" ? "text-rose-600" : "text-neutral-400"} />
-                  <span>Blocked</span>
+                  <BanIcon size={14} className={status === "blocked" || status === "suspended" ? "text-rose-600" : "text-neutral-400"} />
+                  <span>Suspended</span>
                 </button>
               </div>
             </div>

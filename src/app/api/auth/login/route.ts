@@ -58,6 +58,14 @@ export async function POST(request: Request) {
       );
     }
 
+    // Check customer account status (admins are never blocked)
+    if (userWithPassword.role !== "admin" && userWithPassword.status === "suspended") {
+      return NextResponse.json(
+        { ok: false, error: "Your account has been suspended. Please contact support." },
+        { status: 403 }
+      );
+    }
+
     // Create session token and set HTTP-only cookie
     const token = await createSessionToken(userWithPassword);
     await setSessionCookie(token);

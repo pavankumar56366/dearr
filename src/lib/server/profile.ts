@@ -8,6 +8,8 @@ export interface UserProfile {
   fullName: string;
   phone: string | null;
   role: "customer" | "admin";
+  status: "active" | "suspended";
+  adminNotes?: string | null;
   emailVerifiedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -28,12 +30,16 @@ export interface CreateProfileInput {
   fullName: string;
   phone?: string | null;
   role?: "customer" | "admin";
+  status?: "active" | "suspended";
+  adminNotes?: string | null;
 }
 
 export interface UpdateProfileInput {
   fullName?: string;
   phone?: string | null;
   role?: "customer" | "admin";
+  status?: "active" | "suspended";
+  adminNotes?: string | null;
   emailVerifiedAt?: Date | null;
   passwordResetTokenHash?: string | null;
   passwordResetExpiresAt?: Date | null;
@@ -46,6 +52,8 @@ interface RawProfileRow {
   full_name: string;
   phone: string | null;
   role: "customer" | "admin";
+  status?: "active" | "suspended";
+  admin_notes?: string | null;
   email_verified_at: string | Date | null;
   password_reset_token_hash?: string | null;
   password_reset_expires_at?: string | Date | null;
@@ -64,6 +72,8 @@ function toSanitizedProfile(row: RawProfileRow): UserProfile {
     fullName: row.full_name,
     phone: row.phone ?? null,
     role: row.role,
+    status: row.status || "active",
+    adminNotes: row.admin_notes ?? null,
     emailVerifiedAt: row.email_verified_at ? new Date(row.email_verified_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -79,7 +89,7 @@ export async function findProfileByEmail(email: string): Promise<UserProfile | n
   if (!normalizedEmail) return null;
 
   const sql = `
-    SELECT id, email, full_name, phone, role, email_verified_at, created_at, updated_at
+    SELECT id, email, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE email = ?
     LIMIT 1
@@ -104,7 +114,7 @@ export async function findProfileWithPasswordByEmail(
   if (!normalizedEmail) return null;
 
   const sql = `
-    SELECT id, email, password_hash, full_name, phone, role, email_verified_at, created_at, updated_at
+    SELECT id, email, password_hash, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE email = ?
     LIMIT 1
@@ -131,7 +141,7 @@ export async function findProfileById(id: string): Promise<UserProfile | null> {
   if (!cleanId) return null;
 
   const sql = `
-    SELECT id, email, full_name, phone, role, email_verified_at, created_at, updated_at
+    SELECT id, email, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE id = ?
     LIMIT 1
@@ -156,6 +166,8 @@ export async function createProfile(input: CreateProfileInput): Promise<UserProf
   const fullName = input.fullName.trim();
   const phone = input.phone?.trim() || null;
   const role = input.role || "customer";
+  const status = input.status || "active";
+  const adminNotes = input.adminNotes?.trim() || null;
 
   if (!normalizedEmail) {
     throw new Error("Email is required to create a profile");
@@ -166,11 +178,11 @@ export async function createProfile(input: CreateProfileInput): Promise<UserProf
   // passwordHash may be NULL for Google-only accounts with no Dearr password
 
   const sql = `
-    INSERT INTO profiles (id, email, password_hash, full_name, phone, role)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO profiles (id, email, password_hash, full_name, phone, role, status, admin_notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
-  await query(sql, [id, normalizedEmail, input.passwordHash ?? null, fullName, phone, role]);
+  await query(sql, [id, normalizedEmail, input.passwordHash ?? null, fullName, phone, role, status, adminNotes]);
 
   const created = await findProfileById(id);
   if (!created) {
@@ -207,6 +219,16 @@ export async function updateProfile(
   if (updates.role !== undefined) {
     fields.push("role = ?");
     values.push(updates.role);
+  }
+
+  if (updates.status !== undefined) {
+    fields.push("status = ?");
+    values.push(updates.status);
+  }
+
+  if (updates.adminNotes !== undefined) {
+    fields.push("admin_notes = ?");
+    values.push(updates.adminNotes ? updates.adminNotes.trim() : null);
   }
 
   if (updates.emailVerifiedAt !== undefined) {

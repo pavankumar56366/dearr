@@ -230,18 +230,38 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     return null;
   }
 
-  return await findProfileById(session.sub);
+  const profile = await findProfileById(session.sub);
+  if (!profile) {
+    return null;
+  }
+
+  // Suspended customers are blocked from normal customer session access (admins never blocked)
+  if (profile.role !== "admin" && profile.status === "suspended") {
+    return null;
+  }
+
+  return profile;
 }
 
 /**
  * Asserts that a user is currently authenticated.
- * Throws AuthError(401) if not logged in.
+ * Throws AuthError(401) if not logged in, or AuthError(403) if customer account is suspended.
  */
 export async function requireUser(): Promise<UserProfile> {
-  const user = await getCurrentUser();
+  const session = await getSession();
+  if (!session || !session.sub) {
+    throw new AuthError("Authentication required to access this resource", 401);
+  }
+
+  const user = await findProfileById(session.sub);
   if (!user) {
     throw new AuthError("Authentication required to access this resource", 401);
   }
+
+  if (user.role !== "admin" && user.status === "suspended") {
+    throw new AuthError("Your account has been suspended. Please contact support.", 403);
+  }
+
   return user;
 }
 

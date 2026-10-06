@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 }
 
 /**
- * PATCH /api/admin/customers/[id] — Update customer contact info.
+ * PATCH /api/admin/customers/[id] — Update customer contact info, status, notes, or address.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
@@ -38,10 +38,35 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const { id } = await context.params;
     const decodedId = decodeURIComponent(id);
 
-    const body = await request.json();
+    let body: any;
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+    }
+
+    // Validate status if provided
+    let statusToUpdate = undefined;
+    if (body.status !== undefined) {
+      const allowedStatuses = ["active", "suspended", "blocked", "inactive"];
+      if (!allowedStatuses.includes(body.status)) {
+        return NextResponse.json(
+          { ok: false, error: "Invalid status. Allowed values: active, suspended" },
+          { status: 400 }
+        );
+      }
+      statusToUpdate = body.status === "suspended" || body.status === "blocked" ? "suspended" : "active";
+    }
+
+    // Support notes or reason passed from status modal or form
+    const notesToUpdate = body.notes !== undefined ? body.notes : body.reason !== undefined ? body.reason : undefined;
+
     const updated = await updateAdminCustomerRecord(decodedId, {
-      name: body.name,
-      phone: body.phone,
+      name: typeof body.name === "string" ? body.name : undefined,
+      phone: typeof body.phone === "string" ? body.phone : undefined,
+      status: statusToUpdate as any,
+      notes: typeof notesToUpdate === "string" ? notesToUpdate : undefined,
+      defaultAddress: body.defaultAddress && typeof body.defaultAddress === "object" ? body.defaultAddress : undefined,
     });
 
     if (!updated) {

@@ -16,6 +16,8 @@ interface RawCustomerRow {
   email: string;
   phone: string | null;
   role: "customer" | "admin";
+  status: CustomerStatus;
+  admin_notes: string | null;
   created_at: string | Date;
   order_count: number | string;
   total_spent: number | string;
@@ -50,7 +52,8 @@ function mapRowToAdminCustomer(row: RawCustomerRow): AdminCustomer {
     name: row.name || "Customer",
     email: row.email,
     phone: row.phone || "",
-    status: "active",
+    status: row.status || "active",
+    notes: row.admin_notes || undefined,
     joinedAt: typeof row.created_at === "string" ? row.created_at : new Date(row.created_at).toISOString(),
     lastOrderAt: row.last_order_at ? (typeof row.last_order_at === "string" ? row.last_order_at : new Date(row.last_order_at).toISOString()) : undefined,
     orderCount: Number(row.order_count || 0),
@@ -79,6 +82,12 @@ export async function listAdminCustomers(filters?: CustomerListFilters): Promise
     whereClauses.push("p.role = 'customer'");
   }
 
+  if (filters?.status && filters.status !== "ALL") {
+    const dbStatus = filters.status === "blocked" || filters.status === "suspended" ? "suspended" : "active";
+    whereClauses.push("p.status = ?");
+    params.push(dbStatus);
+  }
+
   if (filters?.search && filters.search.trim()) {
     const term = `%${filters.search.trim().toLowerCase()}%`;
     whereClauses.push("(LOWER(p.full_name) LIKE ? OR LOWER(p.email) LIKE ? OR p.phone LIKE ?)");
@@ -94,6 +103,8 @@ export async function listAdminCustomers(filters?: CustomerListFilters): Promise
       p.email,
       p.phone,
       p.role,
+      p.status,
+      p.admin_notes,
       p.created_at,
       COALESCE(o.order_count, 0) AS order_count,
       COALESCE(o.total_spent, 0) AS total_spent,
@@ -152,6 +163,8 @@ export async function getAdminCustomerById(id: string): Promise<AdminCustomer | 
       p.email,
       p.phone,
       p.role,
+      p.status,
+      p.admin_notes,
       p.created_at,
       COALESCE(o.order_count, 0) AS order_count,
       COALESCE(o.total_spent, 0) AS total_spent,
@@ -202,12 +215,18 @@ export async function getAdminCustomerById(id: string): Promise<AdminCustomer | 
 
 /**
  * Updates a customer profile.
- * Restricted to safe customer fields (name, phone).
+ * Restricted to safe customer fields (name, phone, status, notes, defaultAddress).
  * Role escalation protection: role and password_hash cannot be modified here.
  */
 export async function updateAdminCustomerRecord(
   id: string,
-  updates: { name?: string; phone?: string }
+  updates: {
+    name?: string;
+    phone?: string;
+    status?: CustomerStatus;
+    notes?: string;
+    defaultAddress?: CustomerAddress;
+  }
 ): Promise<AdminCustomer | null> {
   const cleanId = id?.trim();
   if (!cleanId) return null;
@@ -222,12 +241,74 @@ export async function updateAdminCustomerRecord(
 
   if (updates.phone !== undefined) {
     setClauses.push("phone = ?");
-    params.push(updates.phone.trim() || null);
+    params.push(updates.phone ? updates.phone.trim() : null);
+  }
+
+  if (updates.status !== undefined) {
+    const validStatus =
+      updates.status === "suspended" || updates.status === "blocked"
+        ? "suspended"
+        : "active";
+    setClauses.push("status = ?");
+    params.push(validStatus);
+  }
+
+  if (updates.notes !== undefined) {
+    setClauses.push("admin_notes = ?");
+    params.push(updates.notes.trim() || null);
   }
 
   if (setClauses.length > 0) {
     params.push(cleanId);
     await query(`UPDATE profiles SET ${setClauses.join(", ")}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, params);
+  }
+
+  if (updates.defaultAddress) {
+    const addr = updates.defaultAddress;
+    const existing = await query<any[]>(
+      "SELECT id FROM addresses WHERE user_id = ? AND is_default = 1 LIMIT 1",
+      [cleanId]
+    );
+
+    if (existing && existing.length > 0) {
+      await query(
+        `UPDATE addresses SET 
+           full_name = ?, phone = ?, address_line_1 = ?, address_line_2 = ?, 
+           city = ?, state = ?, postal_code = ?, country = ?, updated_at = CURRENT_TIMESTAMP 
+         WHERE id = ?`,
+        [
+          addr.fullName || updates.name || "Customer",
+          addr.phone || updates.phone || "",
+          addr.addressLine1,
+          addr.addressLine2 || null,
+          addr.city,
+          addr.state,
+          addr.postalCode,
+          addr.country || "India",
+          existing[0].id,
+        ]
+      );
+    } else if (addr.addressLine1 && addr.city) {
+      const crypto = await import("crypto");
+      await query(
+        `INSERT INTO addresses (
+           id, user_id, label, full_name, phone, address_line_1, address_line_2, 
+           city, state, postal_code, country, is_default
+         ) VALUES (?, ?, 'Default', ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+        [
+          crypto.randomUUID(),
+          cleanId,
+          addr.fullName || updates.name || "Customer",
+          addr.phone || updates.phone || "",
+          addr.addressLine1,
+          addr.addressLine2 || null,
+          addr.city,
+          addr.state,
+          addr.postalCode,
+          addr.country || "India",
+        ]
+      );
+    }
   }
 
   return getAdminCustomerById(cleanId);

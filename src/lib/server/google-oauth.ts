@@ -216,6 +216,8 @@ interface RawProfileRowWithGoogle {
   full_name: string;
   phone: string | null;
   role: "customer" | "admin";
+  status?: "active" | "suspended";
+  admin_notes?: string | null;
   email_verified_at: string | Date | null;
   created_at: string | Date;
   updated_at: string | Date;
@@ -228,6 +230,8 @@ function toProfile(row: RawProfileRowWithGoogle): UserProfile {
     fullName: row.full_name,
     phone: row.phone ?? null,
     role: row.role,
+    status: row.status || "active",
+    adminNotes: row.admin_notes ?? null,
     emailVerifiedAt: row.email_verified_at ? new Date(row.email_verified_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
@@ -240,7 +244,7 @@ function toProfile(row: RawProfileRowWithGoogle): UserProfile {
  */
 export async function findProfileByGoogleSubject(googleSubject: string): Promise<UserProfile | null> {
   const sql = `
-    SELECT id, email, google_subject, full_name, phone, role, email_verified_at, created_at, updated_at
+    SELECT id, email, google_subject, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE google_subject = ?
     LIMIT 1

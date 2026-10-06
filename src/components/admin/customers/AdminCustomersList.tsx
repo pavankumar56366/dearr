@@ -45,6 +45,10 @@ export function AdminCustomersList() {
   const [showSkeletonDemo, setShowSkeletonDemo] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Status transition modal state
+  const [customerToChangeStatus, setCustomerToChangeStatus] = useState<AdminCustomer | null>(null);
+  const [targetStatus, setTargetStatus] = useState<CustomerStatus>("active");
+  const [statusChangeReason, setStatusChangeReason] = useState("");
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -53,6 +57,49 @@ export function AdminCustomersList() {
     setTimeout(() => {
       setToastMessage(null);
     }, 3000);
+  };
+
+  const handleOpenStatusModal = (cust: AdminCustomer, nextStatus: CustomerStatus) => {
+    setCustomerToChangeStatus(cust);
+    setTargetStatus(nextStatus);
+    setStatusChangeReason("");
+    setOpenDropdownId(null);
+  };
+
+  const handleConfirmStatusChange = async () => {
+    if (!customerToChangeStatus) return;
+    try {
+      const res = await fetch(`/api/admin/customers/${customerToChangeStatus.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: targetStatus,
+          reason: statusChangeReason.trim() || undefined,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.customer) {
+          setCustomers((prev) =>
+            prev.map((c) => (c.id === data.customer.id ? data.customer : c))
+          );
+          showToast(
+            `Customer account ${
+              targetStatus === "suspended" || targetStatus === "blocked"
+                ? "suspended"
+                : "reactivated"
+            } successfully.`
+          );
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || "Failed to update customer status");
+      }
+    } catch {
+      showToast("Network error updating customer status");
+    } finally {
+      setCustomerToChangeStatus(null);
+    }
   };
 
   const fetchCustomers = async () => {
@@ -241,10 +288,11 @@ export function AdminCustomersList() {
           </span>
         );
       case "blocked":
+      case "suspended":
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
             <BanIcon size={12} className="text-rose-600 shrink-0" />
-            <span>Blocked</span>
+            <span>Suspended</span>
           </span>
         );
       default:
@@ -706,6 +754,29 @@ export function AdminCustomersList() {
                                   <span>Edit Customer</span>
                                 </Link>
 
+                                {customer.status !== "suspended" && customer.status !== "blocked" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleOpenStatusModal(customer, "suspended")
+                                    }
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 hover:text-rose-900 transition-colors cursor-pointer"
+                                  >
+                                    <BanIcon size={14} className="text-rose-600" />
+                                    <span>Suspend Customer</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleOpenStatusModal(customer, "active")
+                                    }
+                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 hover:text-emerald-900 transition-colors cursor-pointer"
+                                  >
+                                    <ShieldAlertIcon size={14} className="text-emerald-600" />
+                                    <span>Reactivate Customer</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                           </td>
@@ -794,6 +865,29 @@ export function AdminCustomersList() {
                                   <span>Edit Customer</span>
                                 </Link>
 
+                                {customer.status !== "suspended" && customer.status !== "blocked" ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleOpenStatusModal(customer, "suspended")
+                                    }
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
+                                  >
+                                    <BanIcon size={14} className="text-rose-600" />
+                                    <span>Suspend Customer</span>
+                                  </button>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleOpenStatusModal(customer, "active")
+                                    }
+                                    className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                                  >
+                                    <ShieldAlertIcon size={14} className="text-emerald-600" />
+                                    <span>Reactivate Customer</span>
+                                  </button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -850,6 +944,119 @@ export function AdminCustomersList() {
         </>
       )}
 
+      {/* ====================================================================
+          4. STATUS TRANSITION MODAL (SUSPEND / REACTIVATE)
+          ==================================================================== */}
+      {customerToChangeStatus && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="customer-status-modal-title"
+        >
+          <div className="bg-surface rounded-2xl border border-neutral-200 shadow-2xl max-w-md w-full p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm font-bold bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
+                  {customerToChangeStatus.id}
+                </span>
+                <span className="text-xs text-neutral-500">
+                  Status Transition
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCustomerToChangeStatus(null)}
+                aria-label="Close status modal"
+                className="w-8 h-8 rounded-lg border border-neutral-200 flex items-center justify-center text-neutral-400 hover:text-neutral-700 cursor-pointer"
+              >
+                <XIcon size={16} />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <h3
+                id="customer-status-modal-title"
+                className="text-base font-bold text-neutral-900"
+              >
+                {targetStatus === "suspended" || targetStatus === "blocked"
+                  ? "Suspend Customer Account"
+                  : "Reactivate Customer Account"}
+              </h3>
+              <p className="text-xs text-neutral-500">
+                You are about to change the status of{" "}
+                <span className="font-bold text-neutral-700">
+                  {customerToChangeStatus.name}
+                </span>{" "}
+                ({customerToChangeStatus.email}) to{" "}
+                <span className="font-bold uppercase text-neutral-900">
+                  {targetStatus === "suspended" || targetStatus === "blocked"
+                    ? "SUSPENDED"
+                    : "ACTIVE"}
+                </span>
+                .
+              </p>
+            </div>
+
+            {/* Warning / Caution Alerts */}
+            {(targetStatus === "suspended" || targetStatus === "blocked") && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 text-xs flex items-start gap-2.5">
+                <BanIcon size={18} className="text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <strong>Important Security Notice:</strong>
+                  <p className="leading-relaxed">
+                    Suspending this account immediately prevents the customer from placing orders, logging into customer portals, or accessing customer features.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Optional Reason / Log */}
+            <div className="space-y-1.5 pt-1">
+              <label
+                htmlFor="status-reason-input"
+                className="block text-xs font-semibold text-neutral-700"
+              >
+                Administrative Reason / Note{" "}
+                <span className="text-neutral-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                id="status-reason-input"
+                rows={2}
+                value={statusChangeReason}
+                onChange={(e) => setStatusChangeReason(e.target.value)}
+                placeholder="e.g. Requested dormancy, resolved support inquiry, or fraud prevention..."
+                className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-xs text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary resize-none"
+              />
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-neutral-100">
+              <button
+                type="button"
+                onClick={() => setCustomerToChangeStatus(null)}
+                className="px-4 py-2 rounded-xl border border-neutral-200 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmStatusChange}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
+                  targetStatus === "suspended" || targetStatus === "blocked"
+                    ? "bg-rose-600 hover:bg-rose-700 text-white"
+                    : "bg-primary hover:bg-[#91BC7A] text-neutral-900"
+                }`}
+              >
+                {targetStatus === "suspended" || targetStatus === "blocked"
+                  ? "Confirm Suspension"
+                  : "Confirm Reactivation"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

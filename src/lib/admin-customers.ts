@@ -8,7 +8,7 @@
 
 import { getAllAdminOrders, AdminOrder } from "./admin-orders";
 
-export type CustomerStatus = "active" | "inactive" | "blocked";
+export type CustomerStatus = "active" | "inactive" | "blocked" | "suspended";
 
 export interface CustomerAddress {
   fullName: string;

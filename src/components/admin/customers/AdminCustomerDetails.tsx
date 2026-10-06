@@ -316,39 +316,21 @@ export function AdminCustomerDetails({
 
         {/* Action Controls */}
         <div className="flex items-center gap-2">
-          {customer.status === "active" ? (
-            <button
-              type="button"
-              onClick={() => handleOpenStatusModal("inactive")}
-              className="px-3 py-1.5 rounded-xl border border-neutral-200 hover:bg-neutral-100 text-xs font-semibold text-neutral-700 transition-all cursor-pointer"
-            >
-              Deactivate Account
-            </button>
-          ) : customer.status === "inactive" ? (
+          {customer.status === "suspended" || customer.status === "blocked" ? (
             <button
               type="button"
               onClick={() => handleOpenStatusModal("active")}
               className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
             >
-              Activate Account
+              Reactivate Account
             </button>
           ) : (
             <button
               type="button"
-              onClick={() => handleOpenStatusModal("active")}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all cursor-pointer shadow-xs"
-            >
-              Unblock Account
-            </button>
-          )}
-
-          {customer.status !== "blocked" && (
-            <button
-              type="button"
-              onClick={() => handleOpenStatusModal("blocked")}
+              onClick={() => handleOpenStatusModal("suspended")}
               className="px-3 py-1.5 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-semibold transition-all cursor-pointer"
             >
-              Block Customer
+              Suspend Account
             </button>
           )}
 
@@ -391,7 +373,7 @@ export function AdminCustomerDetails({
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
                     <BanIcon size={12} className="text-rose-600" />
-                    <span>Blocked</span>
+                    <span>Suspended</span>
                   </span>
                 )}
               </div>
