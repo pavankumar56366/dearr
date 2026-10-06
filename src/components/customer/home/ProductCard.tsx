@@ -3,8 +3,10 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import { HeartIcon, CheckIcon } from "@/components/customer/Icons";
 import { useCart } from "@/context/CartContext";
+import { useAuth } from "@/context/AuthContext";
 
 export interface ProductCardInput {
   id: string;
@@ -68,6 +70,47 @@ export default function ProductCard({ product }: ProductCardProps) {
   const discountPercent = hasDiscount
     ? Math.round(((compareAt - currentPrice) / compareAt) * 100)
     : null;
+
+  const { isLoggedIn } = useAuth();
+  const router = useRouter();
+  const [isWishlisted, setIsWishlisted] = useState(false);
+  const [isWishlistLoading, setIsWishlistLoading] = useState(false);
+
+  const handleWishlistClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!isLoggedIn) {
+      router.push(`/login?redirect=${encodeURIComponent(`/product/${product.slug}`)}`);
+      return;
+    }
+
+    if (isWishlistLoading) return;
+    setIsWishlistLoading(true);
+
+    const nextState = !isWishlisted;
+    setIsWishlisted(nextState);
+
+    try {
+      if (nextState) {
+        await fetch("/api/wishlist/items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ productId: product.id }),
+        });
+      } else {
+        await fetch(`/api/wishlist/items/${product.id}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+      }
+    } catch {
+      setIsWishlisted(!nextState);
+    } finally {
+      setIsWishlistLoading(false);
+    }
+  };
 
   return (
     <article
@@ -136,14 +179,20 @@ export default function ProductCard({ product }: ProductCardProps) {
         {/* Wishlist Button */}
         <button
           type="button"
-          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 z-10 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 hover:scale-110 shadow-sm"
+          onClick={handleWishlistClick}
+          className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full flex items-center justify-center transition-all duration-200 z-10 opacity-90 sm:opacity-0 sm:group-hover:opacity-100 hover:scale-110 shadow-sm cursor-pointer"
           style={{
-            background: "rgba(255,255,255,0.92)",
+            background: isWishlisted ? "rgba(255,255,255,0.98)" : "rgba(255,255,255,0.92)",
             backdropFilter: "blur(4px)",
           }}
-          aria-label={`Add ${product.name} to wishlist`}
+          aria-label={isWishlisted ? `Remove ${product.name} from wishlist` : `Add ${product.name} to wishlist`}
         >
-          <HeartIcon size={16} style={{ color: "var(--color-neutral-500)" }} />
+          <HeartIcon
+            size={16}
+            style={{ color: isWishlisted ? "#C00707" : "var(--color-neutral-500)" }}
+            fill={isWishlisted ? "#C00707" : "none"}
+            stroke={isWishlisted ? "#C00707" : "currentColor"}
+          />
         </button>
       </div>
 

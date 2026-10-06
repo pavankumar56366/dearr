@@ -89,12 +89,54 @@ function mapApiCartItem(item: any): CartItem {
   };
 }
 
+const GUEST_CART_KEY = "dearr_guest_cart";
+
+function getStoredGuestCart(): CartItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = sessionStorage.getItem(GUEST_CART_KEY) || localStorage.getItem(GUEST_CART_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+function storeGuestCart(items: CartItem[]) {
+  if (typeof window === "undefined") return;
+  try {
+    const serialized = JSON.stringify(items);
+    sessionStorage.setItem(GUEST_CART_KEY, serialized);
+    localStorage.setItem(GUEST_CART_KEY, serialized);
+  } catch {}
+}
+
+function clearStoredGuestCart() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(GUEST_CART_KEY);
+    localStorage.removeItem(GUEST_CART_KEY);
+  } catch {}
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const { isLoggedIn, isLoading: isAuthLoading } = useAuth();
 
   const [items, setItems] = useState<CartItem[]>([]);
   const [serverTotals, setServerTotals] = useState<CartTotalsState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const hasMergedRef = React.useRef(false);
+
+  // Load guest cart on initial mount if unauthenticated
+  useEffect(() => {
+    if (!isLoggedIn && !isAuthLoading) {
+      const stored = getStoredGuestCart();
+      if (stored.length > 0 && items.length === 0) {
+        setItems(stored);
+      }
+    }
+  }, [isLoggedIn, isAuthLoading]);
 
   // Synchronize cart with API when customer is authenticated
   const refreshCart = useCallback(async () => {
@@ -126,13 +168,54 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isLoggedIn]);
 
+  // Handle Login State: Merge guest cart items into database cart on login
   useEffect(() => {
-    if (!isAuthLoading) {
-      if (isLoggedIn) {
+    if (isAuthLoading) return;
+
+    if (isLoggedIn) {
+      if (!hasMergedRef.current) {
+        hasMergedRef.current = true;
+        (async () => {
+          // Check for any guest items in state or storage
+          const guestItems = items.length > 0 ? items : getStoredGuestCart();
+          if (guestItems.length > 0) {
+            for (const guestItem of guestItems) {
+              const productId = guestItem.productId || (guestItem as any).id;
+              if (productId) {
+                try {
+                  await fetch("/api/cart/items", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({
+                      productId,
+                      variantId: guestItem.variantId || null,
+                      quantity: guestItem.quantity || 1,
+                    }),
+                  });
+                } catch {
+                  // Silently ignore single item failure (e.g. stock or inactive) so remaining items merge
+                }
+              }
+            }
+            clearStoredGuestCart();
+          }
+          await refreshCart();
+        })();
+      } else {
         refreshCart();
       }
+    } else {
+      hasMergedRef.current = false;
     }
   }, [isLoggedIn, isAuthLoading, refreshCart]);
+
+  // Persist guest cart when unauthenticated
+  useEffect(() => {
+    if (!isLoggedIn && !isAuthLoading && items.length > 0) {
+      storeGuestCart(items);
+    }
+  }, [items, isLoggedIn, isAuthLoading]);
 
   // Decimal-safe subtotal calculation (rounded to 2 decimal places)
   const subtotal = useMemo(() => {

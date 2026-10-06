@@ -7,7 +7,6 @@ import {
   DEFAULT_ADMIN_SETTINGS,
   APPROVED_DEARR_PALETTE,
   getAdminSettings,
-  saveAdminSettings,
 } from "@/lib/admin-settings";
 import {
   CheckCircleIcon,
@@ -230,26 +229,7 @@ export function AdminSettingsPage() {
   // Save handler
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    setTouched({
-      storeName: true,
-      supportEmail: true,
-      supportPhone: true,
-      postalCode: true,
-      minimumOrderValue: true,
-      freeShippingThreshold: true,
-      defaultShippingFee: true,
-      cancellationWindowHours: true,
-    });
-
-    if (!validateForm()) {
-      showToast("Please correct the highlighted validation errors.");
-      return;
-    }
-
-    const saved = saveAdminSettings(formData);
-    setInitialSettings(saved);
-    setFormData(saved);
-    showToast("Settings saved successfully.");
+    showToast("Store parameters are governed by production environment configuration for Dearr V1 (Read-Only).");
   };
 
   // Reset to Defaults handler
@@ -357,6 +337,19 @@ export function AdminSettingsPage() {
           </div>
           <p className="text-xs sm:text-sm text-neutral-500">
             Configure store identity, storefront switches, checkout limits, customer policies, and notification rules.
+          </p>
+        </div>
+      </div>
+
+      {/* Production Configuration Notice */}
+      <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-amber-900 text-xs flex items-start gap-3 shadow-2xs">
+        <AlertCircleIcon size={18} className="text-amber-600 shrink-0 mt-0.5" />
+        <div className="space-y-1">
+          <span className="font-bold text-amber-950 block text-xs">
+            Production Configuration (Read-Only)
+          </span>
+          <p className="text-amber-800 leading-relaxed text-[11px]">
+            Store identity, thresholds, policies, and operational switches are governed by production environment configuration in Dearr V1. Back-office parameters cannot be mutated dynamically through this form.
           </p>
         </div>
       </div>
@@ -1086,9 +1079,11 @@ export function AdminSettingsPage() {
 
             <button
               type="submit"
-              className="px-6 py-2.5 rounded-xl bg-primary hover:bg-[#91BC7A] text-neutral-900 font-bold text-xs shadow-xs transition-all cursor-pointer"
+              disabled
+              title="Store settings are governed by production environment configuration for Dearr V1 (Read-Only)"
+              className="px-6 py-2.5 rounded-xl bg-neutral-200 text-neutral-500 font-bold text-xs shadow-none cursor-not-allowed"
             >
-              Save Changes
+              Save Changes (Read-Only)
             </button>
           </div>
         </div>
@@ -1127,7 +1122,7 @@ export function AdminSettingsPage() {
                 Reset all settings to Dearr defaults?
               </h3>
               <p className="text-xs text-neutral-500 leading-relaxed">
-                This will populate the form with canonical Dearr configurations. You will still need to click &ldquo;Save Changes&rdquo; to commit.
+                This will reset the form values back to canonical Dearr default configurations.
               </p>
             </div>
 

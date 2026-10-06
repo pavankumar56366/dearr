@@ -45,10 +45,6 @@ export function AdminCustomersList() {
   const [showSkeletonDemo, setShowSkeletonDemo] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Status transition modals state
-  const [customerToChangeStatus, setCustomerToChangeStatus] = useState<AdminCustomer | null>(null);
-  const [targetStatus, setTargetStatus] = useState<CustomerStatus>("active");
-  const [statusChangeReason, setStatusChangeReason] = useState("");
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
@@ -94,7 +90,6 @@ export function AdminCustomersList() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpenDropdownId(null);
-        setCustomerToChangeStatus(null);
       }
     };
     document.addEventListener("mousedown", handleOutsideClick);
@@ -211,50 +206,6 @@ export function AdminCustomersList() {
     selectedDateRange,
   ]);
 
-  // Open modal for status changes
-  const handleOpenStatusModal = (
-    customer: AdminCustomer,
-    target: CustomerStatus
-  ) => {
-    setOpenDropdownId(null);
-    setCustomerToChangeStatus(customer);
-    setTargetStatus(target);
-    setStatusChangeReason("");
-  };
-
-  // Confirm status change via API
-  const handleConfirmStatusChange = async () => {
-    if (!customerToChangeStatus) return;
-
-    try {
-      const res = await fetch(`/api/admin/customers/${customerToChangeStatus.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: targetStatus,
-          reason: statusChangeReason.trim() || undefined,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error("Failed to update customer status");
-      }
-
-      const data = await res.json();
-      if (data.ok && data.customer) {
-        setCustomers((prev) =>
-          prev.map((c) => (c.id === data.customer.id ? data.customer : c))
-        );
-        showToast(
-          `Customer "${customerToChangeStatus.name}" marked as ${targetStatus.toUpperCase()}`
-        );
-      }
-    } catch (err: any) {
-      showToast(err.message || "Failed to update customer status");
-    } finally {
-      setCustomerToChangeStatus(null);
-    }
-  };
 
   // Helper date formatter
   const formatDate = (isoString?: string) => {
@@ -755,73 +706,6 @@ export function AdminCustomersList() {
                                   <span>Edit Customer</span>
                                 </Link>
 
-                                <div className="border-t border-neutral-100 my-1" />
-
-                                {/* Contextual Status Actions */}
-                                {customer.status === "active" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "inactive")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-50 transition-colors cursor-pointer"
-                                    >
-                                      <AlertCircleIcon size={14} className="text-amber-500" />
-                                      <span>Deactivate</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "blocked")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
-                                    >
-                                      <BanIcon size={14} className="text-rose-500" />
-                                      <span>Block Customer</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {customer.status === "inactive" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "active")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
-                                    >
-                                      <CheckCircleIcon size={14} className="text-emerald-500" />
-                                      <span>Activate Account</span>
-                                    </button>
-
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "blocked")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 transition-colors cursor-pointer"
-                                    >
-                                      <BanIcon size={14} className="text-rose-500" />
-                                      <span>Block Customer</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {customer.status === "blocked" && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleOpenStatusModal(customer, "active")
-                                    }
-                                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 transition-colors cursor-pointer"
-                                  >
-                                    <ShieldAlertIcon size={14} className="text-emerald-500" />
-                                    <span>Unblock (Reactivate)</span>
-                                  </button>
-                                )}
                               </div>
                             )}
                           </td>
@@ -910,70 +794,6 @@ export function AdminCustomersList() {
                                   <span>Edit Customer</span>
                                 </Link>
 
-                                <div className="border-t border-neutral-100 my-1" />
-
-                                {customer.status === "active" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "inactive")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-amber-700 hover:bg-amber-50 cursor-pointer"
-                                    >
-                                      <AlertCircleIcon size={14} />
-                                      <span>Deactivate</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "blocked")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
-                                    >
-                                      <BanIcon size={14} />
-                                      <span>Block Customer</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {customer.status === "inactive" && (
-                                  <>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "active")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
-                                    >
-                                      <CheckCircleIcon size={14} />
-                                      <span>Activate Account</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleOpenStatusModal(customer, "blocked")
-                                      }
-                                      className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-rose-700 hover:bg-rose-50 cursor-pointer"
-                                    >
-                                      <BanIcon size={14} />
-                                      <span>Block Customer</span>
-                                    </button>
-                                  </>
-                                )}
-
-                                {customer.status === "blocked" && (
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleOpenStatusModal(customer, "active")
-                                    }
-                                    className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
-                                  >
-                                    <ShieldAlertIcon size={14} />
-                                    <span>Unblock (Reactivate)</span>
-                                  </button>
-                                )}
                               </div>
                             )}
                           </div>
@@ -1030,132 +850,6 @@ export function AdminCustomersList() {
         </>
       )}
 
-      {/* ====================================================================
-          4. STATUS TRANSITION MODAL (DEACTIVATE / BLOCK / ACTIVATE)
-          ==================================================================== */}
-      {customerToChangeStatus && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="customer-status-modal-title"
-        >
-          <div className="bg-surface rounded-2xl border border-neutral-200 shadow-2xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm font-bold bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
-                  {customerToChangeStatus.id}
-                </span>
-                <span className="text-xs text-neutral-500">
-                  Status Transition
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setCustomerToChangeStatus(null)}
-                aria-label="Close status modal"
-                className="w-8 h-8 rounded-lg border border-neutral-200 flex items-center justify-center text-neutral-400 hover:text-neutral-700 cursor-pointer"
-              >
-                <XIcon size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <h3
-                id="customer-status-modal-title"
-                className="text-base font-bold text-neutral-900"
-              >
-                {targetStatus === "blocked"
-                  ? "Block Customer Account"
-                  : targetStatus === "inactive"
-                  ? "Deactivate Customer Account"
-                  : "Activate Customer Account"}
-              </h3>
-              <p className="text-xs text-neutral-500">
-                You are about to change the status of{" "}
-                <span className="font-bold text-neutral-700">
-                  {customerToChangeStatus.name}
-                </span>{" "}
-                ({customerToChangeStatus.email}) to{" "}
-                <span className="font-bold uppercase text-neutral-900">
-                  {targetStatus}
-                </span>
-                .
-              </p>
-            </div>
-
-            {/* Warning / Caution Alerts */}
-            {targetStatus === "blocked" && (
-              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-950 text-xs flex items-start gap-2.5">
-                <BanIcon size={18} className="text-rose-600 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <strong>Important Security Notice:</strong>
-                  <p className="leading-relaxed">
-                    Blocking this account immediately prevents the customer from placing orders, redeeming discounts, or logging into customer portals.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {targetStatus === "inactive" && (
-              <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2">
-                <AlertCircleIcon size={16} className="text-amber-600 shrink-0 mt-0.5" />
-                <span>
-                  Deactivating keeps historical orders safe while pausing active customer marketing campaigns.
-                </span>
-              </div>
-            )}
-
-            {/* Optional Reason / Log */}
-            <div className="space-y-1.5 pt-1">
-              <label
-                htmlFor="status-reason-input"
-                className="block text-xs font-semibold text-neutral-700"
-              >
-                Administrative Reason / Note{" "}
-                <span className="text-neutral-400 font-normal">(optional)</span>
-              </label>
-              <textarea
-                id="status-reason-input"
-                rows={2}
-                value={statusChangeReason}
-                onChange={(e) => setStatusChangeReason(e.target.value)}
-                placeholder="e.g. Requested dormancy, resolved support inquiry, or fraud prevention..."
-                className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-xs text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary resize-none"
-              />
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-neutral-100">
-              <button
-                type="button"
-                onClick={() => setCustomerToChangeStatus(null)}
-                className="px-4 py-2 rounded-xl border border-neutral-200 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmStatusChange}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-xs ${
-                  targetStatus === "blocked"
-                    ? "bg-rose-600 hover:bg-rose-700 text-white"
-                    : targetStatus === "inactive"
-                    ? "bg-amber-600 hover:bg-amber-700 text-white"
-                    : "bg-primary hover:bg-[#91BC7A] text-neutral-900"
-                }`}
-              >
-                {targetStatus === "blocked"
-                  ? "Confirm & Block"
-                  : targetStatus === "inactive"
-                  ? "Confirm Deactivation"
-                  : "Confirm Activation"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

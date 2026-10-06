@@ -7,7 +7,6 @@ import {
   OrderStatus,
   PaymentStatus,
   updateAdminOrderStatus,
-  updateAdminPaymentStatus,
   getOrderMetrics,
 } from "@/lib/admin-orders";
 import {
@@ -44,9 +43,6 @@ export function AdminOrdersList() {
   const [orderToUpdateStatus, setOrderToUpdateStatus] = useState<AdminOrder | null>(null);
   const [targetStatus, setTargetStatus] = useState<OrderStatus>("processing");
 
-  // Payment status update modal state
-  const [orderToUpdatePayment, setOrderToUpdatePayment] = useState<AdminOrder | null>(null);
-  const [targetPaymentStatus, setTargetPaymentStatus] = useState<PaymentStatus>("paid");
 
   // Customer inspection modal state
   const [inspectCustomerOrder, setInspectCustomerOrder] = useState<AdminOrder | null>(null);
@@ -129,7 +125,6 @@ export function AdminOrdersList() {
       if (e.key === "Escape") {
         setOpenDropdownId(null);
         setOrderToUpdateStatus(null);
-        setOrderToUpdatePayment(null);
         setInspectCustomerOrder(null);
       }
     };
@@ -260,29 +255,6 @@ export function AdminOrdersList() {
     setOrderToUpdateStatus(null);
   };
 
-  // Handle Payment Status Update
-  const handleOpenPaymentModal = (order: AdminOrder) => {
-    setOpenDropdownId(null);
-    setOrderToUpdatePayment(order);
-    setTargetPaymentStatus(order.paymentStatus);
-  };
-
-  const handleConfirmPaymentUpdate = () => {
-    if (!orderToUpdatePayment) return;
-    const updated = updateAdminPaymentStatus(
-      orderToUpdatePayment.id,
-      targetPaymentStatus
-    );
-    if (updated) {
-      setOrders((prev) =>
-        prev.map((o) => (o.id === updated.id ? { ...o, paymentStatus: updated.paymentStatus } : o))
-      );
-      showToast(
-        `Payment for ${updated.orderNumber} updated to ${updated.paymentStatus}`
-      );
-    }
-    setOrderToUpdatePayment(null);
-  };
 
   const handleClearFilters = () => {
     setSearchQuery("");
@@ -773,14 +745,6 @@ export function AdminOrdersList() {
                                   <span>Update Status</span>
                                 </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenPaymentModal(order)}
-                                  className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
-                                >
-                                  <CreditCardIcon size={14} className="text-neutral-400" />
-                                  <span>Update Payment</span>
-                                </button>
 
                                 <button
                                   type="button"
@@ -873,14 +837,6 @@ export function AdminOrdersList() {
                                   <span>Update Status</span>
                                 </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenPaymentModal(order)}
-                                  className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold text-neutral-700 hover:bg-neutral-100 cursor-pointer"
-                                >
-                                  <CreditCardIcon size={14} />
-                                  <span>Update Payment</span>
-                                </button>
 
                                 <button
                                   type="button"
@@ -1077,111 +1033,6 @@ export function AdminOrdersList() {
         </div>
       )}
 
-      {/* Payment Status Update Modal */}
-      {orderToUpdatePayment && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-xs animate-in fade-in duration-150"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="update-payment-dialog-title"
-        >
-          <div className="bg-surface rounded-2xl border border-neutral-200 shadow-xl max-w-md w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-neutral-100 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm font-bold bg-neutral-100 px-2 py-0.5 rounded border border-neutral-200">
-                  {orderToUpdatePayment.orderNumber}
-                </span>
-                <span className="text-xs text-neutral-500">Update Payment</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setOrderToUpdatePayment(null)}
-                aria-label="Close payment status update"
-                className="w-8 h-8 rounded-lg border border-neutral-200 flex items-center justify-center text-neutral-400 hover:text-neutral-700 cursor-pointer"
-              >
-                <XIcon size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-1">
-              <h3
-                id="update-payment-dialog-title"
-                className="text-base font-bold text-neutral-900"
-              >
-                Update Payment Status
-              </h3>
-              <p className="text-xs text-neutral-500">
-                Update payment verification status for customer order{" "}
-                <span className="font-bold text-neutral-700">
-                  {orderToUpdatePayment.orderNumber}
-                </span>
-                .
-              </p>
-            </div>
-
-            {/* Caution if target is Refunded */}
-            {targetPaymentStatus === "refunded" && (
-              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-900 text-xs flex items-start gap-2">
-                <AlertCircleIcon size={16} className="text-rose-600 shrink-0 mt-0.5" />
-                <span>
-                  <strong>Caution:</strong> Marking an order as Refunded records that payment was returned to the customer.
-                </span>
-              </div>
-            )}
-
-            {/* Payment Options */}
-            <div className="space-y-2 pt-1">
-              {(
-                [
-                  "pending",
-                  "paid",
-                  "failed",
-                  "refunded",
-                ] as PaymentStatus[]
-              ).map((pst) => (
-                <label
-                  key={pst}
-                  className={`flex items-center justify-between p-3 rounded-xl border text-xs font-semibold cursor-pointer transition-all ${
-                    targetPaymentStatus === pst
-                      ? "bg-primary/20 border-primary text-neutral-900 shadow-2xs"
-                      : "bg-white border-neutral-200 text-neutral-700 hover:bg-neutral-50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="radio"
-                      name="targetPaymentStatus"
-                      checked={targetPaymentStatus === pst}
-                      onChange={() => setTargetPaymentStatus(pst)}
-                      className="accent-primary"
-                    />
-                    <span className="capitalize">{pst}</span>
-                  </div>
-                  {renderPaymentStatusBadge(pst)}
-                </label>
-              ))}
-            </div>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-neutral-100">
-              <button
-                type="button"
-                onClick={() => setOrderToUpdatePayment(null)}
-                className="px-4 py-2 rounded-xl border border-neutral-200 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="button"
-                onClick={handleConfirmPaymentUpdate}
-                className="px-4 py-2 rounded-xl bg-primary hover:bg-[#91BC7A] text-neutral-900 text-xs font-bold transition-colors cursor-pointer shadow-xs"
-              >
-                Save Payment Status
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Customer Inspection Modal */}
       {inspectCustomerOrder && (
