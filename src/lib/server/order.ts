@@ -879,7 +879,7 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
 
   await withTransaction(async (conn) => {
     const orderRows = await conn.execute(
-      "SELECT id, status FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, status, payment_status FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
       [cleanOrderId]
     );
     const orders = (orderRows as any)[0] as any[];
@@ -889,6 +889,7 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
     }
 
     const currentStatus = orders[0].status as OrderStatus;
+    const currentPaymentStatus = orders[0].payment_status;
     if (currentStatus === "delivered") {
       throw new OrderValidationError("Delivered orders cannot be cancelled", 400);
     }
@@ -896,24 +897,27 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       throw new OrderValidationError("Order is already cancelled", 400);
     }
 
-    // Restore stock
-    const itemRows = await conn.execute(
-      "SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?",
-      [cleanOrderId]
-    );
-    const items = (itemRows as any)[0] as any[];
+    // Restore stock ONLY if order had inventory deducted (paid or confirmed)
+    const shouldRestoreStock = currentPaymentStatus === "paid" || currentStatus === "confirmed";
+    if (shouldRestoreStock) {
+      const itemRows = await conn.execute(
+        "SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?",
+        [cleanOrderId]
+      );
+      const items = (itemRows as any)[0] as any[];
 
-    for (const item of items || []) {
-      if (item.variant_id) {
-        await conn.execute(
-          "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
-          [item.quantity, item.variant_id]
-        );
-      } else if (item.product_id) {
-        await conn.execute(
-          "UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
-          [item.quantity, item.product_id]
-        );
+      for (const item of items || []) {
+        if (item.variant_id) {
+          await conn.execute(
+            "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+            [item.quantity, item.variant_id]
+          );
+        } else if (item.product_id) {
+          await conn.execute(
+            "UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+            [item.quantity, item.product_id]
+          );
+        }
       }
     }
 

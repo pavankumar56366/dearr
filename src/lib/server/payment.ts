@@ -191,9 +191,50 @@ export async function processTestPayment(
     if (input.outcome === "success") {
       const providerPaymentId = `test_pay_${crypto.randomUUID()}`;
 
-      // Update orders.payment_status to 'paid'
+      // Deduct inventory atomically inside this transaction
+      const [itemRows] = (await conn.execute(
+        "SELECT product_id, variant_id, quantity, product_name FROM order_items WHERE order_id = ?",
+        [cleanOrderId]
+      )) as any[];
+
+      for (const item of itemRows || []) {
+        const qty = Number(item.quantity);
+        if (item.variant_id) {
+          const [result] = (await conn.execute(
+            `UPDATE product_variants 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.variant_id, qty]
+          )) as any[];
+          if ((result as any).affectedRows === 0) {
+            throw new PaymentValidationError(
+              `Insufficient stock available for variant of "${item.product_name || "product"}". Cannot settle payment.`,
+              409
+            );
+          }
+        } else if (item.product_id) {
+          const [result] = (await conn.execute(
+            `UPDATE products 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.product_id, qty]
+          )) as any[];
+          if ((result as any).affectedRows === 0) {
+            throw new PaymentValidationError(
+              `Insufficient stock available for "${item.product_name || "product"}". Cannot settle payment.`,
+              409
+            );
+          }
+        }
+      }
+
+      // Update orders.payment_status to 'paid' and status to 'confirmed'
       await conn.execute(
-        "UPDATE orders SET payment_status = 'paid', updated_at = NOW() WHERE id = ?",
+        `UPDATE orders 
+         SET payment_status = 'paid', 
+             status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
+             updated_at = NOW() 
+         WHERE id = ?`,
         [cleanOrderId]
       );
 
@@ -960,10 +1001,51 @@ export async function settlePaidOrder(
       }
     }
 
-    // 8. Atomic settlement transition in MySQL:
-    // Update orders.payment_status = 'paid'
+    // 8. Deduct inventory atomically inside this transaction
+    const [itemRows] = (await conn.execute(
+      "SELECT product_id, variant_id, quantity, product_name FROM order_items WHERE order_id = ?",
+      [orderRow.id]
+    )) as any[];
+
+    for (const item of itemRows || []) {
+      const qty = Number(item.quantity);
+      if (item.variant_id) {
+        const [result] = (await conn.execute(
+          `UPDATE product_variants 
+           SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+           WHERE id = ? AND stock_quantity >= ?`,
+          [qty, item.variant_id, qty]
+        )) as any[];
+        if ((result as any).affectedRows === 0) {
+          throw new PaymentValidationError(
+            `Insufficient stock available for variant of "${item.product_name || "product"}". Cannot settle payment.`,
+            409
+          );
+        }
+      } else if (item.product_id) {
+        const [result] = (await conn.execute(
+          `UPDATE products 
+           SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+           WHERE id = ? AND stock_quantity >= ?`,
+          [qty, item.product_id, qty]
+        )) as any[];
+        if ((result as any).affectedRows === 0) {
+          throw new PaymentValidationError(
+            `Insufficient stock available for "${item.product_name || "product"}". Cannot settle payment.`,
+            409
+          );
+        }
+      }
+    }
+
+    // 9. Atomic settlement transition in MySQL:
+    // Update orders.payment_status = 'paid' and status = 'confirmed' (if still pending)
     await conn.execute(
-      "UPDATE orders SET payment_status = 'paid', updated_at = NOW() WHERE id = ?",
+      `UPDATE orders 
+       SET payment_status = 'paid', 
+           status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END,
+           updated_at = NOW() 
+       WHERE id = ?`,
       [orderRow.id]
     );
 

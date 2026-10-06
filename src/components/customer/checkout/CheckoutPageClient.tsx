@@ -381,68 +381,20 @@ export default function CheckoutPageClient() {
           return;
         }
 
-        // If guest/unauthenticated (401), use demo simulation
+        // If guest/unauthenticated (401), redirect to login with cart preserved
         if (res.status === 401) {
-          const adminOrder = createAdminOrderFromCheckout({
-            items,
-            customer: {
-              name: address.fullName,
-              email: address.email,
-              phone: address.phone,
-            },
-            shippingAddress: {
-              fullName: address.fullName,
-              phone: address.phone,
-              addressLine1: address.addressLine1,
-              addressLine2: address.addressLine2,
-              city: address.city,
-              state: address.state,
-              postalCode: address.postalCode,
-              country: address.country || "India",
-            },
-            subtotal,
-            discountAmount: 0,
-            shippingAmount: 0,
-            paymentMethod: "Razorpay (Prepaid Demo)",
-          });
-          saveAdminOrder(adminOrder);
-          clearCart();
           setIsProcessing(false);
-          router.push(`/order-confirmed?orderNumber=${adminOrder.orderNumber}`);
+          router.push("/login?redirect=/checkout");
           return;
         }
 
         // Real API error (e.g. 400 Insufficient stock)
         setIsProcessing(false);
         setAlertNotice(data.error || "Failed to create order. Please try again.");
-      } catch (err) {
-        console.error("Order creation network error, falling back to session:", err);
-        const adminOrder = createAdminOrderFromCheckout({
-          items,
-          customer: {
-            name: address.fullName,
-            email: address.email,
-            phone: address.phone,
-          },
-          shippingAddress: {
-            fullName: address.fullName,
-            phone: address.phone,
-            addressLine1: address.addressLine1,
-            addressLine2: address.addressLine2,
-            city: address.city,
-            state: address.state,
-            postalCode: address.postalCode,
-            country: address.country || "India",
-          },
-          subtotal,
-          discountAmount: 0,
-          shippingAmount: 0,
-          paymentMethod: "Razorpay (Prepaid Demo)",
-        });
-        saveAdminOrder(adminOrder);
-        clearCart();
+      } catch (err: any) {
+        console.error("Order creation network error:", err);
         setIsProcessing(false);
-        router.push(`/order-confirmed?orderNumber=${adminOrder.orderNumber}`);
+        setAlertNotice("Network error while creating order. Please check your connection and try again.");
       }
     })();
   }, [
