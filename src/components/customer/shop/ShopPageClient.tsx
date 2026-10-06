@@ -17,7 +17,7 @@
  *
  * All state is local + URL params — no backend.
  */
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -41,14 +41,25 @@ const CATEGORY_ICON_MAP: Record<string, string> = {
   "miniatures-decor": "✨",
 };
 
+export interface PaginationInfo {
+  page: number;
+  pageSize: number;
+  totalCount: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
 interface ShopPageClientProps {
   initialProducts?: any[];
   initialCategories?: any[];
+  initialPagination?: PaginationInfo;
 }
 
 export default function ShopPageClient({
   initialProducts,
   initialCategories,
+  initialPagination,
 }: ShopPageClientProps) {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -58,12 +69,24 @@ export default function ShopPageClient({
   const urlCategory = searchParams.get("cat") || searchParams.get("category") || "all";
   const urlSort = (searchParams.get("sort") as SortOption) || "featured";
   const urlQuery = searchParams.get("q") || searchParams.get("search") || "";
+  const urlPage = parseInt(searchParams.get("page") || "1", 10) || 1;
 
   // ─── Catalog State ──────────────────────────────────────────────────────
   const [allProducts, setAllProducts] = useState<any[]>(initialProducts || []);
   const [categories, setCategories] = useState<any[]>(initialCategories || []);
+  const [pagination, setPagination] = useState<PaginationInfo>(
+    initialPagination || {
+      page: urlPage,
+      pageSize: 24,
+      totalCount: initialProducts?.length || 0,
+      totalPages: Math.ceil((initialProducts?.length || 0) / 24) || 1,
+      hasNextPage: false,
+      hasPrevPage: false,
+    }
+  );
   const [isLoading, setIsLoading] = useState(!initialProducts || initialProducts.length === 0);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const isFirstMount = useRef(true);
 
   useEffect(() => {
     if (initialCategories && initialCategories.length > 0) {
@@ -93,10 +116,11 @@ export default function ShopPageClient({
   }, [initialCategories]);
 
   useEffect(() => {
-    if (initialProducts && initialProducts.length > 0) {
-      setAllProducts(initialProducts);
-      setIsLoading(false);
-      return;
+    if (isFirstMount.current) {
+      isFirstMount.current = false;
+      if (initialProducts && initialProducts.length > 0) {
+        return;
+      }
     }
 
     let isMounted = true;
@@ -104,7 +128,20 @@ export default function ShopPageClient({
       setIsLoading(true);
       setFetchError(null);
       try {
-        const res = await fetch("/api/products?pageSize=100");
+        const params = new URLSearchParams();
+        params.set("page", String(urlPage));
+        params.set("pageSize", "24");
+        if (urlCategory && urlCategory !== "all") {
+          params.set("cat", urlCategory);
+        }
+        if (urlQuery.trim()) {
+          params.set("q", urlQuery.trim());
+        }
+        if (urlSort && urlSort !== "featured") {
+          params.set("sort", urlSort);
+        }
+
+        const res = await fetch(`/api/products?${params.toString()}`);
         if (!res.ok) {
           throw new Error("Failed to load products");
         }
@@ -112,6 +149,9 @@ export default function ShopPageClient({
         if (isMounted) {
           if (data.ok && Array.isArray(data.products)) {
             setAllProducts(data.products);
+            if (data.pagination) {
+              setPagination(data.pagination);
+            }
           } else {
             setAllProducts([]);
           }
@@ -133,7 +173,7 @@ export default function ShopPageClient({
     return () => {
       isMounted = false;
     };
-  }, [initialProducts]);
+  }, [urlCategory, urlSort, urlQuery, urlPage, initialProducts]);
 
   const [activeCategory, setActiveCategory] = useState(urlCategory);
   const [sortBy, setSortBy] = useState<SortOption>(urlSort);
@@ -160,7 +200,13 @@ export default function ShopPageClient({
     (params: Record<string, string | null>) => {
       const newParams = new URLSearchParams(searchParams.toString());
       Object.entries(params).forEach(([key, value]) => {
-        if (value === null || value === "" || value === "all" || value === "featured") {
+        if (
+          value === null ||
+          value === "" ||
+          value === "all" ||
+          value === "featured" ||
+          (key === "page" && (value === "1" || value === null))
+        ) {
           newParams.delete(key);
         } else {
           newParams.set(key, value);
@@ -184,22 +230,33 @@ export default function ShopPageClient({
   const handleCategoryChange = useCallback(
     (slug: string) => {
       setActiveCategory(slug);
-      updateURL({ cat: slug === "all" ? null : slug });
+      updateURL({ cat: slug === "all" ? null : slug, page: null });
     },
     [updateURL]
   );
 
   const handleClearSearch = useCallback(() => {
     setSearchQuery("");
-    updateURL({ q: null });
+    updateURL({ q: null, page: null });
   }, [updateURL]);
 
   const handleSortChange = useCallback(
     (sort: SortOption) => {
       setSortBy(sort);
-      updateURL({ sort: sort === "featured" ? null : sort });
+      updateURL({ sort: sort === "featured" ? null : sort, page: null });
     },
     [updateURL]
+  );
+
+  const handlePageChange = useCallback(
+    (newPage: number) => {
+      if (newPage < 1 || (pagination.totalPages > 0 && newPage > pagination.totalPages)) return;
+      updateURL({ page: newPage === 1 ? null : String(newPage) });
+      if (typeof window !== "undefined") {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+    },
+    [pagination.totalPages, updateURL]
   );
 
   const handleStockToggle = useCallback(() => {
@@ -612,7 +669,7 @@ export default function ShopPageClient({
 
             {/* Toolbar */}
             <ShopToolbar
-              totalResults={filteredProducts.length}
+              totalResults={pagination.totalCount || filteredProducts.length}
               sortBy={sortBy}
               onSortChange={handleSortChange}
               viewMode={viewMode}
@@ -641,6 +698,63 @@ export default function ShopPageClient({
                   <ListProductCard key={product.id} product={product} />
                 ))}
               </div>
+            )}
+
+            {/* ─── Pagination Controls ─────────────────────── */}
+            {pagination.totalPages > 1 && (
+              <nav
+                aria-label="Shop catalog pagination"
+                className="mt-8 pt-6 border-t border-neutral-200 flex flex-col sm:flex-row items-center justify-between gap-4"
+              >
+                <p className="text-xs text-neutral-500 font-medium">
+                  Showing page <span className="font-bold text-neutral-800">{pagination.page}</span> of{" "}
+                  <span className="font-bold text-neutral-800">{pagination.totalPages}</span> ({pagination.totalCount} products)
+                </p>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(pagination.page - 1)}
+                    disabled={!pagination.hasPrevPage || pagination.page <= 1}
+                    className="px-3.5 py-2 rounded-xl border border-neutral-200 bg-surface text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+                  >
+                    ← Previous
+                  </button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+                      .filter((p) => Math.abs(p - pagination.page) <= 2 || p === 1 || p === pagination.totalPages)
+                      .map((p, idx, arr) => {
+                        const showEllipsis = idx > 0 && p - arr[idx - 1] > 1;
+                        return (
+                          <React.Fragment key={p}>
+                            {showEllipsis && <span className="px-1 text-xs text-neutral-400">…</span>}
+                            <button
+                              type="button"
+                              onClick={() => handlePageChange(p)}
+                              className={`w-8 h-8 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                pagination.page === p
+                                  ? "bg-primary text-neutral-900 shadow-2xs"
+                                  : "bg-surface border border-neutral-200 text-neutral-700 hover:bg-neutral-50"
+                              }`}
+                            >
+                              {p}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handlePageChange(pagination.page + 1)}
+                    disabled={!pagination.hasNextPage || pagination.page >= pagination.totalPages}
+                    className="px-3.5 py-2 rounded-xl border border-neutral-200 bg-surface text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all cursor-pointer shadow-2xs"
+                  >
+                    Next →
+                  </button>
+                </div>
+              </nav>
             )}
           </div>
         </div>
