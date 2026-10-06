@@ -5,6 +5,7 @@ import {
   getApplicableDiscountForProduct,
   computeDiscountAmount,
 } from "./discount";
+import { getStoreSettings } from "./settings";
 
 // ---------------------------------------------------------------------------
 // Error Handling
@@ -470,8 +471,19 @@ export async function createOrderFromCart(
     orderSubtotal = roundToTwo(orderSubtotal);
     orderDiscountTotal = roundToTwo(orderDiscountTotal);
 
-    // V1: Free shipping
-    const shippingAmount = 0;
+    const storeSettings = await getStoreSettings();
+
+    if (orderSubtotal < storeSettings.minimumOrderValue) {
+      throw new OrderValidationError(
+        `Minimum order value is ₹${storeSettings.minimumOrderValue}. Current subtotal is ₹${orderSubtotal}.`,
+        400
+      );
+    }
+
+    const shippingAmount =
+      orderSubtotal >= storeSettings.freeShippingThreshold
+        ? 0
+        : storeSettings.defaultShippingFee;
     const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
 
     // 4. Insert order

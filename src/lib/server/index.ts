@@ -248,3 +248,8 @@ export {
   type ReviewListFilters,
 } from "./review";
 
+export {
+  getStoreSettings,
+  updateStoreSettings,
+} from "./settings";
+

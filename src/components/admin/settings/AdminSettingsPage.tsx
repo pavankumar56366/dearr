@@ -227,9 +227,50 @@ export function AdminSettingsPage() {
   };
 
   // Save handler
-  const handleSave = (e: React.FormEvent) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    showToast("Store parameters are governed by production environment configuration for Dearr V1 (Read-Only).");
+    setTouched({
+      storeName: true,
+      supportEmail: true,
+      supportPhone: true,
+      postalCode: true,
+      minimumOrderValue: true,
+      freeShippingThreshold: true,
+      defaultShippingFee: true,
+      cancellationWindowHours: true,
+    });
+
+    if (!validateForm()) {
+      showToast("Please correct the highlighted validation errors.");
+      return;
+    }
+
+    try {
+      setIsSaving(true);
+      const res = await fetch("/api/admin/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(formData),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ok && data.settings) {
+          setInitialSettings(data.settings);
+          setFormData(data.settings);
+          showToast("Store settings saved successfully.");
+        }
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        showToast(errData.error || "Failed to save settings.");
+      }
+    } catch {
+      showToast("Network error saving settings.");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Reset to Defaults handler
@@ -337,19 +378,6 @@ export function AdminSettingsPage() {
           </div>
           <p className="text-xs sm:text-sm text-neutral-500">
             Configure store identity, storefront switches, checkout limits, customer policies, and notification rules.
-          </p>
-        </div>
-      </div>
-
-      {/* Production Configuration Notice */}
-      <div className="p-4 rounded-2xl bg-amber-50/70 border border-amber-200 text-amber-900 text-xs flex items-start gap-3 shadow-2xs">
-        <AlertCircleIcon size={18} className="text-amber-600 shrink-0 mt-0.5" />
-        <div className="space-y-1">
-          <span className="font-bold text-amber-950 block text-xs">
-            Production Configuration (Read-Only)
-          </span>
-          <p className="text-amber-800 leading-relaxed text-[11px]">
-            Store identity, thresholds, policies, and operational switches are governed by production environment configuration in Dearr V1. Back-office parameters cannot be mutated dynamically through this form.
           </p>
         </div>
       </div>
@@ -1079,11 +1107,10 @@ export function AdminSettingsPage() {
 
             <button
               type="submit"
-              disabled
-              title="Store settings are governed by production environment configuration for Dearr V1 (Read-Only)"
-              className="px-6 py-2.5 rounded-xl bg-neutral-200 text-neutral-500 font-bold text-xs shadow-none cursor-not-allowed"
+              disabled={isSaving}
+              className="px-6 py-2.5 rounded-xl bg-primary hover:bg-[#91BC7A] text-neutral-900 font-bold text-xs shadow-xs transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Save Changes (Read-Only)
+              {isSaving ? "Saving..." : "Save Changes"}
             </button>
           </div>
         </div>
