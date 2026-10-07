@@ -4,9 +4,9 @@
 
 | Item | Value |
 |---|---|
-| Current Version | v1.1.0 |
+| Current Version | v1.1.1 |
 | Current Branch | main |
-| Latest Commit | 2f958ba |
+| Latest Commit | b91f5a8 |
 
 ## Versions
 
@@ -14,6 +14,7 @@
 |---|---|---|---|
 | v1.0.0 | 2026-10-05 | fb4a2a7 | Initial stable release |
 | v1.1.0 | 2026-10-07 | 2f958ba | Dearr V1.1 release |
+| v1.1.1 | 2026-10-07 | b91f5a8 | Security patch for source-map-js vulnerability |
 
 ## Commit History
 
@@ -43,3 +44,5 @@
 | 22 | 1daddd2 | 2026-10-06 | feat(payment): prepare Razorpay integration for Live Mode payments with dual-mode detection and security assurance |
 | 23 | 1839a9b | 2026-10-06 | fix: remove obsolete checkout prototype message |
 | 24 | 2f958ba | 2026-10-06 | docs: update git history |
+| 25 | 15fed57 | 2026-10-07 | docs: finalize Dearr v1.1.0 release history |
+| 26 | b91f5a8 | 2026-10-07 | fix: patch source-map-js security vulnerability |
