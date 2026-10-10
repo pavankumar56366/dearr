@@ -4,6 +4,7 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { TrendingSearchItem, TRENDING_PRODUCTS } from "./search-mock-data";
+import { isUploadPath } from "@/lib/product-image";
 
 interface TrendingSearchProductsProps {
   products?: TrendingSearchItem[];
@@ -34,6 +35,7 @@ export function TrendingSearchProducts({
                 src={item.image}
                 alt={item.title}
                 fill
+                unoptimized={isUploadPath(item.image)}
                 className="object-cover object-center group-hover:scale-105 transition-transform duration-300"
                 sizes="(max-width: 768px) 50vw, 25vw"
               />

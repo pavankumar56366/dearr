@@ -64,6 +64,8 @@ export {
   ProductValidationError,
   generateSlug,
   validateSlug,
+  toPublicUrl,
+  toProductImage,
   findProductById,
   findProductBySlug,
   getRelatedProducts,

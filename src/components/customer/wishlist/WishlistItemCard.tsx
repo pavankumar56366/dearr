@@ -5,6 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import type { SampleProduct } from "@/data/sample-products";
 import { CartIcon, CloseIcon, CheckIcon } from "@/components/customer/Icons";
+import { normalizeImageUrl, isUploadPath } from "@/lib/product-image";
 
 interface WishlistItemCardProps {
   product: SampleProduct;
@@ -62,9 +63,10 @@ export default function WishlistItemCard({
       <div className="relative aspect-square w-full overflow-hidden bg-[#f4f7f2]">
         <Link href={`/product/${product.slug}`} className="block w-full h-full">
           <Image
-            src={product.image}
+            src={normalizeImageUrl(product.image)}
             alt={`${product.name} — Precision 3D Printed`}
             fill
+            unoptimized={isUploadPath(product.image)}
             sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
             className={`object-cover transition-transform duration-300 group-hover:scale-105 ${
               isOutOfStock ? "opacity-75 grayscale-30" : ""

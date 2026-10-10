@@ -25,6 +25,7 @@ import Image from "next/image";
 import ProductCard from "@/components/customer/home/ProductCard";
 import { HeartIcon } from "@/components/customer/Icons";
 import { useCart } from "@/context/CartContext";
+import { getProductPrimaryImage, isUploadPath } from "@/lib/product-image";
 import ShopSidebar from "./ShopSidebar";
 import ShopToolbar from "./ShopToolbar";
 import type { SortOption, ViewMode } from "./ShopToolbar";
@@ -781,18 +782,7 @@ function ListProductCard({ product }: { product: any }) {
   const { addItem } = useCart();
   const [isAdded, setIsAdded] = useState(false);
 
-  const rawFirstImage =
-    product.images && product.images.length > 0 ? product.images[0] : null;
-  const rawImage =
-    (typeof rawFirstImage === "string"
-      ? rawFirstImage
-      : rawFirstImage?.url || rawFirstImage?.storagePath) ||
-    product.image ||
-    "/product-samples/1.jpeg";
-  const displayImage =
-    rawImage.startsWith("http") || rawImage.startsWith("/")
-      ? rawImage
-      : `/${rawImage}`;
+  const displayImage = getProductPrimaryImage(product);
 
   const categoryName =
     typeof product.category === "object" && product.category !== null
@@ -828,6 +818,7 @@ function ListProductCard({ product }: { product: any }) {
           src={displayImage}
           alt={product.name}
           fill
+          unoptimized={isUploadPath(displayImage)}
           sizes="(max-width: 640px) 128px, 176px"
           className={`object-cover transition-transform duration-300 group-hover:scale-105 ${
             isOutOfStock ? "opacity-75 grayscale-30" : ""

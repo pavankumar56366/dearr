@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import type { SampleProduct, SampleProductVariant } from "@/data/sample-products";
 import { useAuth } from "./AuthContext";
+import { getProductPrimaryImage } from "@/lib/product-image";
 
 /**
  * CartItem — Models a single line item in the customer shopping cart.
@@ -73,7 +74,7 @@ function mapApiCartItem(item: any): CartItem {
     productId: item.productId,
     slug: item.product?.slug || `product-${item.productId}`,
     name: item.product?.name || "Product",
-    image: item.product?.image || "/product-samples/1.jpeg",
+    image: getProductPrimaryImage(item.product),
     category: item.product?.category || "3D Printing",
     price: finalPrice,
     compareAtPrice: originalPrice > finalPrice ? originalPrice : null,

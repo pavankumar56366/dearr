@@ -7,6 +7,7 @@ import { useSearchParams } from "next/navigation";
 import { SAMPLE_PRODUCTS, type SampleProduct } from "@/data/sample-products";
 import { getAllAdminProducts } from "@/lib/admin-catalog";
 import { getAllAdminCategories } from "@/lib/admin-categories";
+import { isUploadPath } from "@/lib/product-image";
 import {
   PackageIcon,
   SearchIcon,
@@ -566,6 +567,7 @@ export function AdminProductsList() {
                                     src={p.image}
                                     alt={p.name}
                                     fill
+                                    unoptimized={isUploadPath(p.image)}
                                     sizes="44px"
                                     className="object-cover"
                                   />

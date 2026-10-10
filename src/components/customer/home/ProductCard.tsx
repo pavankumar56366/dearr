@@ -8,6 +8,7 @@ import { HeartIcon, CheckIcon } from "@/components/customer/Icons";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWishlist } from "@/context/WishlistContext";
+import { getProductPrimaryImage, isUploadPath } from "@/lib/product-image";
 
 export interface ProductCardInput {
   id: string;
@@ -40,18 +41,7 @@ export default function ProductCard({ product }: ProductCardProps) {
   const { addItem } = useCart();
   const [isAdded, setIsAdded] = useState(false);
 
-  const rawFirstImage =
-    product.images && product.images.length > 0 ? product.images[0] : null;
-  const rawImage =
-    (typeof rawFirstImage === "string"
-      ? rawFirstImage
-      : rawFirstImage?.url || rawFirstImage?.storagePath) ||
-    product.image ||
-    "/product-samples/1.jpeg";
-  const displayImage =
-    rawImage.startsWith("http") || rawImage.startsWith("/")
-      ? rawImage
-      : `/${rawImage}`;
+  const displayImage = getProductPrimaryImage(product);
 
   const categoryName =
     typeof product.category === "object" && product.category !== null
@@ -116,6 +106,7 @@ export default function ProductCard({ product }: ProductCardProps) {
           src={displayImage}
           alt={product.name}
           fill
+          unoptimized={isUploadPath(displayImage)}
           sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
           className={`object-cover transition-transform duration-300 group-hover:scale-105 ${
             isOutOfStock ? "opacity-75 grayscale-30" : ""

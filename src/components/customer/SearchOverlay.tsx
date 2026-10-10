@@ -13,6 +13,7 @@ import {
   TRENDING_PRODUCTS,
   RECENT_SEARCHES,
 } from "./search/search-mock-data";
+import { getProductPrimaryImage } from "@/lib/product-image";
 
 interface SearchOverlayProps {
   isOpen: boolean;
@@ -54,7 +55,7 @@ export function SearchOverlay({
             ctaText: "view creation →",
             category: p.category?.name || "3D Printing",
             href: `/product/${p.slug}`,
-            image: p.images?.[0]?.url || "/product-samples/1.jpeg",
+            image: getProductPrimaryImage(p),
             price: Number(p.price),
           }));
           setTrendingProducts(mapped);

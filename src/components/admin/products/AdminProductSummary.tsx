@@ -3,6 +3,7 @@
 import React from "react";
 import Image from "next/image";
 import { ImageIcon, StarIcon, LayersIcon, ShieldCheckIcon } from "../AdminIcons";
+import { isUploadPath } from "@/lib/product-image";
 
 interface AdminProductSummaryProps {
   title: string;
@@ -96,6 +97,7 @@ export function AdminProductSummary({
             src={primaryImage}
             alt={title || "Product preview"}
             fill
+            unoptimized={isUploadPath(primaryImage)}
             sizes="(max-width: 768px) 100vw, 320px"
             className="object-cover"
           />

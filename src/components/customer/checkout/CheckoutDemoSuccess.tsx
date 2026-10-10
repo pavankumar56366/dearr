@@ -6,6 +6,7 @@ import Image from "next/image";
 import type { CartItem } from "@/context/CartContext";
 import type { DeliveryAddressFormValues } from "@/lib/checkout-validation";
 import { CheckIcon, PrinterIcon, ShieldCheckIcon, TruckIcon } from "@/components/customer/Icons";
+import { normalizeImageUrl, isUploadPath } from "@/lib/product-image";
 
 interface CheckoutDemoSuccessProps {
   orderNumber: string;
@@ -123,7 +124,7 @@ export default function CheckoutDemoSuccess({
             <div key={item.id} className="p-3.5 flex items-center justify-between gap-3 text-xs">
               <div className="flex items-center gap-3">
                 <div className="relative w-12 h-12 rounded-lg overflow-hidden bg-neutral-100 border border-neutral-200 shrink-0">
-                  <Image src={item.image} alt={item.name} fill className="object-cover" sizes="48px" />
+                  <Image src={normalizeImageUrl(item.image)} alt={item.name} fill unoptimized={isUploadPath(item.image)} className="object-cover" sizes="48px" />
                 </div>
                 <div className="flex flex-col">
                   <span className="font-bold text-neutral-900">{item.name}</span>

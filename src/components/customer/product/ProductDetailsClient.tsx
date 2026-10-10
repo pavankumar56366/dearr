@@ -41,6 +41,7 @@ import ProductSpecifications from "./ProductSpecifications";
 import ProductAccordion from "./ProductAccordion";
 import ProductNotFound from "./ProductNotFound";
 import { useCart } from "@/context/CartContext";
+import { getProductGalleryImages, getProductPrimaryImage } from "@/lib/product-image";
 
 interface ProductDetailsClientProps {
   product?: any | null;
@@ -213,14 +214,8 @@ export default function ProductDetailsClient({
       : product.categorySlug || "";
 
   // Normalize images
-  const rawImages = (product.images || [])
-    .map((img: any) => (typeof img === "string" ? img : img?.url || img?.storagePath))
-    .filter(Boolean);
-  const mainImage =
-    rawImages[0] ||
-    (typeof product.image === "string" ? product.image : null) ||
-    "/product-samples/1.jpeg";
-  const galleryImages = rawImages.length > 0 ? rawImages : [mainImage];
+  const galleryImages = getProductGalleryImages(product);
+  const mainImage = galleryImages[0] || getProductPrimaryImage(product);
 
   // Selected variant adjustments
   const currentVariant = product.variants?.find((v: any) => v.id === selectedVariantId);

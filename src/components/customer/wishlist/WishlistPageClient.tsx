@@ -7,6 +7,7 @@ import type { SampleProduct } from "@/data/sample-products";
 import { ChevronRightIcon } from "@/components/customer/Icons";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { getProductPrimaryImage } from "@/lib/product-image";
 
 import WishlistItemCard from "./WishlistItemCard";
 import WishlistEmptyState from "./WishlistEmptyState";
@@ -64,7 +65,7 @@ export default function WishlistPageClient() {
               item.product.compareAtPrice !== null && item.product.compareAtPrice !== undefined
                 ? Number(item.product.compareAtPrice)
                 : null,
-            image: item.product.image || "/product-samples/1.jpeg",
+            image: getProductPrimaryImage(item.product),
             category: item.product.category || "3D Printing",
             categorySlug: item.product.categorySlug || "3d-printing",
             isFeatured: Boolean(item.product.isFeatured),

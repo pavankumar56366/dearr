@@ -6,6 +6,7 @@ import Link from "next/link";
 import type { CartItem } from "@/context/CartContext";
 import type { DeliveryAddressFormValues } from "@/lib/checkout-validation";
 import { SecureLockIcon, ShieldCheckIcon, TruckIcon } from "@/components/customer/Icons";
+import { normalizeImageUrl, isUploadPath } from "@/lib/product-image";
 
 interface CheckoutSummaryProps {
   items: CartItem[];
@@ -76,9 +77,10 @@ export default function CheckoutSummary({
           <div key={item.id} className="pt-3 first:pt-0 flex items-center gap-3">
             <div className="relative w-14 h-14 rounded-xl overflow-hidden bg-neutral-100 border border-neutral-200 shrink-0">
               <Image
-                src={item.image}
+                src={normalizeImageUrl(item.image)}
                 alt={item.name}
                 fill
+                unoptimized={isUploadPath(item.image)}
                 className="object-cover"
                 sizes="56px"
               />

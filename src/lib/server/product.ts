@@ -44,6 +44,7 @@ export interface Product {
   stockQuantity: number;
   isFeatured: boolean;
   isActive: boolean;
+  image?: string;
   images: ProductImage[];
   variants: ProductVariant[];
   createdAt: Date;
@@ -158,26 +159,38 @@ export function validateSlug(slug: string): void {
 /**
  * Normalizes a storage path into a public URL.
  */
-function toPublicUrl(storagePath: string): string {
+export function toPublicUrl(storagePath: string | null | undefined): string {
   if (!storagePath) return "";
-  if (storagePath.startsWith("http://") || storagePath.startsWith("https://")) {
-    return storagePath;
+  const trimmed = storagePath.trim();
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("data:")
+  ) {
+    return trimmed;
   }
-  return storagePath.startsWith("/") ? storagePath : `/${storagePath}`;
+  return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
 /**
- * Maps raw database rows to a sanitized ProductImage object.
+ * Maps raw database rows or API objects to a sanitized ProductImage object.
  */
-function toProductImage(row: any): ProductImage {
+export function toProductImage(row: any): ProductImage {
+  const rawPath = row.storage_path || row.storagePath || row.url || "";
+  const pubUrl = toPublicUrl(row.url || rawPath);
   return {
-    id: row.id,
-    productId: row.product_id,
-    storagePath: row.storage_path,
-    url: toPublicUrl(row.storage_path),
-    altText: row.alt_text ?? null,
-    sortOrder: Number(row.sort_order ?? 0),
-    createdAt: new Date(row.created_at),
+    id: row.id || `img-${row.product_id || row.productId || crypto.randomUUID()}`,
+    productId: row.product_id || row.productId || "",
+    storagePath: rawPath || pubUrl,
+    url: pubUrl,
+    altText: row.alt_text ?? row.altText ?? null,
+    sortOrder: Number(row.sort_order ?? row.sortOrder ?? 0),
+    createdAt: row.created_at
+      ? new Date(row.created_at)
+      : row.createdAt
+      ? new Date(row.createdAt)
+      : new Date(),
   };
 }
 
@@ -207,6 +220,13 @@ function toProduct(
   images: ProductImage[] = [],
   variants: ProductVariant[] = []
 ): Product {
+  const primaryImageUrl =
+    images.length > 0 && images[0].url
+      ? images[0].url
+      : row.primary_image
+      ? toPublicUrl(row.primary_image)
+      : "/product-samples/1.jpeg";
+
   return {
     id: row.id,
     categoryId: row.category_id ?? null,
@@ -215,10 +235,14 @@ function toProduct(
     slug: row.slug,
     description: row.description,
     price: Number(row.price),
-    compareAtPrice: row.compare_at_price !== null && row.compare_at_price !== undefined ? Number(row.compare_at_price) : null,
+    compareAtPrice:
+      row.compare_at_price !== null && row.compare_at_price !== undefined
+        ? Number(row.compare_at_price)
+        : null,
     stockQuantity: Number(row.stock_quantity ?? 0),
     isFeatured: Boolean(row.is_featured),
     isActive: Boolean(row.is_active),
+    image: primaryImageUrl,
     images,
     variants,
     createdAt: new Date(row.created_at),

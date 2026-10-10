@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import Image from "next/image";
+import { getProductPrimaryImage, isUploadPath } from "@/lib/product-image";
 import {
   listAllOrders,
   listProducts,
@@ -593,9 +594,7 @@ export default async function AdminDashboardPage() {
                   </thead>
                   <tbody className="divide-y divide-neutral-100 text-neutral-700">
                     {recentProducts.map((p) => {
-                      const rawFirstImage = p.images && p.images.length > 0 ? p.images[0] : null;
-                      const rawUrl = typeof rawFirstImage === "string" ? rawFirstImage : rawFirstImage?.url;
-                      const displayImg = rawUrl || "/product-samples/1.jpeg";
+                      const displayImg = getProductPrimaryImage(p);
 
                       return (
                         <tr key={p.id} className="hover:bg-neutral-50/70 transition-colors">
@@ -606,6 +605,7 @@ export default async function AdminDashboardPage() {
                                   src={displayImg}
                                   alt={p.name}
                                   fill
+                                  unoptimized={isUploadPath(displayImg)}
                                   sizes="36px"
                                   className="object-cover"
                                 />

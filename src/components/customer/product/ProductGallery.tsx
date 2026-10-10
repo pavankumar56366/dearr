@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import { normalizeImageUrl, DEFAULT_PRODUCT_FALLBACK_IMAGE, isUploadPath } from "@/lib/product-image";
 
 interface ProductGalleryProps {
   productName: string;
@@ -31,10 +32,13 @@ export default function ProductGallery({
 }: ProductGalleryProps) {
   // Normalize images array to string URLs whether passed as strings or image objects
   const rawList = images && images.length > 0 ? images : [mainImage];
-  const stringImages = rawList
-    .map((img) => (typeof img === "string" ? img : (img as any)?.url || (img as any)?.storagePath || ""))
+  const normalizedList = rawList
+    .map((img) => normalizeImageUrl(img, ""))
     .filter(Boolean);
-  const allImages = stringImages.length > 0 ? stringImages : [typeof mainImage === "string" && mainImage ? mainImage : "/product-samples/1.jpeg"];
+  const allImages =
+    normalizedList.length > 0
+      ? normalizedList
+      : [normalizeImageUrl(mainImage, DEFAULT_PRODUCT_FALLBACK_IMAGE)];
 
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -61,6 +65,7 @@ export default function ProductGallery({
           src={currentImage}
           alt={currentAltText}
           fill
+          unoptimized={isUploadPath(currentImage)}
           priority
           sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 600px"
           className={`object-cover transition-opacity duration-300 ${
@@ -174,6 +179,7 @@ export default function ProductGallery({
                   src={img}
                   alt={`${productName} thumbnail ${idx + 1}`}
                   fill
+                  unoptimized={isUploadPath(img)}
                   sizes="80px"
                   className="object-cover"
                 />

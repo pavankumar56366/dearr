@@ -12,6 +12,7 @@ import {
   PlusIcon,
   CheckIcon,
 } from "../AdminIcons";
+import { shouldBypassOptimization } from "@/lib/product-image";
 
 export interface ProductImageItem {
   id: string;
@@ -338,6 +339,7 @@ export function AdminProductImageUpload({
                       fill
                       sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 20vw"
                       className="object-cover"
+                      unoptimized={shouldBypassOptimization(img.url)}
                     />
 
                     {/* Primary Badge */}

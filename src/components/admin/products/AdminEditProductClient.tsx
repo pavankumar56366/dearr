@@ -5,21 +5,15 @@ import { getAdminProductBySlug } from "@/lib/admin-catalog";
 import { type SampleProduct } from "@/data/sample-products";
 import { AdminProductForm } from "./AdminProductForm";
 import { AdminProductNotFound } from "./AdminProductNotFound";
+import { getProductPrimaryImage, getProductGalleryImages } from "@/lib/product-image";
 
 interface AdminEditProductClientProps {
   slug: string;
 }
 
 function mapApiProductToSampleProduct(p: any): SampleProduct {
-  const primaryImg =
-    (Array.isArray(p.images) && p.images[0]?.url) ||
-    p.primaryImage ||
-    p.image ||
-    "/product-samples/1.jpeg";
-  const allImages =
-    Array.isArray(p.images) && p.images.length > 0
-      ? p.images.map((img: any) => (typeof img === "string" ? img : img.url || img.storagePath))
-      : [primaryImg];
+  const primaryImg = getProductPrimaryImage(p);
+  const allImages = getProductGalleryImages(p);
 
   return {
     id: p.id,

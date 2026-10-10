@@ -4,6 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import type { CartItem } from "@/context/CartContext";
 import { MinusIcon, PlusIcon, CloseIcon } from "@/components/customer/Icons";
+import { normalizeImageUrl, isUploadPath } from "@/lib/product-image";
 
 interface CartItemRowProps {
   item: CartItem;
@@ -50,9 +51,10 @@ export default function CartItemRow({
           className="relative w-20 h-20 sm:w-24 sm:h-24 shrink-0 rounded-xl overflow-hidden bg-[#f4f7f2] border border-neutral-200/80 focus:outline-none focus:ring-2 focus:ring-primary"
         >
           <Image
-            src={item.image}
+            src={normalizeImageUrl(item.image)}
             alt={`${item.name} — Precision 3D Printed`}
             fill
+            unoptimized={isUploadPath(item.image)}
             sizes="96px"
             className={`object-cover ${isOutOfStock ? "opacity-75 grayscale-30" : ""}`}
           />
