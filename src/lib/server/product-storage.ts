@@ -215,11 +215,20 @@ export async function saveProductImage(
 
   // Sync with persistent shared storage outside ephemeral deployment folder
   try {
-    const sharedDir = path.resolve(process.cwd(), "..", "..", "..", "shared_uploads", "products");
-    await fs.promises.mkdir(sharedDir, { recursive: true });
-    await fs.promises.writeFile(path.join(sharedDir, filename), buffer);
+    const persistentDirs = [
+      "/home/u209580425/domains/dearr.in/uploads/products",
+      path.resolve(process.cwd(), "..", "..", "..", "shared_uploads", "products"),
+    ];
+    for (const dir of persistentDirs) {
+      try {
+        await fs.promises.mkdir(dir, { recursive: true });
+        await fs.promises.writeFile(path.join(dir, filename), buffer);
+      } catch {
+        // Non-blocking in local development or if parent path not accessible
+      }
+    }
   } catch {
-    // Non-blocking in local development or if parent path not accessible
+    // Non-blocking
   }
 
   return {
