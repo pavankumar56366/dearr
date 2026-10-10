@@ -16,7 +16,8 @@ import OrderShippingSnapshot from "./OrderShippingSnapshot";
 import OrderItemSummary from "./OrderItemSummary";
 import OrderConfirmationActions from "./OrderConfirmationActions";
 import OrderDirectAccessFallback from "./OrderDirectAccessFallback";
-import { CheckIcon, ChevronRightIcon, ShieldCheckIcon } from "@/components/customer/Icons";
+import PaymentSuccessAnimation from "@/components/customer/checkout/PaymentSuccessAnimation";
+import { CheckIcon, ChevronRightIcon, ShieldCheckIcon, AlertCircleIcon, PackageIcon } from "@/components/customer/Icons";
 
 export default function OrderConfirmationClient() {
   const searchParams = useSearchParams();
@@ -173,52 +174,113 @@ export default function OrderConfirmationClient() {
         </nav>
 
         {/* Confirmation Hero Card */}
-        <header
-          role="status"
-          aria-live="polite"
-          className="rounded-3xl p-6 sm:p-10 mb-8 text-center flex flex-col items-center gap-4 animate-in fade-in duration-300"
-          style={{
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-neutral-100)",
-            boxShadow: "var(--shadow-card)",
-          }}
-        >
-          {/* Animated Success Badge */}
-          <div
-            className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center text-white shadow-lg scale-in-95"
-            style={{ background: "var(--color-success)" }}
-            aria-hidden="true"
-          >
-            <CheckIcon size={36} className="stroke-[3]" />
-          </div>
+        {(() => {
+          const isPaid = order.paymentStatus === "paid" && order.status !== "cancelled";
+          const isFailed = order.paymentStatus === "failed";
+          const isCancelled = order.status === "cancelled";
 
-          <div className="flex flex-col gap-1 max-w-xl">
-            <span
-              className="text-[11px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full self-center"
-              style={{ background: "rgba(42, 124, 19, 0.1)", color: "var(--color-success)" }}
+          return (
+            <header
+              role="status"
+              aria-live="polite"
+              className="rounded-3xl p-6 sm:p-10 mb-8 text-center flex flex-col items-center gap-4 animate-in fade-in duration-300"
+              style={{
+                background: "var(--color-surface)",
+                border: "1px solid var(--color-neutral-100)",
+                boxShadow: "var(--shadow-card)",
+              }}
             >
-              Order Successfully Received
-            </span>
+              {/* Modular Payment Success Animation — Only on confirmed payment success */}
+              {isPaid ? (
+                <div className="my-1">
+                  <PaymentSuccessAnimation size={76} />
+                </div>
+              ) : isFailed ? (
+                <div className="my-1 w-16 h-16 rounded-full bg-red-100 flex items-center justify-center text-red-600 shadow-xs">
+                  <AlertCircleIcon size={34} />
+                </div>
+              ) : isCancelled ? (
+                <div className="my-1 w-16 h-16 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-500 shadow-xs">
+                  <AlertCircleIcon size={34} />
+                </div>
+              ) : (
+                <div className="my-1 w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center text-amber-700 shadow-xs">
+                  <PackageIcon size={30} />
+                </div>
+              )}
 
-            <h1
-              className="text-2xl sm:text-4xl font-extrabold tracking-tight mt-1"
-              style={{ color: "var(--color-neutral-900)" }}
-            >
-              Thank You for Your Order!
-            </h1>
+              <div className="flex flex-col gap-1 max-w-xl">
+                <span
+                  className="text-[11px] font-extrabold uppercase tracking-widest px-3 py-1 rounded-full self-center"
+                  style={
+                    isPaid
+                      ? { background: "rgba(42, 124, 19, 0.1)", color: "var(--color-success)" }
+                      : isFailed
+                      ? { background: "#FEE2E2", color: "#DC2626" }
+                      : isCancelled
+                      ? { background: "#F3F4F6", color: "#6B7280" }
+                      : { background: "#FEF3C7", color: "#B45309" }
+                  }
+                >
+                  {isPaid
+                    ? "Payment Verified & Order Confirmed"
+                    : isFailed
+                    ? "Payment Incomplete / Failed"
+                    : isCancelled
+                    ? "Order Cancelled"
+                    : "Order Received — Payment Pending"}
+                </span>
 
-            <p className="text-xs sm:text-sm text-neutral-600 mt-1">
-              Order Reference: <strong className="text-neutral-900 font-mono text-sm sm:text-base">{order.orderNumber}</strong>
-            </p>
-          </div>
+                <h1
+                  className="text-2xl sm:text-4xl font-extrabold tracking-tight mt-1"
+                  style={{ color: "var(--color-neutral-900)" }}
+                >
+                  {isPaid
+                    ? "Thank You for Your Order!"
+                    : isFailed
+                    ? "Payment Could Not Be Completed"
+                    : isCancelled
+                    ? "Order Cancelled"
+                    : "Thank You! Order Registered"}
+                </h1>
 
-          <div className="mt-2 p-3.5 max-w-2xl rounded-2xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5 text-left leading-relaxed">
-            <ShieldCheckIcon size={18} className="text-emerald-700 shrink-0 mt-0.5" />
-            <div>
-              <strong>Order Confirmed & Secured:</strong> Your 3D print order snapshot and production timeline have been registered in our workshop queue with verified payment status.
-            </div>
-          </div>
-        </header>
+                <p className="text-xs sm:text-sm text-neutral-600 mt-1">
+                  Order Reference: <strong className="text-neutral-900 font-mono text-sm sm:text-base">{order.orderNumber}</strong>
+                </p>
+              </div>
+
+              {isPaid ? (
+                <div className="mt-2 p-3.5 max-w-2xl rounded-2xl bg-emerald-50/90 border border-emerald-200 text-xs text-emerald-950 flex items-start gap-2.5 text-left leading-relaxed">
+                  <ShieldCheckIcon size={18} className="text-emerald-700 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Order Confirmed & Secured:</strong> Your 3D print order snapshot and production timeline have been registered in our workshop queue with verified payment status.
+                  </div>
+                </div>
+              ) : isFailed ? (
+                <div className="mt-2 p-3.5 max-w-2xl rounded-2xl bg-red-50/90 border border-red-200 text-xs text-red-950 flex items-start gap-2.5 text-left leading-relaxed">
+                  <AlertCircleIcon size={18} className="text-red-700 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Payment Incomplete:</strong> The payment for this order was not completed or failed verification. Please retry payment or check your payment method to begin production.
+                  </div>
+                </div>
+              ) : isCancelled ? (
+                <div className="mt-2 p-3.5 max-w-2xl rounded-2xl bg-neutral-100 border border-neutral-200 text-xs text-neutral-800 flex items-start gap-2.5 text-left leading-relaxed">
+                  <AlertCircleIcon size={18} className="text-neutral-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Order Inactive:</strong> This order has been cancelled and is no longer being processed by the workshop.
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-2 p-3.5 max-w-2xl rounded-2xl bg-amber-50/90 border border-amber-200 text-xs text-amber-950 flex items-start gap-2.5 text-left leading-relaxed">
+                  <PackageIcon size={18} className="text-amber-700 shrink-0 mt-0.5" />
+                  <div>
+                    <strong>Payment Pending:</strong> Your order details are saved. Once payment is settled or confirmed upon delivery (COD), your items will enter production.
+                  </div>
+                </div>
+              )}
+            </header>
+          );
+        })()}
 
         {/* 2-Column Responsive Layout */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-8">

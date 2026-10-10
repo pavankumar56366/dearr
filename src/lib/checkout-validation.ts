@@ -77,18 +77,3 @@ export function validateDeliveryAddress(data: unknown): {
     errors,
   };
 }
-
-/**
- * Sample verified delivery address for testing/demo convenience
- */
-export const DEMO_DELIVERY_ADDRESS: DeliveryAddressFormValues = {
-  fullName: "Henry Designer",
-  phone: "9876543210",
-  email: "henry@example.com",
-  addressLine1: "Plot 42, 3D Innovation Park, 4th Cross",
-  addressLine2: "Indiranagar Stage 2",
-  city: "Bengaluru",
-  state: "Karnataka",
-  postalCode: "560038",
-  country: "India",
-};

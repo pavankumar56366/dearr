@@ -287,7 +287,7 @@ async function runCustomerE2E() {
     console.log("\n--- Section 3: Real Catalog Storefront Flow ---");
 
     // 3.1 Fetch Categories
-    const resCats = await categoriesHandler();
+    const resCats = await categoriesHandler(new Request("http://localhost:3000/api/categories"));
     const dataCats = await resCats.json();
     assert(
       "3.1 Categories endpoint returns active MySQL categories",

@@ -535,6 +535,30 @@ export function EditIcon({ size = 20, className = "", ...props }: IconProps) {
   );
 }
 
+export function TrashIcon({ size = 20, className = "", ...props }: IconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+      {...props}
+    >
+      <path d="M3 6h18" />
+      <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+      <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+      <line x1="10" x2="10" y1="11" y2="17" />
+      <line x1="14" x2="14" y1="11" y2="17" />
+    </svg>
+  );
+}
+
 export function ChevronLeftIcon({ size = 16, className = "", ...props }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className} {...props}>
@@ -567,6 +591,256 @@ export function CalendarIcon({ size = 20, className = "", ...props }: IconProps)
       <path d="M16 2v4" />
       <rect width="18" height="18" x="3" y="4" rx="2" />
       <path d="M3 10h18" />
+    </svg>
+  );
+}
+
+/* ==========================================================================
+   Official Dearr SVGs (Extracted from docs/dearr_icons.zip)
+   ========================================================================== */
+
+export function SparkleIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 6L26.5 17.5L38 22L26.5 26.5L22 38L17.5 26.5L6 22L17.5 17.5z" fill="#FDB10A" />
+        <path d="M37 29L38.7 33.3L43 35L38.7 36.7L37 41L35.3 36.7L31 35L35.3 33.3z" fill="#FF5C93" strokeWidth="1.8" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearSearchIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="21" cy="21" r="12" fill="#E6F7F9" />
+        <path d="M30 30l11 11" strokeWidth="3.5" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearCartIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12.5 14H39.5L34.5 30h-19z" fill="#FDB10A" />
+        <path d="M5 8h6l4.5 22h19" />
+        <circle cx="19" cy="38" r="3" fill="#FF5A5F" />
+        <circle cx="33" cy="38" r="3" fill="#FF5A5F" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearWishlistIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M24 41C10 31 6 24 6 17a9 9 0 0 1 18-2.5A9 9 0 0 1 42 17c0 7-4 14-18 24z" fill="#FF3D6E" />
+        <path d="M13 17a5 5 0 0 1 4-5" stroke="#fff" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearAccountIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="24" cy="15" r="8" fill="#FF5C93" />
+        <path d="M8 42c0-9 7-14 16-14s16 5 16 14z" fill="#06B6C4" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearOrdersIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="9" y="8" width="30" height="34" rx="5" fill="#E6F7F9" />
+        <rect x="17" y="4" width="14" height="8" rx="3" fill="#06B6C4" />
+        <path d="M16 22h16M16 29h16M16 36h9" />
+      </g>
+    </svg>
+  );
+}
+
+export function DearMailIcon({ size = 24, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="6" y="11" width="36" height="26" rx="5" fill="#FFE0EC" />
+        <path d="M7 14l17 12 17-12" />
+        <path d="M24 35c-3-2-4.5-3.3-4.5-5a2.3 2.3 0 0 1 4.5-.9 2.3 2.3 0 0 1 4.5.9c0 1.7-1.5 3-4.5 5z" fill="#FF3D6E" stroke="none" />
+      </g>
+    </svg>
+  );
+}
+
+/* Trust Badges */
+export function PrecisionPrintIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="8" y="5" width="32" height="37" rx="5" fill="#E6F7F9" />
+        <rect x="12" y="11" width="24" height="5.5" rx="2.75" fill="#06B6C4" />
+        <path d="M21 16.5h6L24 23z" fill="#FF5A5F" />
+        <rect x="17" y="32" width="14" height="7" rx="2" fill="#FDB10A" />
+        <path d="M12 39h24" />
+      </g>
+    </svg>
+  );
+}
+
+export function CustomPersonalizationIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M10 38l2-8L30.5 11.5a3.5 3.5 0 0 1 5 0l1 1a3.5 3.5 0 0 1 0 5L18 36z" fill="#FDB10A" />
+        <path d="M10 38l2-8 6 6z" fill="#FFE0B2" />
+        <path d="M27 15l6 6" />
+        <path d="M39 27L40.5 31L44.5 32.5L40.5 34L39 38L37.5 34L33.5 32.5L37.5 31z" fill="#FF5C93" strokeWidth="1.8" />
+        <path d="M33 6L33.84 8.16L36 9L33.84 9.84L33 12L32.16 9.84L30 9L32.16 8.16z" fill="#FF5A5F" strokeWidth="1.5" />
+      </g>
+    </svg>
+  );
+}
+
+export function EcoFriendlyPlaIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M12 37C9 21 20 9 40 9c1 20-9 29-26 28z" fill="#3DBE8B" />
+        <path d="M12 37c5-9 12-16 20-21" />
+        <path d="M12 37l-4 5" />
+      </g>
+    </svg>
+  );
+}
+
+export function SafePackagingIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="8" y="17" width="32" height="25" rx="4" fill="#FDB10A" />
+        <rect x="6" y="9" width="36" height="10" rx="3.5" fill="#FF5A5F" />
+        <path d="M20 9h8v18h-8z" fill="#FFF1C9" />
+      </g>
+    </svg>
+  );
+}
+
+export function AllIndiaDeliveryIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="4" y="11" width="26" height="22" rx="3.5" fill="#FF5A5F" />
+        <path d="M30 18h8l6 7v8H30z" fill="#FDB10A" />
+        <path d="M34 21.5h3.2l3 3.5H34z" fill="#E6F7F9" strokeWidth="2" />
+        <circle cx="14" cy="35" r="4.5" fill="#fff" />
+        <circle cx="36" cy="35" r="4.5" fill="#fff" />
+        <path d="M17 29c-3-2-4.5-3.5-4.5-5.3a2.4 2.4 0 0 1 4.5-1 2.4 2.4 0 0 1 4.5 1c0 1.8-1.5 3.3-4.5 5.3z" fill="#fff" stroke="none" />
+      </g>
+    </svg>
+  );
+}
+
+/* Category SVGs */
+export function SpiritualIdolsIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 36C14 37.5 8 34.5 5 29c6.5-1.5 12.5-.5 16 7z" fill="#FDB10A" />
+        <path d="M27 36c7 1.5 13-1.5 16-7-6.5-1.5-12.5-.5-16 7z" fill="#FDB10A" />
+        <path d="M23 33C14 33 8.5 27.5 8 19c8.5.5 14 5 15 14z" fill="#A66BC8" />
+        <path d="M25 33c9 0 14.5-5.5 15-14-8.5.5-14 5-15 14z" fill="#A66BC8" />
+        <path d="M24 8c5 5 6.5 14 0 26-6.5-12-5-21 0-26z" fill="#FF5C93" />
+        <path d="M12 41h24" />
+      </g>
+    </svg>
+  );
+}
+
+export function ArticulatedToysIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M24 11V8" />
+        <circle cx="24" cy="5.5" r="2.5" fill="#FF5A5F" />
+        <rect x="10" y="11" width="28" height="18" rx="7" fill="#06B6C4" />
+        <rect x="15" y="31" width="18" height="11" rx="4" fill="#FDB10A" />
+        <path d="M15 35l-6 4M33 35l6 4M20.5 25h7" />
+        <circle cx="18" cy="19.5" r="1.8" fill="#2D3142" />
+        <circle cx="30" cy="19.5" r="1.8" fill="#2D3142" />
+      </g>
+    </svg>
+  );
+}
+
+export function CustomKeychainsIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="24" cy="9" r="5.5" />
+        <path d="M24 14.5V18" />
+        <rect x="12" y="18" width="24" height="24" rx="7" fill="#FF5C93" />
+        <path d="M24 37c-5-3.5-8-6.2-8-9.4a4.2 4.2 0 0 1 8-1.8 4.2 4.2 0 0 1 8 1.8c0 3.2-3 5.9-8 9.4z" fill="#fff" stroke="none" />
+      </g>
+    </svg>
+  );
+}
+
+export function DeskOrganizersIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="16" y="7" width="5" height="17" rx="2.5" fill="#FDB10A" />
+        <rect x="23" y="4" width="5" height="20" rx="2.5" fill="#FF5A5F" />
+        <rect x="30" y="9" width="5" height="15" rx="2.5" fill="#06B6C4" />
+        <path d="M11 22h26l-3 19.5a2.5 2.5 0 0 1-2.5 2.2h-15a2.5 2.5 0 0 1-2.5-2.2z" fill="#A66BC8" />
+        <path d="M17 30h14" stroke="#fff" />
+      </g>
+    </svg>
+  );
+}
+
+export function LithophaneLampsIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="10" y="5" width="28" height="29" rx="6" fill="#FFE9A8" />
+        <circle cx="19" cy="14" r="3" fill="#FDB10A" stroke="none" />
+        <path d="M13 29l7-8 5 5 3-3 7 6" />
+        <rect x="14" y="34" width="20" height="8" rx="3.5" fill="#A66BC8" />
+      </g>
+    </svg>
+  );
+}
+
+export function MiniaturesDecorIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M19 9h10v5c6 3 8.5 8.5 8.5 14.5C37.5 35 33 40 24 40s-13.5-5-13.5-11.5C10.5 22.5 13 17 19 14z" fill="#FF5C93" />
+        <path d="M17 28c0-3 1-5 3-7" stroke="#fff" />
+        <path d="M38 3.5L39.5 7.5L43.5 9L39.5 10.5L38 14.5L36.5 10.5L32.5 9L36.5 7.5z" fill="#FDB10A" strokeWidth="1.8" />
+      </g>
+    </svg>
+  );
+}
+
+export function StudyProjectsIcon({ size = 32, className = "", ...props }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className} aria-hidden="true" {...props}>
+      <g stroke="#2D3142" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M13 22v9c0 3.5 5 6 11 6s11-2.5 11-6v-9" fill="#A66BC8" />
+        <path d="M24 8L5 17l19 9 19-9z" fill="#06B6C4" />
+        <path d="M41 19v11" />
+        <circle cx="41" cy="32.5" r="2.3" fill="#FDB10A" />
+      </g>
     </svg>
   );
 }

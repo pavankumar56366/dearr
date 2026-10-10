@@ -15,6 +15,7 @@ import {
 } from "./types";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { useWishlist } from "@/context/WishlistContext";
 
 export interface CustomerHeaderProps {
   initialData?: Partial<NavbarData>;
@@ -27,10 +28,12 @@ export function CustomerHeader({
 }: CustomerHeaderProps) {
   const { totalCount, subtotal } = useCart();
   const { user, isLoggedIn } = useAuth();
+  const { wishlistCount } = useWishlist();
 
   const data: NavbarData = {
     ...DEFAULT_NAVBAR_DATA,
     ...initialData,
+    wishlistCount: initialData?.wishlistCount !== undefined ? initialData.wishlistCount : wishlistCount,
     cartCount: totalCount,
     cartTotal: `₹${subtotal.toLocaleString("en-IN")}`,
     isLoggedIn: initialData?.isLoggedIn !== undefined ? initialData.isLoggedIn : isLoggedIn,

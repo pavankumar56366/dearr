@@ -2,6 +2,16 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import {
+  SpiritualIdolsIcon,
+  ArticulatedToysIcon,
+  CustomKeychainsIcon,
+  DeskOrganizersIcon,
+  LithophaneLampsIcon,
+  MiniaturesDecorIcon,
+  StudyProjectsIcon,
+  SparkleIcon,
+} from "@/components/customer/Icons";
 
 export interface CategoryChipItem {
   id: string;
@@ -15,13 +25,15 @@ interface CategoryChipsProps {
   initialCategories?: CategoryChipItem[];
 }
 
-const CATEGORY_ICON_MAP: Record<string, string> = {
-  "spiritual-idols": "🕉️",
-  "articulated-toys": "🦎",
-  "custom-keychains": "🔑",
-  "desk-organizers": "📂",
-  "lithophane-lamps": "💡",
-  "home-decor": "🏺",
+const CATEGORY_SVG_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
+  "spiritual-idols": SpiritualIdolsIcon,
+  "articulated-toys": ArticulatedToysIcon,
+  "custom-keychains": CustomKeychainsIcon,
+  "desk-organizers": DeskOrganizersIcon,
+  "lithophane-lamps": LithophaneLampsIcon,
+  "miniatures-decor": MiniaturesDecorIcon,
+  "home-decor": MiniaturesDecorIcon,
+  "study-projects": StudyProjectsIcon,
 };
 
 /**
@@ -29,7 +41,7 @@ const CATEGORY_ICON_MAP: Record<string, string> = {
  * Design Ref: docs/4.DESIGN(1) (1).md §6.1 (Category Row)
  *
  * Connected directly to real MySQL categories.
- * Hides scrollbar for a clean look.
+ * Renders official Dearr SVG category icons extracted from docs/dearr_icons.zip.
  */
 export default function CategoryChips({ initialCategories }: CategoryChipsProps) {
   const [categories, setCategories] = useState<CategoryChipItem[]>(initialCategories || []);
@@ -99,41 +111,43 @@ export default function CategoryChips({ initialCategories }: CategoryChipsProps)
             msOverflowStyle: "none",
           }}
         >
-          {categories.map((cat) => (
-            <Link
-              key={cat.id}
-              href={`/shop?cat=${cat.slug}`}
-              className="group flex flex-col items-center gap-2 shrink-0"
-            >
-              {/* Chip Circle */}
-              <div
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg"
-                style={{
-                  background: "var(--color-neutral-100)",
-                  border: "2px solid transparent",
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = "var(--color-primary)";
-                  (e.currentTarget as HTMLDivElement).style.background = "rgba(162, 203, 139, 0.12)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.borderColor = "transparent";
-                  (e.currentTarget as HTMLDivElement).style.background = "var(--color-neutral-100)";
-                }}
+          {categories.map((cat) => {
+            const SvgIcon = CATEGORY_SVG_MAP[cat.slug] || SparkleIcon;
+
+            return (
+              <Link
+                key={cat.id}
+                href={`/shop?cat=${cat.slug}`}
+                className="group flex flex-col items-center gap-2 shrink-0"
               >
-                <span className="text-2xl sm:text-3xl select-none">
-                  {cat.icon || CATEGORY_ICON_MAP[cat.slug] || "✨"}
+                {/* Chip Circle */}
+                <div
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-full flex items-center justify-center p-3 transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg"
+                  style={{
+                    background: "var(--color-neutral-100)",
+                    border: "2px solid transparent",
+                  }}
+                  onMouseEnter={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.borderColor = "var(--color-primary)";
+                    (e.currentTarget as HTMLDivElement).style.background = "rgba(162, 203, 139, 0.12)";
+                  }}
+                  onMouseLeave={(e) => {
+                    (e.currentTarget as HTMLDivElement).style.borderColor = "transparent";
+                    (e.currentTarget as HTMLDivElement).style.background = "var(--color-neutral-100)";
+                  }}
+                >
+                  <SvgIcon size={36} />
+                </div>
+                {/* Label */}
+                <span
+                  className="text-xs sm:text-sm font-medium text-center whitespace-nowrap"
+                  style={{ color: "var(--color-neutral-700)" }}
+                >
+                  {cat.name}
                 </span>
-              </div>
-              {/* Label */}
-              <span
-                className="text-xs sm:text-sm font-medium text-center whitespace-nowrap"
-                style={{ color: "var(--color-neutral-700)" }}
-              >
-                {cat.name}
-              </span>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       </div>
 

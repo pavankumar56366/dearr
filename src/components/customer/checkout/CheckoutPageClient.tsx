@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCart } from "@/context/CartContext";
@@ -12,10 +12,9 @@ import {
   validateDeliveryAddress,
   type DeliveryAddressFormValues,
   type DeliveryAddressErrors,
-  DEMO_DELIVERY_ADDRESS,
 } from "@/lib/checkout-validation";
 import CheckoutStepper, { type CheckoutStep } from "./CheckoutStepper";
-import AddressForm from "./AddressForm";
+import AddressForm, { type SavedAddressItem } from "./AddressForm";
 import PaymentMethod, { type PaymentOption } from "./PaymentMethod";
 import CheckoutSummary from "./CheckoutSummary";
 import CheckoutEmptyState from "./CheckoutEmptyState";
@@ -53,19 +52,119 @@ export default function CheckoutPageClient() {
 
   const [currentStep, setCurrentStep] = useState<CheckoutStep>("delivery");
   const [address, setAddress] = useState<DeliveryAddressFormValues>(INITIAL_ADDRESS);
+  const [savedAddresses, setSavedAddresses] = useState<SavedAddressItem[]>([]);
+  const [selectedAddressId, setSelectedAddressId] = useState<string | "new">("new");
+  const [saveNewAddress, setSaveNewAddress] = useState(true);
   const [errors, setErrors] = useState<DeliveryAddressErrors>({});
   const [isAddressValidated, setIsAddressValidated] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<PaymentOption>("razorpay");
   const [isProcessing, setIsProcessing] = useState(false);
   const [orderNumber, setOrderNumber] = useState<string>("DEAR-10001");
   const [alertNotice, setAlertNotice] = useState<string | null>(null);
+  const [storeSettings, setStoreSettings] = useState<{
+    freeShippingThreshold: number;
+    defaultShippingFee: number;
+  }>({ freeShippingThreshold: 999, defaultShippingFee: 50 });
 
-  // Pre-load Razorpay checkout script
-  React.useEffect(() => {
-    loadRazorpayScript();
+  // Load public store settings for dynamic shipping calculations
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSettings() {
+      try {
+        const res = await fetch("/api/settings");
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.ok && data.settings) {
+            setStoreSettings({
+              freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 999),
+              defaultShippingFee: Number(data.settings.defaultShippingFee ?? 50),
+            });
+          }
+        }
+      } catch {
+        // Fallback to baseline defaults
+      }
+    }
+    loadSettings();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // Field change handler
+  const shippingFee = subtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee;
+  const totalPayable = Math.max(0, subtotal + shippingFee);
+
+  // Pre-load Razorpay checkout script & fetch customer saved addresses
+  useEffect(() => {
+    loadRazorpayScript();
+
+    let isMounted = true;
+    async function fetchSavedAddresses() {
+      try {
+        const res = await fetch("/api/customer/addresses");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && data.ok && Array.isArray(data.addresses) && data.addresses.length > 0) {
+          setSavedAddresses(data.addresses);
+          const defaultAddr = data.addresses.find((a: SavedAddressItem) => a.isDefault) || data.addresses[0];
+          if (defaultAddr) {
+            setSelectedAddressId(defaultAddr.id);
+            setAddress((prev) => ({
+              ...prev,
+              fullName: defaultAddr.fullName,
+              phone: defaultAddr.phone,
+              addressLine1: defaultAddr.addressLine1,
+              addressLine2: defaultAddr.addressLine2 || "",
+              city: defaultAddr.city,
+              state: defaultAddr.state,
+              postalCode: defaultAddr.postalCode,
+              country: defaultAddr.country || "India",
+            }));
+            setIsAddressValidated(true);
+          }
+        }
+      } catch (err) {
+        // Unauthenticated or network error — fall back to manual address entry
+      }
+    }
+    fetchSavedAddresses();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Handle switching between saved addresses or new address form
+  const handleSelectSavedAddress = useCallback(
+    (addrId: string | "new") => {
+      setSelectedAddressId(addrId);
+      if (addrId === "new") {
+        setAddress(INITIAL_ADDRESS);
+        setErrors({});
+        setIsAddressValidated(false);
+      } else {
+        const selected = savedAddresses.find((a) => a.id === addrId);
+        if (selected) {
+          setAddress((prev) => ({
+            ...prev,
+            fullName: selected.fullName,
+            phone: selected.phone,
+            addressLine1: selected.addressLine1,
+            addressLine2: selected.addressLine2 || "",
+            city: selected.city,
+            state: selected.state,
+            postalCode: selected.postalCode,
+            country: selected.country || "India",
+          }));
+          setErrors({});
+          setIsAddressValidated(true);
+        }
+      }
+    },
+    [savedAddresses]
+  );
+
+  // Field change handler for new address form
   const handleAddressChange = useCallback((field: keyof DeliveryAddressFormValues, value: string) => {
     setAddress((prev) => ({ ...prev, [field]: value }));
     // Clear inline error when customer types
@@ -79,42 +178,55 @@ export default function CheckoutPageClient() {
     });
   }, []);
 
-  // Quick-fill verified demo address
-  const handleFillDemo = useCallback(() => {
-    setAddress(DEMO_DELIVERY_ADDRESS);
-    setErrors({});
-    setIsAddressValidated(true);
-    setAlertNotice("Demo address populated successfully!");
-    setTimeout(() => setAlertNotice(null), 3000);
-  }, []);
-
   // Address form submission
-  const handleAddressSubmit = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    const result = validateDeliveryAddress(address);
+  const handleAddressSubmit = useCallback(
+    (e: React.FormEvent) => {
+      e.preventDefault();
 
-    if (!result.success) {
-      setErrors(result.errors);
-      setIsAddressValidated(false);
-      setAlertNotice("Please resolve the highlighted delivery details before continuing.");
-      setTimeout(() => setAlertNotice(null), 4000);
-      return;
-    }
+      if (selectedAddressId !== "new") {
+        // Saved address already selected and verified
+        setIsAddressValidated(true);
+        setCurrentStep("payment");
+        setAlertNotice("Delivery address selected! Proceeding to payment step.");
+        setTimeout(() => setAlertNotice(null), 3000);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
 
-    setErrors({});
-    setIsAddressValidated(true);
-    setCurrentStep("payment");
-    setAlertNotice("Delivery address verified! Proceeding to payment step.");
-    setTimeout(() => setAlertNotice(null), 3000);
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [address]);
+      const result = validateDeliveryAddress(address);
+      if (!result.success) {
+        setErrors(result.errors);
+        setIsAddressValidated(false);
+        setAlertNotice("Please resolve the highlighted delivery details before continuing.");
+        setTimeout(() => setAlertNotice(null), 4000);
+        return;
+      }
 
-  // Proceed to payment / Place Order (Demo mode)
+      setErrors({});
+      setIsAddressValidated(true);
+      setCurrentStep("payment");
+      setAlertNotice("Delivery address verified! Proceeding to payment step.");
+      setTimeout(() => setAlertNotice(null), 3000);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    },
+    [address, selectedAddressId]
+  );
+
+  // Proceed to payment / Place Order
   const handleProceedToPayment = useCallback(() => {
     if (isProcessing) return;
 
     // 1. If currently on delivery step, validate address and move to payment step
     if (currentStep === "delivery") {
+      if (selectedAddressId !== "new") {
+        setIsAddressValidated(true);
+        setCurrentStep("payment");
+        setAlertNotice("Delivery address selected! Proceeding to payment step.");
+        setTimeout(() => setAlertNotice(null), 3000);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
+      }
+
       const result = validateDeliveryAddress(address);
       if (!result.success) {
         setErrors(result.errors);
@@ -132,15 +244,17 @@ export default function CheckoutPageClient() {
       return;
     }
 
-    // 2. Re-validate delivery address
-    const result = validateDeliveryAddress(address);
-    if (!result.success) {
-      setErrors(result.errors);
-      setIsAddressValidated(false);
-      setCurrentStep("delivery");
-      setAlertNotice("Please complete your delivery address first.");
-      setTimeout(() => setAlertNotice(null), 4000);
-      return;
+    // 2. Re-validate delivery address if on payment step
+    if (selectedAddressId === "new") {
+      const result = validateDeliveryAddress(address);
+      if (!result.success) {
+        setErrors(result.errors);
+        setIsAddressValidated(false);
+        setCurrentStep("delivery");
+        setAlertNotice("Please complete your delivery address first.");
+        setTimeout(() => setAlertNotice(null), 4000);
+        return;
+      }
     }
 
     // 3. Prevent checkout if empty or unavailable items
@@ -156,24 +270,30 @@ export default function CheckoutPageClient() {
       return;
     }
 
-    // 4. Server-authoritative Order API call with guest demo fallback
+    // 4. Server-authoritative Order API call
     setIsProcessing(true);
 
     (async () => {
       try {
+        const orderPayload: any =
+          selectedAddressId !== "new"
+            ? { addressId: selectedAddressId }
+            : {
+                shippingFullName: address.fullName,
+                shippingPhone: address.phone,
+                shippingAddressLine1: address.addressLine1,
+                shippingAddressLine2: address.addressLine2 || null,
+                shippingCity: address.city,
+                shippingState: address.state,
+                shippingPostalCode: address.postalCode,
+                shippingCountry: address.country || "India",
+                saveAddress: saveNewAddress,
+              };
+
         const res = await fetch("/api/orders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            shippingFullName: address.fullName,
-            shippingPhone: address.phone,
-            shippingAddressLine1: address.addressLine1,
-            shippingAddressLine2: address.addressLine2 || null,
-            shippingCity: address.city,
-            shippingState: address.state,
-            shippingPostalCode: address.postalCode,
-            shippingCountry: address.country || "India",
-          }),
+          body: JSON.stringify(orderPayload),
         });
 
         const data = await res.json();
@@ -400,9 +520,11 @@ export default function CheckoutPageClient() {
   }, [
     isProcessing,
     currentStep,
+    selectedAddressId,
     address,
+    saveNewAddress,
     items,
-    subtotal,
+    paymentMethod,
     hasUnavailableItems,
     clearCart,
     router,
@@ -555,12 +677,16 @@ export default function CheckoutPageClient() {
           <div className="lg:col-span-7 flex flex-col gap-6">
             {currentStep === "delivery" && (
               <AddressForm
+                savedAddresses={savedAddresses}
+                selectedAddressId={selectedAddressId}
+                onSelectSavedAddress={handleSelectSavedAddress}
                 values={address}
                 errors={errors}
                 onChange={handleAddressChange}
                 onSubmit={handleAddressSubmit}
-                onFillDemo={handleFillDemo}
                 isValidated={isAddressValidated}
+                saveNewAddress={saveNewAddress}
+                onToggleSaveNewAddress={setSaveNewAddress}
               />
             )}
 
@@ -596,6 +722,9 @@ export default function CheckoutPageClient() {
               onProceedToPayment={handleProceedToPayment}
               isAddressValid={isAddressValidated}
               hasUnavailableItems={hasUnavailableItems}
+              shippingFee={shippingFee}
+              freeShippingThreshold={storeSettings.freeShippingThreshold}
+              totalPayable={totalPayable}
               actionLabel={
                 currentStep === "payment"
                   ? "Place Order & Pay via Razorpay"

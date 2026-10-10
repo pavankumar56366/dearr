@@ -14,6 +14,7 @@ export interface Category {
   isActive: boolean;
   productCount?: number;
   activeProductCount?: number;
+  viewCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -111,6 +112,9 @@ function toCategory(row: any): Category {
   }
   if (row.active_product_count !== undefined) {
     cat.activeProductCount = Number(row.active_product_count);
+  }
+  if (row.view_count !== undefined) {
+    cat.viewCount = Number(row.view_count);
   }
 
   return cat;
@@ -369,4 +373,104 @@ export async function updateCategory(
   await query<any>(updateSql, values);
 
   return await findCategoryById(cleanId, true);
+}
+
+/**
+ * Records a customer browsing view for a category with deduplication.
+ * Rate/duplication protection: Ignores views from the same session_hash within 30 minutes.
+ * If category_views table does not exist yet (pending production migration), fails silently.
+ */
+export async function recordCategoryView(
+  categoryId: string,
+  sessionHash?: string
+): Promise<boolean> {
+  if (!categoryId || typeof categoryId !== "string") return false;
+  const cleanId = categoryId.trim();
+
+  try {
+    // 1. Verify category exists and is active
+    const catRows = await query<any[]>(
+      "SELECT id FROM categories WHERE (id = ? OR slug = ?) AND is_active = 1 LIMIT 1",
+      [cleanId, cleanId]
+    );
+    if (!catRows || catRows.length === 0) return false;
+    const resolvedId = catRows[0].id;
+
+    // 2. Check deduplication window (30 minutes) if sessionHash provided
+    if (sessionHash) {
+      const cleanHash = sessionHash.trim().slice(0, 64);
+      const recent = await query<any[]>(
+        `SELECT id FROM category_views
+         WHERE category_id = ? AND session_hash = ? AND viewed_at >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+         LIMIT 1`,
+        [resolvedId, cleanHash]
+      );
+      if (recent && recent.length > 0) {
+        return false; // Deduplicated
+      }
+
+      await query(
+        `INSERT INTO category_views (id, category_id, viewed_at, session_hash) VALUES (?, ?, NOW(), ?)`,
+        [crypto.randomUUID(), resolvedId, cleanHash]
+      );
+    } else {
+      await query(
+        `INSERT INTO category_views (id, category_id, viewed_at, session_hash) VALUES (?, ?, NOW(), NULL)`,
+        [crypto.randomUUID(), resolvedId]
+      );
+    }
+    return true;
+  } catch (err: any) {
+    // Graceful fallback if table does not exist or migration is pending
+    if (err?.code === "ER_NO_SUCH_TABLE" || err?.errno === 1146 || String(err).includes("doesn't exist")) {
+      return false;
+    }
+    console.warn("[recordCategoryView] Non-fatal error recording view:", err?.message || err);
+    return false;
+  }
+}
+
+/**
+ * Retrieves the top popular categories by genuine browsing activity.
+ * Returns at most `limit` active categories.
+ * Falls back deterministically to active categories if metrics table is absent or empty.
+ */
+export async function getPopularCategories(limit = 3, days = 30): Promise<Category[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 10));
+  const safeDays = Math.max(1, Math.min(days, 365));
+
+  try {
+    const sql = `
+      SELECT c.*, COUNT(cv.id) AS view_count
+      FROM categories c
+      INNER JOIN category_views cv ON cv.category_id = c.id
+      WHERE c.is_active = 1
+        AND cv.viewed_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+      GROUP BY c.id
+      ORDER BY view_count DESC, c.name ASC
+      LIMIT ?
+    `;
+    const rows = await query<any[]>(sql, [safeDays, safeLimit]);
+    if (rows && rows.length > 0) {
+      const categories = rows.map(toCategory);
+      if (categories.length >= safeLimit) {
+        return categories.slice(0, safeLimit);
+      }
+      // Fill remaining deterministically with other active categories
+      const existingIds = new Set(categories.map((c) => c.id));
+      const remainingLimit = safeLimit - categories.length;
+      const allActive = await listCategories({ isActive: true });
+      const fill = allActive.filter((c) => !existingIds.has(c.id)).slice(0, remainingLimit);
+      return [...categories, ...fill];
+    }
+  } catch (err: any) {
+    // If category_views table doesn't exist, proceed to deterministic fallback
+    if (err?.code !== "ER_NO_SUCH_TABLE" && err?.errno !== 1146 && !String(err).includes("doesn't exist")) {
+      console.warn("[getPopularCategories] Non-fatal error querying metrics:", err?.message || err);
+    }
+  }
+
+  // Deterministic fallback: active categories ordered alphabetically
+  const fallback = await listCategories({ isActive: true });
+  return fallback.slice(0, safeLimit);
 }

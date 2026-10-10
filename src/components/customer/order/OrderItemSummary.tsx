@@ -106,9 +106,15 @@ export default function OrderItemSummary({ order }: OrderItemSummaryProps) {
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>Domestic Logistics</span>
-          <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-            Free Shipping
-          </span>
+          {order.shippingAmount === 0 ? (
+            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+              Free Shipping
+            </span>
+          ) : (
+            <span className="font-semibold text-neutral-900">
+              ₹{order.shippingAmount.toLocaleString("en-IN")}
+            </span>
+          )}
         </div>
 
         <div className="flex items-center justify-between text-neutral-600">

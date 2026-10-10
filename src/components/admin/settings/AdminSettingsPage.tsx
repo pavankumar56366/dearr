@@ -28,7 +28,6 @@ interface FormErrors {
   supportEmail?: string;
   supportPhone?: string;
   postalCode?: string;
-  minimumOrderValue?: string;
   freeShippingThreshold?: string;
   defaultShippingFee?: string;
   cancellationWindowHours?: string;
@@ -204,9 +203,6 @@ export function AdminSettingsPage() {
     }
 
     // Numeric validations
-    if (formData.minimumOrderValue < 0) {
-      newErrors.minimumOrderValue = "Minimum order value cannot be negative";
-    }
     if (formData.freeShippingThreshold < 0) {
       newErrors.freeShippingThreshold = "Free shipping threshold cannot be negative";
     }
@@ -236,7 +232,6 @@ export function AdminSettingsPage() {
       supportEmail: true,
       supportPhone: true,
       postalCode: true,
-      minimumOrderValue: true,
       freeShippingThreshold: true,
       defaultShippingFee: true,
       cancellationWindowHours: true,
@@ -697,31 +692,7 @@ export function AdminSettingsPage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-            {/* Minimum Order Value */}
-            <div className="space-y-1.5">
-              <label
-                htmlFor="minimumOrderValue"
-                className="block text-xs font-bold text-neutral-800"
-              >
-                Minimum Order Value (₹)
-              </label>
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
-                  ₹
-                </span>
-                <input
-                  id="minimumOrderValue"
-                  type="number"
-                  min={0}
-                  value={formData.minimumOrderValue}
-                  onChange={(e) =>
-                    updateField("minimumOrderValue", Number(e.target.value))
-                  }
-                  className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
-                />
-              </div>
-            </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
 
             {/* Free Shipping Threshold */}
             <div className="space-y-1.5">

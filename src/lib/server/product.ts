@@ -921,3 +921,88 @@ export async function deactivateProduct(id: string): Promise<boolean> {
   );
   return Boolean(res && (res as any).affectedRows > 0);
 }
+
+/**
+ * Queries real sales data from confirmed orders to return top-selling active products.
+ * Falls back deterministically to featured and newest products.
+ */
+export async function findTrendingProducts(limit = 4): Promise<Product[]> {
+  const safeLimit = Math.max(1, Math.min(limit, 24));
+
+  const sql = `
+    SELECT p.*, c.name AS category_name, c.slug AS category_slug, c.description AS category_description,
+           COALESCE(sales.total_sold, 0) AS total_sold
+    FROM products p
+    LEFT JOIN categories c ON p.category_id = c.id
+    LEFT JOIN (
+      SELECT oi.product_id, SUM(oi.quantity) AS total_sold
+      FROM order_items oi
+      INNER JOIN orders o ON oi.order_id = o.id
+      WHERE o.payment_status = 'paid'
+        AND o.status IN ('confirmed', 'processing', 'shipped', 'delivered')
+      GROUP BY oi.product_id
+    ) sales ON sales.product_id = p.id
+    WHERE p.is_active = 1
+    ORDER BY total_sold DESC, p.is_featured DESC, p.created_at DESC
+    LIMIT ?
+  `;
+
+  const rows = await query<any[]>(sql, [safeLimit]);
+  if (!rows || rows.length === 0) return [];
+
+  const productIds = rows.map((r) => r.id);
+  const placeholders = productIds.map(() => "?").join(",");
+
+  const [imageRows, variantRows] = await Promise.all([
+    query<any[]>(
+      `SELECT * FROM product_images WHERE product_id IN (${placeholders}) ORDER BY sort_order ASC, created_at ASC`,
+      productIds
+    ),
+    query<any[]>(
+      `SELECT * FROM product_variants WHERE product_id IN (${placeholders}) ORDER BY created_at ASC`,
+      productIds
+    ),
+  ]);
+
+  const imagesByProduct = new Map<string, ProductImage[]>();
+  (imageRows || []).forEach((img) => {
+    const list = imagesByProduct.get(img.product_id) || [];
+    list.push(toProductImage(img));
+    imagesByProduct.set(img.product_id, list);
+  });
+
+  const variantsByProduct = new Map<string, ProductVariant[]>();
+  (variantRows || []).forEach((v) => {
+    const list = variantsByProduct.get(v.product_id) || [];
+    list.push({
+      id: v.id,
+      productId: v.product_id,
+      name: v.name,
+      sku: v.sku,
+      price: v.price !== null ? Number(v.price) : null,
+      stockQuantity: Number(v.stock_quantity || 0),
+      isActive: Boolean(v.is_active),
+      createdAt: new Date(v.created_at),
+      updatedAt: new Date(v.updated_at),
+    });
+    variantsByProduct.set(v.product_id, list);
+  });
+
+  return rows.map((row) => {
+    const category: ProductCategoryInfo | null = row.category_id
+      ? {
+          id: row.category_id,
+          name: row.category_name,
+          slug: row.category_slug,
+          description: row.category_description ?? null,
+        }
+      : null;
+
+    return toProduct(
+      row,
+      category,
+      imagesByProduct.get(row.id) || [],
+      variantsByProduct.get(row.id) || []
+    );
+  });
+}

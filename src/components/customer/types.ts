@@ -23,9 +23,9 @@ export interface NavbarData {
  * (wishlist count: 4, cart count: 5, cart total: ₹230.00)
  */
 export const DEFAULT_NAVBAR_DATA: NavbarData = {
-  wishlistCount: 4,
-  cartCount: 5,
-  cartTotal: "₹230.00",
+  wishlistCount: 0,
+  cartCount: 0,
+  cartTotal: "₹0.00",
   isLoggedIn: false,
 };
 

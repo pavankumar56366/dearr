@@ -27,7 +27,76 @@ export function SearchOverlay({
 }: SearchOverlayProps) {
   const router = useRouter();
   const [query, setQuery] = useState(initialQuery);
+  const [trendingProducts, setTrendingProducts] = useState(TRENDING_PRODUCTS);
+  const [popularCategories, setPopularCategories] = useState(SEARCH_CATEGORIES.slice(0, 3));
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // Load real trending products from MySQL orders & catalog data
+  useEffect(() => {
+    let isMounted = true;
+    async function loadTrending() {
+      try {
+        const res = await fetch("/api/products?trending=true&limit=4");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && data.ok && Array.isArray(data.products) && data.products.length > 0) {
+          const seen = new Set<string>();
+          const distinct: any[] = [];
+          for (const p of data.products) {
+            if (p && p.id && !seen.has(p.id)) {
+              seen.add(p.id);
+              distinct.push(p);
+            }
+          }
+          const mapped = distinct.slice(0, 4).map((p: any) => ({
+            id: p.id,
+            title: p.name,
+            ctaText: "view creation →",
+            category: p.category?.name || "3D Printing",
+            href: `/product/${p.slug}`,
+            image: p.images?.[0]?.url || "/product-samples/1.jpeg",
+            price: Number(p.price),
+          }));
+          setTrendingProducts(mapped);
+        }
+      } catch {
+        // Fall back to baseline trending products
+      }
+    }
+    loadTrending();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Load popular categories from metrics / catalog (at most 3)
+  useEffect(() => {
+    let isMounted = true;
+    async function loadCategories() {
+      try {
+        const res = await fetch("/api/categories?popular=true&limit=3");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (isMounted && data.ok && Array.isArray(data.categories) && data.categories.length > 0) {
+          const mapped = data.categories.slice(0, 3).map((c: any) => ({
+            id: c.id,
+            name: c.name,
+            slug: c.slug,
+            count: Number(c.productCount ?? c.viewCount ?? 0),
+          }));
+          setPopularCategories(mapped);
+        }
+      } catch {
+        // Fall back to baseline popular categories
+      }
+    }
+    loadCategories();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Sync initial query if passed
   useEffect(() => {
@@ -201,13 +270,13 @@ export function SearchOverlay({
             onSelectQuery={handleSelectQuery}
             onSelectCategory={onClose}
             popularSearches={POPULAR_SEARCHES}
-            categories={SEARCH_CATEGORIES}
+            categories={popularCategories}
             recentSearches={RECENT_SEARCHES}
           />
 
-          {/* Trending Products Grid */}
+          {/* Trending Products Grid (Dynamic & Top Selling) */}
           <TrendingSearchProducts
-            products={TRENDING_PRODUCTS}
+            products={trendingProducts}
             onSelectProduct={onClose}
           />
         </div>

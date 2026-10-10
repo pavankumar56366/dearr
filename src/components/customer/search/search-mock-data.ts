@@ -31,9 +31,6 @@ export const POPULAR_SEARCHES: PopularSearchItem[] = [
   { id: "1", query: "Radha Krishna" },
   { id: "2", query: "Ganesha idol" },
   { id: "3", query: "articulated dragon" },
-  { id: "4", query: "lithophane lamp" },
-  { id: "5", query: "custom keychains" },
-  { id: "6", query: "desk organizers" },
 ];
 
 export const SEARCH_CATEGORIES: CategorySearchItem[] = [

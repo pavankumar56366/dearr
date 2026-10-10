@@ -253,10 +253,16 @@ export function LoginForm({ oauthError }: { oauthError?: string | null }) {
             <SocialIcon name="twitter" size={16} />
             <span className="sr-only">Twitter</span>
           </span>
-          <span className="p-2 rounded-full hover:text-neutral-700 transition-colors cursor-pointer">
+          <a
+            href="https://www.instagram.com/dearr.in_?utm_source=ig_web_button_share_sheet&stkn=ZDNlZDc0MzIxNw=="
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 rounded-full hover:text-pink-600 transition-colors cursor-pointer"
+            aria-label="Follow Dearr on Instagram (opens in new tab)"
+          >
             <SocialIcon name="instagram" size={16} />
             <span className="sr-only">Instagram</span>
-          </span>
+          </a>
         </div>
       </form>
     </div>

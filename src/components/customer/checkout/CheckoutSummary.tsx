@@ -18,6 +18,9 @@ interface CheckoutSummaryProps {
   isAddressValid: boolean;
   hasUnavailableItems: boolean;
   actionLabel?: string;
+  shippingFee?: number;
+  freeShippingThreshold?: number;
+  totalPayable?: number;
 }
 
 export default function CheckoutSummary({
@@ -31,8 +34,13 @@ export default function CheckoutSummary({
   isAddressValid,
   hasUnavailableItems,
   actionLabel,
+  shippingFee,
+  freeShippingThreshold,
+  totalPayable,
 }: CheckoutSummaryProps) {
   const isSubmitDisabled = !isAddressValid || totalCount === 0 || hasUnavailableItems || isProcessing;
+  const effectiveShipping = shippingFee !== undefined ? shippingFee : 0;
+  const effectiveTotal = totalPayable !== undefined ? totalPayable : (subtotal + effectiveShipping);
 
   return (
     <aside
@@ -138,11 +146,23 @@ export default function CheckoutSummary({
         </div>
 
         <div className="flex items-center justify-between text-neutral-600">
-          <span>Standard 3D Print Logistics</span>
-          <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
-            Free Shipping
-          </span>
+          <span>Standard Shipping</span>
+          {effectiveShipping === 0 ? (
+            <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
+              Free Shipping
+            </span>
+          ) : (
+            <span className="text-xs font-bold text-neutral-900 font-mono">
+              ₹{effectiveShipping.toLocaleString("en-IN")}
+            </span>
+          )}
         </div>
+
+        {effectiveShipping > 0 && freeShippingThreshold && subtotal < freeShippingThreshold && (
+          <p className="text-[11px] text-neutral-500 -mt-1">
+            Add ₹{(freeShippingThreshold - subtotal).toLocaleString("en-IN")} more to qualify for Free Shipping
+          </p>
+        )}
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>Taxes</span>
@@ -159,7 +179,7 @@ export default function CheckoutSummary({
             className="text-xl sm:text-2xl font-black tracking-tight"
             style={{ color: "var(--color-neutral-900)" }}
           >
-            ₹{subtotal.toLocaleString("en-IN")}
+            ₹{effectiveTotal.toLocaleString("en-IN")}
           </span>
         </div>
       </div>

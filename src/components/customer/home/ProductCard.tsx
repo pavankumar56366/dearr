@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { HeartIcon, CheckIcon } from "@/components/customer/Icons";
 import { useCart } from "@/context/CartContext";
 import { useAuth } from "@/context/AuthContext";
+import { useWishlist } from "@/context/WishlistContext";
 
 export interface ProductCardInput {
   id: string;
@@ -73,7 +74,8 @@ export default function ProductCard({ product }: ProductCardProps) {
 
   const { isLoggedIn } = useAuth();
   const router = useRouter();
-  const [isWishlisted, setIsWishlisted] = useState(false);
+  const { isWishlisted: checkIsWishlisted, toggleWishlist } = useWishlist();
+  const isWishlisted = checkIsWishlisted(product.id);
   const [isWishlistLoading, setIsWishlistLoading] = useState(false);
 
   const handleWishlistClick = async (e: React.MouseEvent) => {
@@ -88,25 +90,10 @@ export default function ProductCard({ product }: ProductCardProps) {
     if (isWishlistLoading) return;
     setIsWishlistLoading(true);
 
-    const nextState = !isWishlisted;
-    setIsWishlisted(nextState);
-
     try {
-      if (nextState) {
-        await fetch("/api/wishlist/items", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ productId: product.id }),
-        });
-      } else {
-        await fetch(`/api/wishlist/items/${product.id}`, {
-          method: "DELETE",
-          credentials: "same-origin",
-        });
-      }
+      await toggleWishlist(product.id);
     } catch {
-      setIsWishlisted(!nextState);
+      // Handled in context
     } finally {
       setIsWishlistLoading(false);
     }

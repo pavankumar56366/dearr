@@ -131,6 +131,34 @@ export default function Footer() {
                 Join
               </button>
             </form>
+
+            {/* Social Follow */}
+            <div className="pt-4">
+              <a
+                href="https://www.instagram.com/dearr.in_?utm_source=ig_web_button_share_sheet&stkn=ZDNlZDc0MzIxNw=="
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-300 hover:text-white transition-colors group"
+                aria-label="Follow Dearr on Instagram (opens in new tab)"
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="text-neutral-400 group-hover:text-pink-400 transition-colors shrink-0"
+                >
+                  <rect width="20" height="20" x="2" y="2" rx="5" ry="5" />
+                  <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z" />
+                  <line x1="17.5" x2="17.51" y1="6.5" y2="6.5" />
+                </svg>
+                <span>Follow @dearr.in_</span>
+              </a>
+            </div>
           </div>
         </div>
 

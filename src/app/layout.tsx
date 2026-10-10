@@ -3,6 +3,7 @@ import { Inter } from "next/font/google";
 import { StorefrontShell } from "@/components/customer";
 import { AuthProvider } from "@/context/AuthContext";
 import { CartProvider } from "@/context/CartContext";
+import { WishlistProvider } from "@/context/WishlistContext";
 import "./globals.css";
 
 const inter = Inter({
@@ -39,7 +40,9 @@ export default function RootLayout({
       <body className="min-h-screen bg-canvas text-neutral-700 font-sans antialiased flex flex-col">
         <AuthProvider>
           <CartProvider>
-            <StorefrontShell>{children}</StorefrontShell>
+            <WishlistProvider>
+              <StorefrontShell>{children}</StorefrontShell>
+            </WishlistProvider>
           </CartProvider>
         </AuthProvider>
       </body>

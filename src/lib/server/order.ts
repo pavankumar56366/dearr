@@ -473,13 +473,7 @@ export async function createOrderFromCart(
 
     const storeSettings = await getStoreSettings();
 
-    if (orderSubtotal < storeSettings.minimumOrderValue) {
-      throw new OrderValidationError(
-        `Minimum order value is ₹${storeSettings.minimumOrderValue}. Current subtotal is ₹${orderSubtotal}.`,
-        400
-      );
-    }
-
+    // Feature #11: No minimum purchase/order value requirement
     const shippingAmount =
       orderSubtotal >= storeSettings.freeShippingThreshold
         ? 0

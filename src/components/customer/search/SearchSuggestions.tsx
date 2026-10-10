@@ -25,16 +25,20 @@ export function SearchSuggestions({
   categories = SEARCH_CATEGORIES,
   recentSearches = RECENT_SEARCHES,
 }: SearchSuggestionsProps) {
+  const displayedRecent = (recentSearches || []).slice(0, 3);
+  const displayedPopular = (popularSearches || []).slice(0, 3);
+  const displayedCategories = (categories || []).slice(0, 3);
+
   return (
     <div className="w-full space-y-6">
-      {/* Recent Searches Tags / Chips */}
-      {recentSearches.length > 0 && (
+      {/* Recent Searches Tags / Chips (Limited to 3) */}
+      {displayedRecent.length > 0 && (
         <div>
           <div className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">
             Recent Searches
           </div>
           <div className="flex flex-wrap gap-2">
-            {recentSearches.map((term, index) => (
+            {displayedRecent.map((term, index) => (
               <button
                 key={index}
                 type="button"
@@ -50,13 +54,13 @@ export function SearchSuggestions({
 
       {/* Two Column Grid on Desktop, Stack on Mobile (Matching search-desktop.png) */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 lg:gap-12">
-        {/* Popular Searches Column */}
+        {/* Popular Searches Column (Limited to 3) */}
         <div className="space-y-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-2">
             Popular Searches
           </h3>
           <ul className="divide-y divide-neutral-100" role="list">
-            {popularSearches.map((item) => (
+            {displayedPopular.map((item) => (
               <li key={item.id}>
                 <button
                   type="button"
@@ -78,29 +82,33 @@ export function SearchSuggestions({
           </ul>
         </div>
 
-        {/* Browse Categories Column */}
+        {/* Browse Categories Column (Limited to at most 3 popular categories) */}
         <div className="space-y-1">
           <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-2">
             Browse Categories
           </h3>
-          <ul className="divide-y divide-neutral-100" role="list">
-            {categories.map((cat) => (
-              <li key={cat.id}>
-                <Link
-                  href={`/shop?cat=${cat.slug}`}
-                  onClick={() => onSelectCategory && onSelectCategory(cat)}
-                  className="w-full py-3 flex items-center justify-between text-left group hover:text-primary transition-colors focus-visible:outline-2 focus-visible:outline-primary rounded-sm"
-                >
-                  <span className="text-sm font-medium text-neutral-900 group-hover:text-primary transition-colors">
-                    {cat.name}
-                  </span>
-                  <span className="text-xs font-semibold text-neutral-400 group-hover:text-primary transition-colors tabular-nums">
-                    {cat.count}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
+          {displayedCategories.length > 0 ? (
+            <ul className="divide-y divide-neutral-100" role="list">
+              {displayedCategories.map((cat) => (
+                <li key={cat.id}>
+                  <Link
+                    href={`/shop?cat=${cat.slug}`}
+                    onClick={() => onSelectCategory && onSelectCategory(cat)}
+                    className="w-full py-3 flex items-center justify-between text-left group hover:text-primary transition-colors focus-visible:outline-2 focus-visible:outline-primary rounded-sm"
+                  >
+                    <span className="text-sm font-medium text-neutral-900 group-hover:text-primary transition-colors">
+                      {cat.name}
+                    </span>
+                    <span className="text-xs font-semibold text-neutral-400 group-hover:text-primary transition-colors tabular-nums">
+                      {cat.count}
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-xs text-neutral-400 py-3">No categories found</p>
+          )}
         </div>
       </div>
     </div>

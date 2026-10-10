@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import { ShopPageClient } from "@/components/customer/shop";
-import { listProducts, listCategories, type Product, type Category } from "@/lib/server";
+import { listProducts, listCategories, recordCategoryView, type Product, type Category } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +58,7 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
     };
     if (cat && cat !== "all") {
       filters.categorySlug = cat;
+      recordCategoryView(cat).catch(() => {});
     }
     if (q) {
       filters.search = q;

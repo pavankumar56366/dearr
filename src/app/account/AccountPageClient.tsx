@@ -9,6 +9,7 @@ import {
   AccountOverview,
   ProfileCard,
   OrderHistory,
+  AccountAddresses,
 } from "@/components/customer/account";
 import type { DemoProfile } from "@/data/demo-account";
 import type { DemoOrder } from "@/lib/order-model";
@@ -177,6 +178,8 @@ export default function AccountPageClient() {
           />
 
           <ProfileCard profile={customer} />
+
+          <AccountAddresses />
 
           <OrderHistory orders={orders} compact />
         </div>

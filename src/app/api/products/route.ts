@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listProducts, ProductListFilters } from "@/lib/server";
+import { listProducts, findTrendingProducts, ProductListFilters } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -9,6 +9,7 @@ export const runtime = "nodejs";
  * Public catalog endpoint returning active products.
  *
  * Supported Query Parameters:
+ * - trending: "true" | "1" (returns top-selling active products)
  * - category: Category slug or ID
  * - featured: "true" | "1"
  * - search: Keyword to search in product name or description
@@ -19,6 +20,13 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
+
+    const trendingParam = searchParams.get("trending");
+    if (trendingParam === "true" || trendingParam === "1") {
+      const limit = Math.min(Math.max(parseInt(searchParams.get("limit") || "4", 10), 1), 12);
+      const trending = await findTrendingProducts(limit);
+      return NextResponse.json({ ok: true, products: trending });
+    }
 
     const categoryParam = (searchParams.get("cat") || searchParams.get("category"))?.trim();
     const featuredParam = searchParams.get("featured");

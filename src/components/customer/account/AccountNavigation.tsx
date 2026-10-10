@@ -41,9 +41,9 @@ const NAV_ITEMS: NavItem[] = [
   {
     id: "addresses",
     label: "Addresses",
-    href: "/account",
+    href: "/account/addresses",
     icon: <MapPinIcon size={18} />,
-    matchPaths: [],
+    matchPaths: ["/account/addresses"],
   },
 ];
 

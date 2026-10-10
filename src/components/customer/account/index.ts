@@ -7,3 +7,4 @@ export { default as OrderHistoryCard } from "./OrderHistoryCard";
 export { default as AccountEmptyOrders } from "./AccountEmptyOrders";
 export { default as OrderDetail } from "./OrderDetail";
 export { default as OrderNotFound } from "./OrderNotFound";
+export { default as AccountAddresses } from "./AccountAddresses";
