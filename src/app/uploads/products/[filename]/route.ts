@@ -27,12 +27,13 @@ function findImageFile(filename: string): string | null {
 
   // Candidate locations across Hostinger standalone filesystem
   const candidateDirs: string[] = [
-    // Shared persistent storage outside ephemeral deployment folder
     path.resolve(process.cwd(), "..", "..", "..", "shared_uploads", "products"),
     path.resolve(process.cwd(), "..", "..", "..", "uploads", "products"),
     path.resolve(process.cwd(), "..", "..", "..", "public_html", "uploads", "products"),
-    path.resolve(process.cwd(), "..", "..", "..", "public_html"),
     path.resolve(process.cwd(), "..", "..", "source", "repository", "public", "uploads", "products"),
+    "/home/u209580425/domains/dearr.in/shared_uploads/products",
+    "/home/u209580425/domains/dearr.in/uploads/products",
+    "/home/u209580425/domains/dearr.in/public_html/uploads/products",
   ];
 
   for (const dir of candidateDirs) {
@@ -46,20 +47,31 @@ function findImageFile(filename: string): string | null {
     }
   }
 
-  // Search prior deployment version folders under ../../versions
-  try {
-    const versionsDir = path.resolve(process.cwd(), "..", "..");
-    if (fs.existsSync(versionsDir)) {
-      const entries = fs.readdirSync(versionsDir);
-      for (const entry of entries) {
-        const candidate = path.join(versionsDir, entry, "nodejs", "public", "uploads", "products", filename);
-        if (fs.existsSync(candidate)) {
-          return candidate;
+  // Search all deployment version folders under hbuilds/versions/<version_uuid>/nodejs/public/uploads/products/
+  const possibleVersionsDirs = [
+    path.resolve(process.cwd(), "..", "..", "versions"),
+    path.resolve(process.cwd(), "..", "versions"),
+    "/home/u209580425/domains/dearr.in/hbuilds/versions",
+  ];
+
+  for (const vDir of possibleVersionsDirs) {
+    try {
+      if (fs.existsSync(vDir)) {
+        const entries = fs.readdirSync(vDir);
+        for (const entry of entries) {
+          const candidate1 = path.join(vDir, entry, "nodejs", "public", "uploads", "products", filename);
+          if (fs.existsSync(candidate1)) {
+            return candidate1;
+          }
+          const candidate2 = path.join(vDir, entry, "public", "uploads", "products", filename);
+          if (fs.existsSync(candidate2)) {
+            return candidate2;
+          }
         }
       }
+    } catch {
+      // ignore
     }
-  } catch {
-    // ignore
   }
 
   return null;
