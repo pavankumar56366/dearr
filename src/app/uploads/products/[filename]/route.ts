@@ -95,6 +95,36 @@ export async function GET(
 
   const foundPath = findImageFile(filename);
   if (!foundPath) {
+    const url = new URL(_request.url);
+    if (url.searchParams.get("debug") === "1") {
+      let versionsList: any = null;
+      try {
+        versionsList = fs.readdirSync("/home/u209580425/domains/dearr.in/hbuilds/versions");
+      } catch (e: any) {
+        versionsList = e.message;
+      }
+      let currentUploads: any = null;
+      try {
+        currentUploads = fs.readdirSync(path.resolve(process.cwd(), "public", "uploads", "products"));
+      } catch (e: any) {
+        currentUploads = e.message;
+      }
+      let parentListing: any = null;
+      try {
+        parentListing = fs.readdirSync(path.resolve(process.cwd(), "..", ".."));
+      } catch (e: any) {
+        parentListing = e.message;
+      }
+      return NextResponse.json(
+        {
+          cwd: process.cwd(),
+          versionsList,
+          currentUploads,
+          parentListing,
+        },
+        { status: 404 }
+      );
+    }
     return new NextResponse("Image not found", { status: 404 });
   }
 
