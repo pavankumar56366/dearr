@@ -213,6 +213,15 @@ export async function saveProductImage(
 
   await fs.promises.writeFile(targetPath, buffer);
 
+  // Sync with persistent shared storage outside ephemeral deployment folder
+  try {
+    const sharedDir = path.resolve(process.cwd(), "..", "..", "..", "shared_uploads", "products");
+    await fs.promises.mkdir(sharedDir, { recursive: true });
+    await fs.promises.writeFile(path.join(sharedDir, filename), buffer);
+  } catch {
+    // Non-blocking in local development or if parent path not accessible
+  }
+
   return {
     filename,
     url: `/uploads/products/${filename}`,
@@ -228,13 +237,26 @@ export async function saveProductImage(
  */
 export async function deleteProductImage(identifier: string): Promise<boolean> {
   const resolvedPath = resolveProductImagePath(identifier);
+  let deleted = false;
 
   try {
     await fs.promises.access(resolvedPath, fs.constants.F_OK);
+    await fs.promises.unlink(resolvedPath);
+    deleted = true;
   } catch {
-    return false; // File does not exist
+    // File did not exist in primary location
   }
 
-  await fs.promises.unlink(resolvedPath);
-  return true;
+  // Also clean up from shared storage if present
+  try {
+    const filename = path.basename(resolvedPath);
+    const sharedPath = path.resolve(process.cwd(), "..", "..", "..", "shared_uploads", "products", filename);
+    await fs.promises.access(sharedPath, fs.constants.F_OK);
+    await fs.promises.unlink(sharedPath);
+    deleted = true;
+  } catch {
+    // Non-blocking
+  }
+
+  return deleted;
 }
