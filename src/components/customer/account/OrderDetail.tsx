@@ -8,85 +8,37 @@ import {
   CheckIcon,
   ClockIcon,
   PackageIcon,
-  PrinterIcon,
-  ShieldCheckIcon,
   TruckIcon,
   MapPinIcon,
   CreditCardIcon,
+  AlertCircleIcon,
 } from "@/components/customer/Icons";
 import type { DemoOrder } from "@/lib/order-model";
 import { getOrderStatusLabel, getOrderStatusColor } from "@/data/demo-orders";
+import {
+  getOrderTrackingStages,
+  type TrackingStage,
+} from "@/lib/order-tracking";
 
 interface OrderDetailProps {
   order: DemoOrder;
 }
 
-// 3D Printing Production Timeline steps
-interface TimelineStep {
-  id: string;
-  label: string;
-  description: string;
-  icon: React.ReactNode;
-}
-
-const TIMELINE_STEPS: TimelineStep[] = [
-  {
-    id: "confirmed",
-    label: "Order Received",
-    description: "Registered in workshop queue",
-    icon: <CheckIcon size={14} className="stroke-[3]" />,
-  },
-  {
-    id: "payment",
-    label: "Payment Verified",
-    description: "Prepaid confirmation recorded",
-    icon: <CreditCardIcon size={14} />,
-  },
-  {
-    id: "processing",
-    label: "3D Print Preparation",
-    description: "Model slicing & filament staging",
-    icon: <PrinterIcon size={14} />,
-  },
-  {
-    id: "qc",
-    label: "Quality Inspection",
-    description: "Layer-by-layer tolerance check",
-    icon: <ShieldCheckIcon size={14} />,
-  },
-  {
-    id: "shipped",
-    label: "Packed & Dispatched",
-    description: "Shockproof packaging & courier handover",
-    icon: <TruckIcon size={14} />,
-  },
-  {
-    id: "delivered",
-    label: "Delivered",
-    description: "Arrived at delivery address",
-    icon: <PackageIcon size={14} />,
-  },
-];
-
-function getTimelineStepStatus(
-  stepId: string,
-  orderStatus: string
-): "completed" | "current" | "upcoming" {
-  const statusOrder = ["confirmed", "payment", "processing", "qc", "shipped", "delivered"];
-  const statusMap: Record<string, number> = {
-    confirmed: 1,   // Order received + payment verified
-    processing: 2,  // 3D print preparation is current
-    shipped: 4,     // Packed & dispatched (QC done)
-    delivered: 5,   // Delivered
-    cancelled: -1,
-  };
-
-  const stepIndex = statusOrder.indexOf(stepId);
-  const currentLevel = statusMap[orderStatus] ?? 0;
-
-  if (stepIndex < currentLevel) return "completed";
-  if (stepIndex === currentLevel) return "current";
-  return "upcoming";
+function getStageIcon(iconType: TrackingStage["iconType"]) {
+  switch (iconType) {
+    case "check":
+      return <CheckIcon size={14} className="stroke-[3]" />;
+    case "card":
+      return <CreditCardIcon size={14} />;
+    case "truck":
+      return <TruckIcon size={14} />;
+    case "package":
+      return <PackageIcon size={14} />;
+    case "alert":
+      return <AlertCircleIcon size={14} />;
+    default:
+      return <CheckIcon size={14} className="stroke-[3]" />;
+  }
 }
 
 export default function OrderDetail({ order }: OrderDetailProps) {
@@ -143,20 +95,39 @@ export default function OrderDetail({ order }: OrderDetailProps) {
         </div>
 
         {/* Status Timeline */}
-        {order.status !== "cancelled" && (
+        {order.status === "cancelled" ? (
+          <div className="px-5 py-5 sm:px-6">
+            <h2 className="text-sm font-bold text-neutral-900 mb-3">
+              Order Tracking Timeline
+            </h2>
+            <div className="p-4 rounded-xl bg-red-50 border border-red-200 text-xs text-red-900 flex items-start gap-2.5">
+              <PackageIcon size={18} className="text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold text-red-950">Order Cancelled</p>
+                <p className="text-red-700 mt-0.5 leading-relaxed">
+                  This order has been cancelled and is not progressing toward delivery.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
           <div className="px-5 py-5 sm:px-6">
             <h2 className="text-sm font-bold text-neutral-900 mb-4">
-              3D Print Production Timeline
+              Order Tracking Timeline
             </h2>
             <ol className="relative flex flex-col gap-4 before:absolute before:left-[13px] before:top-2 before:bottom-2 before:w-0.5 before:bg-neutral-200">
-              {TIMELINE_STEPS.map((step) => {
-                const stepStatus = getTimelineStepStatus(step.id, order.status);
-                const isCompleted = stepStatus === "completed";
-                const isCurrent = stepStatus === "current";
+              {getOrderTrackingStages({
+                status: order.status,
+                paymentStatus: order.paymentStatus,
+                paymentMethod: order.paymentMethod,
+              }).map((stage) => {
+                const isCompleted = stage.status === "completed";
+                const isCurrent = stage.status === "current";
+                const isFailed = stage.status === "failed";
 
                 return (
                   <li
-                    key={step.id}
+                    key={stage.id}
                     aria-current={isCurrent ? "step" : undefined}
                     className="relative flex items-start gap-3.5 pl-0"
                   >
@@ -164,12 +135,18 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                       className={`relative z-10 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
                         isCompleted
                           ? "bg-[#2A7C13] text-white"
+                          : isFailed
+                          ? "bg-red-600 text-white ring-4 ring-red-500/20"
                           : isCurrent
                           ? "bg-primary text-neutral-900 ring-4 ring-primary/20"
                           : "bg-neutral-100 text-neutral-400 border border-neutral-200"
                       }`}
                     >
-                      {step.icon}
+                      {isCompleted ? (
+                        <CheckIcon size={14} className="stroke-[3]" />
+                      ) : (
+                        getStageIcon(stage.iconType)
+                      )}
                     </div>
                     <div className="min-w-0 pt-0.5">
                       <p
@@ -178,18 +155,30 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                             ? "text-neutral-900"
                             : isCompleted
                             ? "text-neutral-700"
+                            : isFailed
+                            ? "text-red-700"
                             : "text-neutral-400"
                         }`}
                       >
-                        {step.label}
-                        {isCurrent && (
-                          <span className="ml-2 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-secondary text-neutral-900">
-                            Active
+                        {stage.label}
+                        {stage.badge && (
+                          <span
+                            className={`ml-2 text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded ${
+                              stage.status === "failed"
+                                ? "bg-red-100 text-red-800 border border-red-200"
+                                : stage.badge === "Due on Delivery"
+                                ? "bg-amber-100 text-amber-900 border border-amber-200"
+                                : stage.badge === "Pending"
+                                ? "bg-amber-100 text-amber-900 border border-amber-200"
+                                : "bg-secondary text-neutral-900"
+                            }`}
+                          >
+                            {stage.badge}
                           </span>
                         )}
                       </p>
                       <p className="text-[11px] text-neutral-500">
-                        {step.description}
+                        {stage.description}
                       </p>
                     </div>
                   </li>

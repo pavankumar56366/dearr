@@ -37,7 +37,7 @@ export default function OrderDetailPageClient({
               orderNumber: o.orderNumber,
               status: o.status,
               paymentStatus: o.paymentStatus,
-              paymentMethod: o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)",
+              paymentMethod: o.paymentMethod || (o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)"),
               subtotal: Number(o.subtotal || 0),
               shippingAmount: Number(o.shippingAmount || 0),
               discountAmount: Number(o.discountAmount || 0),

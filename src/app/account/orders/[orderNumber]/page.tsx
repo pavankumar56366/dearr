@@ -3,7 +3,7 @@ import OrderDetailPageClient from "./OrderDetailPageClient";
 
 export const metadata: Metadata = {
   title: "Order Details — Dearr | 3D Printed Products",
-  description: "View your order details, status, and 3D print production timeline.",
+  description: "View your order details, status, and tracking timeline.",
   robots: {
     index: false,
     follow: false,

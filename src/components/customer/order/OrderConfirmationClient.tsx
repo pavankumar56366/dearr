@@ -41,7 +41,7 @@ export default function OrderConfirmationClient() {
                 orderNumber: o.orderNumber,
                 status: o.status,
                 paymentStatus: o.paymentStatus,
-                paymentMethod: o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)",
+                paymentMethod: o.paymentMethod || (o.paymentStatus === "paid" ? "Razorpay (Paid)" : "Razorpay (Pending)"),
                 subtotal: o.subtotal,
                 shippingAmount: o.shippingAmount,
                 discountAmount: o.discountAmount,
@@ -286,7 +286,11 @@ export default function OrderConfirmationClient() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start mb-8">
           {/* Left Column: Timeline + Shipping Details */}
           <div className="lg:col-span-7 flex flex-col gap-8">
-            <OrderStatusTimeline currentStatus={order.status} />
+            <OrderStatusTimeline
+              currentStatus={order.status}
+              paymentStatus={order.paymentStatus}
+              paymentMethod={order.paymentMethod}
+            />
             <OrderShippingSnapshot order={order} />
           </div>
 
