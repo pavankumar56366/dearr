@@ -4,13 +4,14 @@
 
 | Item | Value |
 |---|---|
-| Current Version | v1.2.1 |
-| Current Branch | main |
-| Latest Commit | 00765bb |
-| Latest Release Tag | v1.2.1 |
-| Release Tag Target | 00765bb545de321ac65f11949438ec73ab9691cd |
-| Synchronization | Local main in sync with origin/main |
+| Latest Production Release | v1.2.1 |
+| Production Release Tag | v1.2.1 |
+| Production Release Tag Target | 00765bb545de321ac65f11949438ec73ab9691cd |
 | Production Deployed Commit | 00765bb545de321ac65f11949438ec73ab9691cd |
+| Latest Local Feature Commit | 5292a03939e0026d710d174934285d60196e56a1 (5292a03) |
+| Feature Development Status | Unreleased Local Development (Merged into local main; not pushed or deployed) |
+| Current Branch | main (local) / feature/simple-order-tracking |
+| Synchronization | Local main ahead of origin/main by unpushed local commits (expected for unreleased development) |
 
 ## Versions
 
@@ -60,6 +61,8 @@
 | 33 | c5c68c7 | 2026-10-11 | fix: add diagnostic debug path resolution to uploads route |
 | 34 | 140df6e | 2026-10-11 | temp diagnostic endpoint |
 | 35 | 00765bb | 2026-10-11 | fix: persistent uploads self-healing and removal of diagnostic route |
+| 36 | a97484e | 2026-10-11 | docs: reconcile git history for v1.2.1 release |
+| 37 | 5292a03 | 2026-10-11 | feat: simplify customer order tracking to four stages |
 
 ## Release v1.2.1 Notes
 
@@ -100,3 +103,34 @@
 - **Database Migration 004**:
   - Verified on Hostinger MySQL (`u209580425_Dearr`).
   - Table `category_views` created with indexes.
+
+## Unreleased Local Development — Four-Stage Order Tracking
+
+- **Status**: Unreleased Local Development (Committed locally on `feature/simple-order-tracking` and merged into local `main`; strictly NOT pushed to GitHub, NOT deployed to Hostinger, and no release tags created or modified)
+- **Production Baseline**: Release `v1.2.1` remains the active production deployment at commit `00765bb545de321ac65f11949438ec73ab9691cd`
+- **Feature Commit**: `5292a03939e0026d710d174934285d60196e56a1` (`5292a03`)
+- **Commit Date**: `2026-10-11 23:44:02 +0530`
+- **Commit Message**: `feat: simplify customer order tracking to four stages`
+- **Implementation Scope**:
+  - **Four Canonical Timeline Stages**: Streamlined customer order tracking to exactly four canonical stages:
+    1. Order Received
+    2. Payment
+    3. Packed & Dispatched
+    4. Delivered
+  - **Removal of Obsolete Internal Stages**: Removed separate internal manufacturing sub-stages (`3D Print Preparation` and `Quality Inspection`) and replaced hardcoded `"Payment Verified"` with dynamic payment status handling.
+  - **Shared Component Engine**: Unified tracking evaluation via pure helper `src/lib/order-tracking.ts` consumed by both Customer Order Details (`OrderDetail.tsx`) and Order Confirmation (`OrderStatusTimeline.tsx`).
+  - **Payment State Machine**:
+    - **Prepaid Orders**: Pending payment stays in `current` state with `Pending` badge; failed payment displays explicit `Failed` badge with retry guidance; verified payment (`paid` or demo `simulated`) marks stage completed.
+    - **Cash on Delivery (COD)**: Displays `Due on Delivery` before delivery; does not block fulfillment progression (`Packed & Dispatched` becomes `active`); delivery alone is NOT treated as proof of payment collection — displays `Collection Pending` if delivered but unpaid; marked paid only upon explicit backend reconciliation.
+  - **Order Integrity & Safeguards**:
+    - Preserved backend `paymentMethod` in `OrderDetailPageClient.tsx` (`o.paymentMethod || ...`).
+    - Passed `paymentStatus` and `paymentMethod` to `<OrderStatusTimeline />` in `OrderConfirmationClient.tsx`.
+    - Rendered explicit `Order Cancelled` alert banner for cancelled orders, preventing deceptive forward fulfillment progress.
+    - Provided safe fallback for unknown or legacy statuses without crashing or premature completion.
+- **Verified Test & Quality Results**:
+  - **Tracking Test Matrix** (`node scripts/verify-order-tracking-stages.mjs`): **15 / 15 tests passed (100%)** (Tests A through L verified).
+  - **Playwright Browser Automation** (`node scripts/browser-verify-order-tracking.mjs`): **10 / 10 scenarios passed (100%)** on Desktop (1280×800) and Mobile (375×667) across Order Details and Order Confirmation pages with 0 console errors and 40 verified screenshot artifacts.
+  - **Dearr Feature Regression Suite** (`node scripts/verify-11-features.mjs`): **26 / 26 tests passed (100%)**.
+  - **Product Image Rendering Suite** (`node scripts/verify-image-rendering.mjs`): **22 / 22 tests passed (100%)**.
+  - **TypeScript Compilation** (`npx tsc --noEmit`): **Passed with zero errors**.
+  - **Production Standalone Build** (`npm run build`): **Succeeded** (74 routes generated, standalone server verified).
