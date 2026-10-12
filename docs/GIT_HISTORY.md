@@ -4,14 +4,12 @@
 
 | Item | Value |
 |---|---|
-| Latest Production Release | v1.2.1 |
-| Production Release Tag | v1.2.1 |
-| Production Release Tag Target | 00765bb545de321ac65f11949438ec73ab9691cd |
-| Production Deployed Commit | 00765bb545de321ac65f11949438ec73ab9691cd |
-| Latest Local Feature Commit | c475f3c352ed69ea8eb08296b273b7f4ab6245fc (c475f3c) |
-| Feature Development Status | Unreleased Local Development (Committed to local main; not pushed or deployed) |
+| Target Release Version | v1.3.1 |
+| Previous Production Release | v1.2.1 |
+| Previous Release Tag Target | 00765bb545de321ac65f11949438ec73ab9691cd |
+| Release Status | Prepared for Release Tagging & Hostinger Deployment Verification |
 | Current Branch | main (local) |
-| Synchronization | Local main ahead of origin/main by unpushed local commits (expected for unreleased development) |
+| Synchronization | Local main ahead of origin/main by unpushed release commits |
 
 ## Versions
 
@@ -21,6 +19,7 @@
 | v1.1.0 | 2026-10-07 | 15fed57 | Dearr V1.1 release |
 | v1.1.1 | 2026-10-07 | c7db367 | Security patch for source-map-js vulnerability |
 | v1.2.1 | 2026-10-11 | 00765bb | Product-image direct rendering fix, persistent upload storage, checkout shipping & payment sync, trending SQL |
+| v1.3.1 | 2026-10-12 | (pending tag) | Four-stage customer order tracking, transparent Dearr brand logo |
 
 ## Commit History
 
@@ -65,6 +64,8 @@
 | 37 | 5292a03 | 2026-10-11 | feat: simplify customer order tracking to four stages |
 | 38 | c274250 | 2026-10-11 | docs: record local four-stage order tracking work |
 | 39 | c475f3c | 2026-10-12 | feat: add transparent Dearr logo asset |
+| 40 | fdadf30 | 2026-10-12 | docs: record transparent Dearr logo work |
+| 41 | 917f267 | 2026-10-12 | test: ensure image load in browser logo verification |
 
 ## Release v1.2.1 Notes
 
@@ -106,68 +107,37 @@
   - Verified on Hostinger MySQL (`u209580425_Dearr`).
   - Table `category_views` created with indexes.
 
-## Unreleased Local Development — Four-Stage Order Tracking
+## Release v1.3.1 Notes (Prepared for Release)
 
-- **Status**: Unreleased Local Development (Committed locally on `feature/simple-order-tracking` and merged into local `main`; strictly NOT pushed to GitHub, NOT deployed to Hostinger, and no release tags created or modified)
-- **Production Baseline**: Release `v1.2.1` remains the active production deployment at commit `00765bb545de321ac65f11949438ec73ab9691cd`
-- **Feature Commit**: `5292a03939e0026d710d174934285d60196e56a1` (`5292a03`)
-- **Commit Date**: `2026-10-11 23:44:02 +0530`
-- **Commit Message**: `feat: simplify customer order tracking to four stages`
-- **Implementation Scope**:
-  - **Four Canonical Timeline Stages**: Streamlined customer order tracking to exactly four canonical stages:
-    1. Order Received
-    2. Payment
-    3. Packed & Dispatched
-    4. Delivered
-  - **Removal of Obsolete Internal Stages**: Removed separate internal manufacturing sub-stages (`3D Print Preparation` and `Quality Inspection`) and replaced hardcoded `"Payment Verified"` with dynamic payment status handling.
-  - **Shared Component Engine**: Unified tracking evaluation via pure helper `src/lib/order-tracking.ts` consumed by both Customer Order Details (`OrderDetail.tsx`) and Order Confirmation (`OrderStatusTimeline.tsx`).
-  - **Payment State Machine**:
-    - **Prepaid Orders**: Pending payment stays in `current` state with `Pending` badge; failed payment displays explicit `Failed` badge with retry guidance; verified payment (`paid` or demo `simulated`) marks stage completed.
-    - **Cash on Delivery (COD)**: Displays `Due on Delivery` before delivery; does not block fulfillment progression (`Packed & Dispatched` becomes `active`); delivery alone is NOT treated as proof of payment collection — displays `Collection Pending` if delivered but unpaid; marked paid only upon explicit backend reconciliation.
-  - **Order Integrity & Safeguards**:
-    - Preserved backend `paymentMethod` in `OrderDetailPageClient.tsx` (`o.paymentMethod || ...`).
-    - Passed `paymentStatus` and `paymentMethod` to `<OrderStatusTimeline />` in `OrderConfirmationClient.tsx`.
-    - Rendered explicit `Order Cancelled` alert banner for cancelled orders, preventing deceptive forward fulfillment progress.
-    - Provided safe fallback for unknown or legacy statuses without crashing or premature completion.
+- **Release Version**: `v1.3.1`
+- **Release Status**: Prepared for release tagging (`v1.3.1`), push to GitHub `main`, and Hostinger production deployment verification.
+- **Production Baseline**: Release `v1.2.1` remains the verified active production baseline at commit `00765bb545de321ac65f11949438ec73ab9691cd`.
+- **Feature Scope**:
+  1. **Four-Stage Customer Order Tracking** (`feat: simplify customer order tracking to four stages` — `5292a03`):
+     - Streamlined customer order tracking timeline to exactly four canonical stages:
+       1. Order Received
+       2. Payment
+       3. Packed & Dispatched
+       4. Delivered
+     - Removed internal manufacturing sub-stages (`3D Print Preparation` and `Quality Inspection`).
+     - Unified tracking evaluation via pure helper `src/lib/order-tracking.ts` consumed by both Customer Order Details (`OrderDetail.tsx`) and Order Confirmation (`OrderStatusTimeline.tsx`).
+     - Accurate payment state machine for prepaid orders (Pending, Failed, Verified) and Cash on Delivery (`Due on Delivery` pre-dispatch, `Collection Pending` post-delivery without premature completion).
+     - Cancellation safeguards and safe fallback for legacy/unknown order states.
+  2. **Transparent Dearr Brand Logo** (`feat: add transparent Dearr logo asset` — `c475f3c`):
+     - Canonical brand asset `public/brand/dearr-logo.png` (955 × 289 px, lossless RGBA, 48,959 bytes).
+     - Genuine alpha channel transparency (61.9% canvas transparent, 4 corners verified `alpha = 0`, inner counter loops transparent).
+     - Complete removal of black background and dark edge halos (0 halo pixels).
+     - Full retention of original playful handwritten style, letter colors (`d` coral red, `e` turquoise, `a` golden yellow, `r` lavender purple, `r` hot pink), 1,763 white highlight bubbles, and pink decorative heart.
+     - Unified storefront desktop/mobile headers, footer, search overlay, auth shells, and admin portal.
+  3. **Verification & Regression Test Suites**:
+     - `scripts/verify-order-tracking-stages.mjs`: Programmatic 15-scenario tracking test matrix.
+     - `scripts/verify-logo-transparency.mjs`: Programmatic alpha-channel & pixel-level color regression test.
+     - `scripts/browser-verify-logo.mjs`: Playwright automated cross-surface browser test suite.
 - **Verified Test & Quality Results**:
-  - **Tracking Test Matrix** (`node scripts/verify-order-tracking-stages.mjs`): **15 / 15 tests passed (100%)** (Tests A through L verified).
-  - **Playwright Browser Automation** (`node scripts/browser-verify-order-tracking.mjs`): **10 / 10 scenarios passed (100%)** on Desktop (1280×800) and Mobile (375×667) across Order Details and Order Confirmation pages with 0 console errors and 40 verified screenshot artifacts.
-  - **Dearr Feature Regression Suite** (`node scripts/verify-11-features.mjs`): **26 / 26 tests passed (100%)**.
-  - **Product Image Rendering Suite** (`node scripts/verify-image-rendering.mjs`): **22 / 22 tests passed (100%)**.
-  - **TypeScript Compilation** (`npx tsc --noEmit`): **Passed with zero errors**.
-  - **Production Standalone Build** (`npm run build`): **Succeeded** (74 routes generated, standalone server verified).
-
-## Unreleased Local Development — Transparent Dearr Logo
-
-- **Status**: Unreleased Local Development (Committed locally on `main`; strictly NOT pushed to GitHub, NOT deployed to Hostinger, and no release tags created or modified)
-- **Production Baseline**: Release `v1.2.1` remains the active production deployment at commit `00765bb545de321ac65f11949438ec73ab9691cd`
-- **Feature Commit**: `c475f3c352ed69ea8eb08296b273b7f4ab6245fc` (`c475f3c`)
-- **Commit Date**: `2026-10-12 00:56:10 +0530`
-- **Commit Message**: `feat: add transparent Dearr logo asset`
-- **Asset Implementation**:
-  - **Canonical Asset**: `public/brand/dearr-logo.png`
-  - **Asset Properties**: Lossless 4-channel PNG (RGBA), 955 × 289 px (3.30:1 aspect ratio), 48,959 bytes.
-  - **Genuine Alpha Transparency**: 61.9% of canvas is pure transparent (`alpha = 0`), with all 4 corners confirmed at `alpha = 0`.
-  - **Inner Holes/Counters**: Transparent interior spaces inside closed letter loops (`d`, `e`, `a`).
-  - **Color & Style Preservation**: Original playful handwritten style preserved with exact vibrant letter colors (`d` coral red, `e` turquoise, `a` golden yellow, `r` lavender purple, `r` hot pink) and pink heart with accent marks.
-  - **White Highlights Preserved**: 1,763 pure white highlight bubble pixels retained on letter curves.
-  - **Edge Antialiasing**: 11,163 smooth antialiased edge pixels with 0 dark halos or leftover black background fringes.
-  - **Clean Cropping**: Unnecessary outer whitespace trimmed with a 4px protective margin.
-- **Files Included in Feature Commit**:
-  - `public/brand/dearr-logo.png` (transparent brand logo asset)
-  - `scripts/verify-logo-transparency.mjs` (programmatic asset & alpha channel regression test)
-  - `scripts/browser-verify-logo.mjs` (Playwright automated browser verification suite)
-- **Shared Brand Integration**:
-  - Storefront Desktop Header (`src/components/customer/DesktopHeader.tsx`)
-  - Storefront Mobile Header (`src/components/customer/CustomerHeader.tsx`)
-  - Storefront Footer Brand Pill (`src/components/customer/home/Footer.tsx`)
-  - Search Overlay (`src/components/customer/SearchOverlay.tsx`)
-  - Customer Auth Shells (`src/components/customer/auth/LoginView.tsx`, `AuthShell.tsx`)
-  - Admin Branding & Portal (`src/components/admin/AdminBrand.tsx`, `src/app/admin/login/page.tsx`)
-- **Verified Test & Quality Results**:
-  - **Logo Transparency Test** (`node scripts/verify-logo-transparency.mjs`): **Passed (100%)** — verified 4 transparent corners, 61.9% canvas alpha, 1,763 white highlights, 0 dark halos, 6 letter/heart slices intact, and 5 composite previews (white, canvas off-white, surface cream, black, and dark footer).
-  - **Playwright Browser Automation** (`node scripts/browser-verify-logo.mjs`): **Passed (100%)** — Desktop Header (120×36px rendered), Mobile Header (92×28px rendered), Footer Brand Pill, Customer Login, and Admin Login verified with 0 console errors and 5 screenshot artifacts.
+  - **Logo Transparency Test** (`node scripts/verify-logo-transparency.mjs`): **Passed (100%)**.
+  - **Playwright Browser Automation** (`node scripts/browser-verify-logo.mjs`): **Passed (100%)** across Desktop Header (120×36px rendered), Mobile Header (92×28px rendered), Footer Brand Pill, Customer Login, and Admin Login with 0 console errors.
   - **Order Tracking Test Matrix** (`node scripts/verify-order-tracking-stages.mjs`): **15 / 15 tests passed (100%)**.
   - **Product Image Rendering Suite** (`node scripts/verify-image-rendering.mjs`): **22 / 22 tests passed (100%)**.
   - **TypeScript Compilation** (`npx tsc --noEmit`): **Passed with zero errors**.
-  - **Production Standalone Build** (`npm run build`): **Succeeded** (74 routes generated, standalone server verified).
+  - **Production Standalone Build** (`npm run build`): **Succeeded** (74 routes generated, standalone server verified at `.next/standalone/server.js`).
+  - **Git Diff & Whitespace Check** (`git diff --check`): **Passed with zero errors**.
