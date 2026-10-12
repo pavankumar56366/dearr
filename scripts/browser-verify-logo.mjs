@@ -10,6 +10,22 @@ if (!fs.existsSync(SCREENSHOT_DIR)) {
   fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 }
 
+async function ensureImageLoaded(locator) {
+  await locator.waitFor({ state: "visible", timeout: 10000 });
+  await locator.evaluate(async (img) => {
+    if (!img.complete) {
+      await new Promise((resolve) => {
+        img.onload = resolve;
+        img.onerror = resolve;
+        setTimeout(resolve, 5000);
+      });
+    }
+    if (typeof img.decode === "function") {
+      await img.decode().catch(() => {});
+    }
+  });
+}
+
 async function runBrowserLogoTests() {
   console.log("================================================================================");
   console.log("DEARR AUTOMATED PLAYWRIGHT LOGO BROWSER VERIFICATION");
@@ -38,7 +54,7 @@ async function runBrowserLogoTests() {
 
     // Header Logo
     const headerLogo = page.locator('header.md\\:block a[aria-label="Dearr Home"] img[src*="dearr-logo"]');
-    await headerLogo.waitFor({ state: "visible", timeout: 5000 });
+    await ensureImageLoaded(headerLogo);
 
     const headerLogoData = await headerLogo.evaluate((img) => ({
       naturalWidth: img.naturalWidth,
@@ -64,7 +80,7 @@ async function runBrowserLogoTests() {
     // Footer Logo
     const footerLogo = page.locator('footer a[aria-label="Dearr Home"] img[src*="dearr-logo"]');
     await footerLogo.scrollIntoViewIfNeeded();
-    await footerLogo.waitFor({ state: "visible", timeout: 5000 });
+    await ensureImageLoaded(footerLogo);
 
     const footerLogoData = await footerLogo.evaluate((img) => ({
       naturalWidth: img.naturalWidth,
@@ -97,7 +113,7 @@ async function runBrowserLogoTests() {
     await page.goto(`${BASE_URL}/`, { waitUntil: "domcontentloaded", timeout: 30000 });
 
     const mobileHeaderLogo = page.locator('header.md\\:hidden a[aria-label="Dearr Home"] img[src*="dearr-logo"]');
-    await mobileHeaderLogo.waitFor({ state: "visible", timeout: 5000 });
+    await ensureImageLoaded(mobileHeaderLogo);
 
     const mobileLogoData = await mobileHeaderLogo.evaluate((img) => ({
       naturalWidth: img.naturalWidth,
