@@ -4,12 +4,14 @@
 
 | Item | Value |
 |---|---|
-| Target Release Version | v1.3.1 |
-| Previous Production Release | v1.2.1 |
-| Previous Release Tag Target | 00765bb545de321ac65f11949438ec73ab9691cd |
-| Release Status | Prepared for Release Tagging & Hostinger Deployment Verification |
+| Latest Production Release | v1.3.1 |
+| Production Release Tag | v1.3.1 |
+| Production Release Tag Target | 0862901d5ce10d2d7a7237d93c788cf561a5ea18 (0862901) |
+| Production Deployed Commit | 0862901d5ce10d2d7a7237d93c788cf561a5ea18 (0862901) |
+| Hostinger Build UUID | 01a12db3-3c51-7045-adc5-3dd10bc40c49 |
+| Deployment Status | completed (Verified live at https://dearr.in) |
 | Current Branch | main (local) |
-| Synchronization | Local main ahead of origin/main by unpushed release commits |
+| Synchronization | In sync with origin/main |
 
 ## Versions
 
@@ -19,7 +21,7 @@
 | v1.1.0 | 2026-10-07 | 15fed57 | Dearr V1.1 release |
 | v1.1.1 | 2026-10-07 | c7db367 | Security patch for source-map-js vulnerability |
 | v1.2.1 | 2026-10-11 | 00765bb | Product-image direct rendering fix, persistent upload storage, checkout shipping & payment sync, trending SQL |
-| v1.3.1 | 2026-10-12 | (pending tag) | Four-stage customer order tracking, transparent Dearr brand logo |
+| v1.3.1 | 2026-10-12 | 0862901 | Four-stage customer order tracking, transparent Dearr brand logo, Hostinger deployment |
 
 ## Commit History
 
@@ -66,6 +68,7 @@
 | 39 | c475f3c | 2026-10-12 | feat: add transparent Dearr logo asset |
 | 40 | fdadf30 | 2026-10-12 | docs: record transparent Dearr logo work |
 | 41 | 917f267 | 2026-10-12 | test: ensure image load in browser logo verification |
+| 42 | 0862901 | 2026-10-12 | docs: prepare Dearr v1.3.1 release history |
 
 ## Release v1.2.1 Notes
 
@@ -107,13 +110,31 @@
   - Verified on Hostinger MySQL (`u209580425_Dearr`).
   - Table `category_views` created with indexes.
 
-## Release v1.3.1 Notes (Prepared for Release)
+## Release v1.3.1 Notes
 
 - **Release Version**: `v1.3.1`
-- **Release Status**: Prepared for release tagging (`v1.3.1`), push to GitHub `main`, and Hostinger production deployment verification.
-- **Production Baseline**: Release `v1.2.1` remains the verified active production baseline at commit `00765bb545de321ac65f11949438ec73ab9691cd`.
+- **Release Date**: 2026-10-12 (Annotated tag timestamp: `2026-10-12 06:50:01 +0530`, Release commit: `2026-10-12 06:49:20 +0530`)
+- **Release Commit**: `0862901d5ce10d2d7a7237d93c788cf561a5ea18` (`0862901`)
+- **Annotated Tag**: `v1.3.1` (`595e3778c00fb8ee1ae519360e1b9d9bc3564a27`)
+- **Tag Target**: `0862901d5ce10d2d7a7237d93c788cf561a5ea18` (verified matching on GitHub `origin` and local repository)
+- **Hostinger Deployment**:
+  - **Build UUID**: `01a12db3-3c51-7045-adc5-3dd10bc40c49`
+  - **Deployed Commit**: `0862901d5ce10d2d7a7237d93c788cf561a5ea18`
+  - **Deployment Status**: `completed` (Build: 46.3s, Publish: 1.4s, Restart: 1.5s, Total: 1m 8s)
+  - **Tag & Deployed Commit Alignment**: Verified exact match (`0862901d5ce10d2d7a7237d93c788cf561a5ea18`)
+- **Live Production Smoke Verification**:
+  - `GET https://dearr.in/`: HTTP 200 OK
+  - `GET https://dearr.in/brand/dearr-logo.png`: HTTP 200 OK (`image/png`, 50,920 bytes)
+  - `GET https://dearr.in/login`: HTTP 200 OK
+  - `GET https://dearr.in/admin/login`: HTTP 200 OK
+  - `GET https://dearr.in/api/health/db`: HTTP 200 OK (`{"ok":true,"database":"mysql"}`)
+  - **Storefront Desktop Header**: Verified live via Playwright (`complete: true`, `naturalWidth: 256`, `naturalHeight: 77`, `offsetWidth: 120`, `offsetHeight: 36`, aspect ratio 3.30:1, zero dark background or halos)
+  - **Storefront Desktop Footer**: Verified live via Playwright (`complete: true`, `naturalWidth: 128`, `naturalHeight: 39`, `offsetWidth: 92`, `offsetHeight: 28`)
+  - **Storefront Mobile Header**: Verified live via Playwright (`complete: true`, `offsetWidth: 92`, `offsetHeight: 28`)
+  - **Customer Login View**: Verified live via Playwright (`complete: true`, `offsetWidth: 106`, `offsetHeight: 32`)
+  - **Admin Login View**: Verified live via Playwright (`complete: true`, `offsetWidth: 106`, `offsetHeight: 32`)
 - **Feature Scope**:
-  1. **Four-Stage Customer Order Tracking** (`feat: simplify customer order tracking to four stages` — `5292a03`):
+  1. **Four-Stage Customer Order Tracking** (`5292a03`):
      - Streamlined customer order tracking timeline to exactly four canonical stages:
        1. Order Received
        2. Payment
@@ -123,7 +144,7 @@
      - Unified tracking evaluation via pure helper `src/lib/order-tracking.ts` consumed by both Customer Order Details (`OrderDetail.tsx`) and Order Confirmation (`OrderStatusTimeline.tsx`).
      - Accurate payment state machine for prepaid orders (Pending, Failed, Verified) and Cash on Delivery (`Due on Delivery` pre-dispatch, `Collection Pending` post-delivery without premature completion).
      - Cancellation safeguards and safe fallback for legacy/unknown order states.
-  2. **Transparent Dearr Brand Logo** (`feat: add transparent Dearr logo asset` — `c475f3c`):
+  2. **Transparent Dearr Brand Logo** (`c475f3c`):
      - Canonical brand asset `public/brand/dearr-logo.png` (955 × 289 px, lossless RGBA, 48,959 bytes).
      - Genuine alpha channel transparency (61.9% canvas transparent, 4 corners verified `alpha = 0`, inner counter loops transparent).
      - Complete removal of black background and dark edge halos (0 halo pixels).
