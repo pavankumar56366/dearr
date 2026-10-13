@@ -6,6 +6,10 @@ import {
   computeDiscountAmount,
 } from "./discount";
 import { getStoreSettings } from "./settings";
+import {
+  resolveReportingPeriod,
+  PLACED_ORDER_SQL_PREDICATE,
+} from "./order-analytics";
 
 // ---------------------------------------------------------------------------
 // Error Handling
@@ -69,6 +73,9 @@ export interface OrderRecord {
   shippingPostalCode: string;
   shippingCountry: string;
   items: OrderItemSnapshot[];
+  dispatchedAt?: Date | null;
+  deliveredAt?: Date | null;
+  cancelledAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -88,8 +95,12 @@ export interface OrderSummary {
   customerName?: string;
   customerEmail?: string;
   customerPhone?: string;
+  dispatchedAt?: Date | null;
+  deliveredAt?: Date | null;
+  cancelledAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  items?: any[];
 }
 
 export interface CreateOrderInput {
@@ -109,6 +120,11 @@ export interface OrderListFilters {
   search?: string;
   page?: number;
   limit?: number;
+  period?: string;
+  date?: string;
+  month?: string;
+  year?: string;
+  placedOnly?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +175,7 @@ function roundToTwo(num: number): number {
   return Math.round(num * 100) / 100;
 }
 
-function validateShippingAddress(input: CreateOrderInput): CreateOrderInput {
+export function validateShippingAddress(input: CreateOrderInput): CreateOrderInput {
   const fullName = input.shippingFullName?.trim();
   if (!fullName || fullName.length < 2 || fullName.length > 150) {
     throw new OrderValidationError(
@@ -226,7 +242,7 @@ function validateShippingAddress(input: CreateOrderInput): CreateOrderInput {
  * Generates a unique human-friendly order number in the format DEAR-XXXXX.
  * Checks the MySQL orders table for collisions.
  */
-async function generateOrderNumber(): Promise<string> {
+export async function generateOrderNumber(): Promise<string> {
   let candidate = "";
   let attempts = 0;
 
@@ -275,6 +291,9 @@ function mapOrderRow(row: any): Omit<OrderRecord, "items"> {
     shippingState: row.shipping_state,
     shippingPostalCode: row.shipping_postal_code,
     shippingCountry: row.shipping_country,
+    dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at) : null,
+    deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
+    cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -664,6 +683,11 @@ export async function listCustomerOrders(
     params.push(filters.paymentStatus);
   }
 
+  // Customer order history only shows valid placed orders (never abandoned online attempts)
+  if (filters?.placedOnly !== false) {
+    conditions.push(PLACED_ORDER_SQL_PREDICATE);
+  }
+
   const whereClause = conditions.join(" AND ");
 
   // Count total
@@ -722,6 +746,30 @@ export async function listAllOrders(
   const conditions: string[] = ["1 = 1"];
   const params: any[] = [];
 
+  // Exclude abandoned online payment attempts by default (only placed orders count)
+  if (filters?.placedOnly !== false) {
+    conditions.push(PLACED_ORDER_SQL_PREDICATE);
+  }
+
+  // Filter by date range if reporting period or specific date is requested
+  if (filters?.period || filters?.date || filters?.month || filters?.year) {
+    try {
+      const range = resolveReportingPeriod({
+        period: filters.period,
+        date: filters.date,
+        month: filters.month,
+        year: filters.year,
+      });
+
+      if (range.period !== "all") {
+        conditions.push("(o.created_at >= ? AND o.created_at < ?)");
+        params.push(range.startSql, range.endSql);
+      }
+    } catch (err: any) {
+      throw new OrderValidationError(err?.message || "Invalid reporting period parameters", 400);
+    }
+  }
+
   if (filters?.status && VALID_ORDER_STATUSES.includes(filters.status)) {
     conditions.push("o.status = ?");
     params.push(filters.status);
@@ -752,15 +800,52 @@ export async function listAllOrders(
        o.subtotal, o.discount_amount, o.shipping_amount, o.total_amount, o.currency,
        o.shipping_full_name, o.shipping_phone,
        o.created_at, o.updated_at,
+       o.dispatched_at, o.delivered_at, o.cancelled_at,
        pr.email AS customer_email,
        (SELECT COALESCE(SUM(oi.quantity), 0) FROM order_items oi WHERE oi.order_id = o.id) AS item_count
      FROM orders o
      LEFT JOIN profiles pr ON o.user_id = pr.id
      WHERE ${whereClause}
-     ORDER BY o.created_at DESC
-     LIMIT ? OFFSET ?`,
+     ORDER BY o.created_at DESC      LIMIT ? OFFSET ?`,
     [...params, limit, offset]
   );
+
+  const orderIds = (orderRows || []).map((row) => row.id);
+  const itemsByOrderId = new Map<string, any[]>();
+
+  if (orderIds.length > 0) {
+    const placeholders = orderIds.map(() => "?").join(",");
+    const itemRows = await query<any[]>(
+      `SELECT oi.id, oi.order_id, oi.product_id, oi.variant_id,
+              oi.product_name, oi.variant_name, oi.unit_price, oi.quantity,
+              oi.discount_amount, oi.line_total,
+              p.slug AS product_slug,
+              (SELECT pi.storage_path FROM product_images pi WHERE pi.product_id = oi.product_id ORDER BY pi.sort_order ASC LIMIT 1) AS product_image
+       FROM order_items oi
+       LEFT JOIN products p ON oi.product_id = p.id
+       WHERE oi.order_id IN (${placeholders})
+       ORDER BY oi.created_at ASC`,
+      orderIds
+    );
+
+    for (const it of itemRows || []) {
+      const list = itemsByOrderId.get(it.order_id) || [];
+      list.push({
+        id: it.id,
+        productId: it.product_id,
+        variantId: it.variant_id,
+        productName: it.product_name,
+        variantName: it.variant_name,
+        productSlug: it.product_slug || "",
+        productImage: it.product_image || "/product-samples/1.jpeg",
+        unitPrice: Number(it.unit_price || 0),
+        quantity: Number(it.quantity || 1),
+        discountAmount: Number(it.discount_amount || 0),
+        lineTotal: Number(it.line_total || 0),
+      });
+      itemsByOrderId.set(it.order_id, list);
+    }
+  }
 
   const orders: OrderSummary[] = (orderRows || []).map((row) => ({
     id: row.id,
@@ -774,9 +859,13 @@ export async function listAllOrders(
     totalAmount: Number(row.total_amount),
     currency: row.currency,
     itemCount: Number(row.item_count || 0),
+    items: itemsByOrderId.get(row.id) || [],
     customerName: row.shipping_full_name || undefined,
     customerEmail: row.customer_email || undefined,
     customerPhone: row.shipping_phone || undefined,
+    dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at) : null,
+    deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
+    cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   }));
@@ -830,10 +919,47 @@ export async function updateOrderStatus(
     );
   }
 
-  await query(
-    "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
-    [newStatus, cleanOrderId]
-  );
+  // Update status with transition timestamps
+  try {
+    if (newStatus === "shipped") {
+      await query(
+        `UPDATE orders
+         SET status = ?,
+             dispatched_at = COALESCE(dispatched_at, NOW()),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [newStatus, cleanOrderId]
+      );
+    } else if (newStatus === "delivered") {
+      await query(
+        `UPDATE orders
+         SET status = ?,
+             delivered_at = COALESCE(delivered_at, NOW()),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [newStatus, cleanOrderId]
+      );
+    } else {
+      await query(
+        "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
+        [newStatus, cleanOrderId]
+      );
+    }
+  } catch {
+    await query(
+      "UPDATE orders SET status = ?, updated_at = NOW() WHERE id = ?",
+      [newStatus, cleanOrderId]
+    );
+  }
+
+  // Record status transition in order_status_history
+  try {
+    await query(
+      `INSERT INTO order_status_history (id, order_id, previous_status, new_status, created_at)
+       VALUES (UUID(), ?, ?, ?, NOW())`,
+      [cleanOrderId, currentStatus, newStatus]
+    );
+  } catch {}
 
   return await getOrderByIdInternal(cleanOrderId);
 }
@@ -927,11 +1053,30 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       }
     }
 
-    // Update order status
-    await conn.execute(
-      "UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = ?",
-      [cleanOrderId]
-    );
+    // Update order status and record cancelled_at timestamp (preserving any previous dispatched_at)
+    try {
+      await conn.execute(
+        `UPDATE orders
+         SET status = 'cancelled',
+             cancelled_at = COALESCE(cancelled_at, NOW()),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [cleanOrderId]
+      );
+    } catch {
+      await conn.execute(
+        "UPDATE orders SET status = 'cancelled', updated_at = NOW() WHERE id = ?",
+        [cleanOrderId]
+      );
+    }
+
+    try {
+      await conn.execute(
+        `INSERT INTO order_status_history (id, order_id, previous_status, new_status, created_at)
+         VALUES (UUID(), ?, ?, 'cancelled', NOW())`,
+        [cleanOrderId, currentStatus]
+      );
+    } catch {}
   });
 
   return await getOrderByIdInternal(cleanOrderId);

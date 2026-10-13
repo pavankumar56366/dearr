@@ -6,21 +6,26 @@ import {
   OrderValidationError,
 } from "@/lib/server/order";
 import {
+  createCheckoutAttemptFromCart,
+  CheckoutAttemptError,
+} from "@/lib/server/checkout-attempt";
+import {
   getCustomerAddressById,
   createCustomerAddress,
 } from "@/lib/server/address";
 
+export const dynamic = "force-dynamic";
+
 /**
- * POST /api/orders — Create a new order from the customer's active cart.
+ * POST /api/orders — Initiates checkout from customer's active cart.
+ *
+ * For online prepaid orders (default), creates and persists an authoritative
+ * `checkout_attempts` record with 30-minute expiry and 30-day retention.
+ * Ordinary pending rows are NEVER written to `orders` before payment capture.
  *
  * Body: { shippingFullName?, shippingPhone?, shippingAddressLine1?, shippingAddressLine2?,
  *         shippingCity?, shippingState?, shippingPostalCode?, shippingCountry?,
- *         addressId?, saveAddress? }
- *
- * Server-side authoritative flow:
- * - If addressId is provided, ownership is strictly verified against user.id in MySQL.
- * - Prices, discounts, stock, totals computed from MySQL (NEVER from browser).
- * - Payment status starts as 'pending' (B-18 Razorpay handles actual payment).
+ *         addressId?, saveAddress?, mode? }
  */
 export async function POST(request: NextRequest) {
   try {
@@ -74,14 +79,43 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const order = await createOrderFromCart(user.id, shippingData);
+    // Direct placed order branch (only for explicit COD or direct order simulation)
+    const isDirectOrder = body.mode === "direct" || body.paymentMethod === "cod";
+    if (isDirectOrder) {
+      const order = await createOrderFromCart(user.id, shippingData);
+      return NextResponse.json(
+        { ok: true, order },
+        { status: 201 }
+      );
+    }
+
+    // Standard Online Prepaid Flow: Create checkout attempt first.
+    // Unpaid attempts never write to orders table; stock is preserved until verified capture.
+    const attempt = await createCheckoutAttemptFromCart(user.id, shippingData);
 
     return NextResponse.json(
-      { ok: true, order },
+      {
+        ok: true,
+        attemptId: attempt.id,
+        isAttempt: true,
+        order: {
+          id: attempt.id,
+          orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+          userId: attempt.userId,
+          status: "pending",
+          paymentStatus: "pending",
+          subtotal: attempt.checkoutData.subtotal,
+          discountAmount: attempt.checkoutData.discountAmount,
+          shippingAmount: attempt.checkoutData.shippingAmount,
+          totalAmount: attempt.amount,
+          currency: attempt.currency,
+          isAttempt: true,
+        },
+      },
       { status: 201 }
     );
   } catch (err) {
-    if (err instanceof OrderValidationError) {
+    if (err instanceof OrderValidationError || err instanceof CheckoutAttemptError) {
       return NextResponse.json(
         { ok: false, error: err.message },
         { status: err.statusCode }
@@ -94,11 +128,7 @@ export async function POST(request: NextRequest) {
 /**
  * GET /api/orders — List the authenticated customer's orders.
  *
- * Query params:
- *   status? — filter by order status
- *   paymentStatus? — filter by payment status
- *   page? — pagination page (default 1)
- *   limit? — items per page (default 20, max 50)
+ * Excludes abandoned online checkout attempts by default.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -110,11 +140,12 @@ export async function GET(request: NextRequest) {
       paymentStatus: (url.searchParams.get("paymentStatus") as any) || undefined,
       page: parseInt(url.searchParams.get("page") || "1", 10),
       limit: parseInt(url.searchParams.get("limit") || "20", 10),
+      placedOnly: true, // Only show valid placed orders
     });
 
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    if (err instanceof OrderValidationError) {
+    if (err instanceof OrderValidationError || err instanceof CheckoutAttemptError) {
       return NextResponse.json(
         { ok: false, error: err.message },
         { status: err.statusCode }

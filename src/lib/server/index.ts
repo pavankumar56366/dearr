@@ -168,6 +168,8 @@ export {
   updateOrderStatus,
   updatePaymentStatus,
   cancelOrder,
+  validateShippingAddress,
+  generateOrderNumber,
   type OrderStatus,
   type PaymentStatus,
   type OrderItemSnapshot,
@@ -222,7 +224,6 @@ export {
   type SafeRazorpayConfig,
 } from "./razorpay";
 
-
 export {
   getGoogleOAuthConfig,
   generateOAuthState,
@@ -258,3 +259,47 @@ export {
   updateStoreSettings,
 } from "./settings";
 
+export {
+  resolveReportingPeriod,
+  getOrderSummaryMetrics,
+  mapToCanonicalBucket,
+  formatKolkataSqlDateTime,
+  formatKolkataDisplay,
+  getNowInAsiaKolkata,
+  kolkataToUtcDate,
+  PLACED_ORDER_SQL_PREDICATE,
+  REVENUE_ELIGIBLE_SQL_PREDICATE,
+  type ReportingPeriod,
+  type ResolvedReportingPeriod,
+  type OrderDashboardMetrics,
+  type CanonicalMetricBucket,
+  AnalyticsValidationError,
+} from "./order-analytics";
+
+export {
+  createCheckoutAttempt,
+  createCheckoutAttemptFromCart,
+  finalizeOrderFromAttempt,
+  getCheckoutAttemptById,
+  getCheckoutAttemptByProviderOrder,
+  updateCheckoutAttemptProviderOrder,
+  markAttemptConverted,
+  cleanupCheckoutAttempts,
+  reconcileLatePaymentAttempt,
+  ATTEMPT_EXPIRY_MINUTES,
+  ATTEMPT_RETENTION_DAYS,
+  type CheckoutAttemptRecord,
+  type CheckoutAttemptStatus,
+  type CreateCheckoutAttemptInput,
+  CheckoutAttemptError,
+} from "./checkout-attempt";
+
+export {
+  sanitizeCsvCell,
+  getExportFilename,
+  generateSummaryCsv,
+  streamOrdersListCsv,
+  recordExportAudit,
+  resolveOrderExportAmounts,
+  type ExportType,
+} from "./order-export";

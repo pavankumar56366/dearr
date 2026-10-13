@@ -361,21 +361,32 @@ export default function CheckoutPageClient() {
                       throw new Error(verifyData.error || "Payment signature verification failed.");
                     }
 
-                    // 2. Authoritative payment settlement
+                    // 2. Authoritative payment settlement confirmation
                     setAlertNotice("Finalizing order settlement...");
-                    const settleRes = await fetch("/api/payments/settle", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        orderId: createdOrder.id,
-                        razorpay_order_id: paymentResp.razorpay_order_id,
-                        razorpay_payment_id: paymentResp.razorpay_payment_id,
-                      }),
-                    });
-                    const settleData = await settleRes.json();
-                    if (!settleRes.ok || !settleData.ok) {
-                      throw new Error(settleData.error || "Order settlement failed.");
+                    let settleData: any = {};
+                    try {
+                      const settleRes = await fetch("/api/payments/settle", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          orderId: createdOrder.id,
+                          razorpay_order_id: paymentResp.razorpay_order_id,
+                          razorpay_payment_id: paymentResp.razorpay_payment_id,
+                        }),
+                      });
+                      settleData = await settleRes.json();
+                    } catch {
+                      // Fallback: verification already finalized the order
                     }
+
+                    const finalOrderNumber =
+                      verifyData.orderNumber ||
+                      settleData.orderNumber ||
+                      createdOrder.orderNumber;
+                    const finalOrderId =
+                      verifyData.orderId ||
+                      settleData.orderId ||
+                      createdOrder.id;
 
                     // Sync admin/local session store
                     try {
@@ -401,15 +412,15 @@ export default function CheckoutPageClient() {
                         shippingAmount: createdOrder.shippingAmount,
                         paymentMethod: "Razorpay (Paid)",
                       });
-                      adminOrder.orderNumber = createdOrder.orderNumber;
-                      adminOrder.id = createdOrder.id;
+                      adminOrder.orderNumber = finalOrderNumber;
+                      adminOrder.id = finalOrderId;
                       adminOrder.paymentStatus = "paid";
                       saveAdminOrder(adminOrder);
                     } catch {}
 
                     await clearCart();
                     setIsProcessing(false);
-                    router.push(`/order-confirmed?orderNumber=${createdOrder.orderNumber}`);
+                    router.push(`/order-confirmed?orderNumber=${finalOrderNumber}`);
                   } catch (err: any) {
                     setIsProcessing(false);
                     setAlertNotice(err.message || "Payment verification failed. Please contact support.");
@@ -418,7 +429,7 @@ export default function CheckoutPageClient() {
                 modal: {
                   ondismiss: async function () {
                     setIsProcessing(false);
-                    setAlertNotice("Payment checkout was closed. Your order remains pending and can be completed anytime.");
+                    setAlertNotice("Payment checkout was closed. Your cart remains saved so you can complete your purchase anytime.");
                     try {
                       await fetch("/api/payments/cancel", {
                         method: "POST",

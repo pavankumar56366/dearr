@@ -121,10 +121,10 @@ export async function POST(req: Request) {
       { status: 200 }
     );
   } catch (error: any) {
-    if (error instanceof PaymentValidationError) {
+    if (error instanceof PaymentValidationError || error?.name === "PaymentValidationError") {
       return NextResponse.json(
         { ok: false, error: error.message },
-        { status: error.statusCode }
+        { status: error.statusCode || 400 }
       );
     }
 

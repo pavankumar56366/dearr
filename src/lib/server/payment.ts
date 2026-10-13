@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { query, withTransaction } from "./db";
 import { type PaymentStatus, type OrderStatus, type OrderRecord, getOrderById } from "./order";
 import { getRazorpayClient, verifyRazorpaySignature } from "./razorpay";
+import { finalizeOrderFromAttempt } from "./checkout-attempt";
 
 /**
  * Custom error class for payment validation failures.
@@ -356,6 +357,83 @@ export async function createRazorpayPaymentOrder(
   const cleanOrderId = validateId(input.orderId, "Order ID");
   const cleanUserId = validateId(input.userId, "User ID");
 
+  // 0. Check if cleanOrderId is a checkout_attempt
+  const attemptRows = await query<any[]>(
+    "SELECT * FROM checkout_attempts WHERE id = ? LIMIT 1",
+    [cleanOrderId]
+  );
+
+  if (attemptRows && attemptRows.length > 0) {
+    const attempt = attemptRows[0];
+    if (attempt.user_id !== cleanUserId) {
+      throw new PaymentValidationError(
+        "Forbidden: You do not have permission to initiate payment for this attempt",
+        403
+      );
+    }
+    if (attempt.status === "converted") {
+      throw new PaymentValidationError("Checkout attempt already completed", 409);
+    }
+    const trustedTotal = Number(attempt.amount);
+    const amountInPaise = Math.round(trustedTotal * 100);
+    const orderCurrency = (attempt.currency || "INR").trim().toUpperCase();
+    const clientPublicKeyId =
+      (process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID || "").trim();
+
+    if (attempt.provider_order_id) {
+      return {
+        success: true,
+        razorpayOrderId: attempt.provider_order_id,
+        orderId: attempt.id,
+        orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+        amount: trustedTotal,
+        amountInPaise,
+        currency: orderCurrency,
+        keyId: clientPublicKeyId,
+        isExisting: true,
+      };
+    }
+
+    const razorpayClient = getRazorpayClient();
+    let rzpOrder: any;
+    try {
+      rzpOrder = await razorpayClient.orders.create({
+        amount: amountInPaise,
+        currency: orderCurrency,
+        receipt: `ATT-${attempt.id.slice(0, 8)}`,
+        notes: {
+          attemptId: attempt.id,
+          userId: cleanUserId,
+        },
+      });
+    } catch (error: any) {
+      const safeErrorMsg =
+        error?.error?.description || error?.message || "Razorpay order creation failed";
+      throw new PaymentValidationError(`Payment gateway error: ${safeErrorMsg}`, 502);
+    }
+
+    if (!rzpOrder || !rzpOrder.id) {
+      throw new PaymentValidationError("Payment gateway returned an invalid order response", 502);
+    }
+
+    await query(
+      "UPDATE checkout_attempts SET provider_order_id = ?, updated_at = NOW() WHERE id = ?",
+      [rzpOrder.id, attempt.id]
+    );
+
+    return {
+      success: true,
+      razorpayOrderId: rzpOrder.id,
+      orderId: attempt.id,
+      orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+      amount: trustedTotal,
+      amountInPaise,
+      currency: orderCurrency,
+      keyId: clientPublicKeyId,
+      isExisting: false,
+    };
+  }
+
   // 1. Fetch internal order by UUID id or order_number
   const orderRows = await query<any[]>(
     `SELECT id, order_number, user_id, status, payment_status, total_amount, currency
@@ -592,6 +670,84 @@ export async function verifyRazorpayPayment(
     throw new PaymentValidationError("Invalid Razorpay signature format", 400);
   }
 
+  // 0. Check if cleanOrderId or cleanRzpOrderId belongs to a checkout_attempt
+  const attemptRows = await query<any[]>(
+    "SELECT * FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
+    [cleanOrderId, cleanRzpOrderId]
+  );
+
+  if (attemptRows && attemptRows.length > 0) {
+    const attempt = attemptRows[0];
+    if (attempt.user_id !== cleanUserId) {
+      throw new PaymentValidationError(
+        "Forbidden: You do not have permission to verify payment for this attempt",
+        403
+      );
+    }
+
+    // Amount validation on attempt (if client supplied amount)
+    const trustedAttemptTotal = Number(attempt.amount);
+    if (input.amount !== undefined) {
+      const suppliedAmount = Number(input.amount);
+      if (isNaN(suppliedAmount) || Math.abs(suppliedAmount - trustedAttemptTotal) > 0.009) {
+        throw new PaymentValidationError(
+          `Payment amount mismatch: expected ₹${trustedAttemptTotal.toFixed(2)}, got ₹${suppliedAmount.toFixed(2)}`,
+          400
+        );
+      }
+    }
+
+    // Currency validation
+    const attemptCurrency = (attempt.currency || "INR").trim().toUpperCase();
+    if (input.currency !== undefined) {
+      const suppliedCurrency = input.currency.trim().toUpperCase();
+      if (suppliedCurrency !== attemptCurrency) {
+        throw new PaymentValidationError(
+          `Payment currency mismatch: expected ${attemptCurrency}, got ${input.currency}`,
+          400
+        );
+      }
+    }
+
+    // Duplicate payment prevention on already converted attempts
+    if (attempt.status === "converted" && attempt.provider_payment_id && attempt.provider_payment_id !== cleanRzpPaymentId) {
+      throw new PaymentValidationError(
+        "Order is already paid; duplicate payment with different payment ID rejected",
+        409
+      );
+    }
+
+    const trustedRzpOrderId = attempt.provider_order_id || cleanRzpOrderId;
+    const isSigValid = verifyRazorpaySignature(
+      trustedRzpOrderId,
+      cleanRzpPaymentId,
+      cleanSignature
+    );
+    if (!isSigValid) {
+      throw new PaymentValidationError("Invalid payment signature", 400);
+    }
+
+    const placedOrder = await finalizeOrderFromAttempt(attempt.id, {
+      providerPaymentId: cleanRzpPaymentId,
+      amount: input.amount,
+      currency: input.currency,
+    });
+
+    return {
+      success: true,
+      verified: true,
+      orderId: placedOrder.id,
+      orderNumber: placedOrder.orderNumber,
+      paymentId: attempt.id,
+      providerPaymentId: cleanRzpPaymentId,
+      status: "verified",
+      paymentStatus: "paid",
+      amount: Number(placedOrder.totalAmount),
+      currency: placedOrder.currency,
+      isExisting: attempt.status === "converted",
+    };
+  }
+
   // 1. Fetch internal order by UUID id or order_number
   const orderRows = await query<any[]>(
     `SELECT id, order_number, user_id, status, payment_status, total_amount, currency
@@ -800,6 +956,41 @@ export async function settlePaidOrder(
   const cleanUserId = validateId(input.userId, "User ID");
 
   return await withTransaction(async (conn) => {
+    // 0. Check if cleanOrderId is a checkout_attempt
+    const [attemptRows]: any = await conn.execute(
+      "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
+      [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+    );
+
+    if (attemptRows && attemptRows.length > 0) {
+      const attempt = attemptRows[0];
+      if (attempt.user_id !== cleanUserId) {
+        throw new PaymentValidationError(
+          "Forbidden: You do not have permission to settle payment for this attempt",
+          403
+        );
+      }
+      if (attempt.status === "converted" && attempt.order_id) {
+        const existingOrder = await getOrderById(attempt.order_id);
+        if (existingOrder) {
+          return {
+            success: true,
+            settled: true,
+            orderId: existingOrder.id,
+            orderNumber: existingOrder.orderNumber,
+            paymentStatus: "paid",
+            orderStatus: existingOrder.status,
+            paymentId: attempt.id,
+            providerPaymentId: input.razorpayPaymentId?.trim() || `pay_${attempt.id.slice(0, 8)}`,
+            amount: Number(existingOrder.totalAmount),
+            currency: existingOrder.currency,
+            paidAt: new Date(),
+            isExisting: true,
+          };
+        }
+      }
+    }
+
     // 1. Fetch internal order with exclusive row lock
     const [orderRows] = (await conn.execute(
       `SELECT id, order_number, user_id, status, payment_status, total_amount, currency
