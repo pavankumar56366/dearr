@@ -64,8 +64,11 @@ export {
   ProductValidationError,
   generateSlug,
   validateSlug,
+  validateHexColor,
+  generateColorSlug,
   toPublicUrl,
   toProductImage,
+  toProductColor,
   findProductById,
   findProductBySlug,
   getRelatedProducts,
@@ -77,10 +80,13 @@ export {
   type Product,
   type ProductImage,
   type ProductVariant,
+  type ProductColor,
   type ProductCategoryInfo,
   type ProductListFilters,
   type CreateProductInput,
   type UpdateProductInput,
+  type CreateProductColorInput,
+  type CreateProductImageInput,
 } from "./product";
 
 export {
@@ -146,11 +152,13 @@ export {
   getOrCreateActiveCartForUser,
   getCartForUser,
   addCartItem,
+  addCartItemsBatch,
   updateCartItemQuantity,
   removeCartItem,
   clearCartForUser,
   type CartProductSummary,
   type CartVariantSummary,
+  type CartColorSummary,
   type CartItemPricing,
   type CartItemStock,
   type CartItemRecord,
@@ -279,6 +287,8 @@ export {
 export {
   createCheckoutAttempt,
   createCheckoutAttemptFromCart,
+  createBuyNowCheckoutAttempt,
+  releaseCheckoutAttemptReservations,
   finalizeOrderFromAttempt,
   getCheckoutAttemptById,
   getCheckoutAttemptByProviderOrder,
@@ -291,6 +301,7 @@ export {
   type CheckoutAttemptRecord,
   type CheckoutAttemptStatus,
   type CreateCheckoutAttemptInput,
+  type BuyNowItemInput,
   CheckoutAttemptError,
 } from "./checkout-attempt";
 

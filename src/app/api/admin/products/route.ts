@@ -107,8 +107,10 @@ export async function POST(request: Request) {
       stockQuantity: body.stockQuantity ?? body.stock_quantity ?? 0,
       isFeatured: body.isFeatured ?? body.is_featured,
       isActive: body.isActive ?? body.is_active,
+      hasColors: body.hasColors ?? body.has_colors,
       images: body.images,
       variants: body.variants,
+      colors: body.colors,
     });
 
     return NextResponse.json(

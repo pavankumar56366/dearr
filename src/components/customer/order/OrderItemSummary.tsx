@@ -73,8 +73,19 @@ export default function OrderItemSummary({ order }: OrderItemSummaryProps) {
                 </Link>
                 {item.variantName && (
                   <span className="text-xs font-semibold text-neutral-500">
-                    Finish / Color: <strong className="text-neutral-700">{item.variantName}</strong>
+                    Finish / Option: <strong className="text-neutral-700">{item.variantName}</strong>
                   </span>
+                )}
+                {item.colorName && (
+                  <div className="flex items-center gap-1.5 text-xs text-neutral-600">
+                    <span
+                      className="w-3 h-3 rounded-full border border-black/15 shadow-xs shrink-0"
+                      style={{ backgroundColor: item.colorHex || "#6366F1" }}
+                    />
+                    <span>
+                      Color: <strong className="text-neutral-900">{item.colorName}</strong>
+                    </span>
+                  </div>
                 )}
                 <div className="flex items-center gap-2 text-xs text-neutral-600 mt-0.5">
                   <span>Qty: <strong className="text-neutral-900">{item.quantity}</strong></span>

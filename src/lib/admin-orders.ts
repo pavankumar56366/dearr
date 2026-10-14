@@ -30,6 +30,9 @@ export interface OrderItem {
   quantity: number;
   lineTotal: number;
   variantName?: string;
+  colorName?: string;
+  colorHex?: string;
+  sku?: string;
 }
 
 export interface OrderCustomer {

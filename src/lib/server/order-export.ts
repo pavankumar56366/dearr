@@ -350,6 +350,7 @@ export async function* streamOrdersListCsv(
          oi.order_id,
          oi.product_name,
          oi.variant_name,
+         oi.color_name,
          oi.quantity
        FROM order_items oi
        WHERE oi.order_id IN (${placeholders})
@@ -360,8 +361,9 @@ export async function* streamOrdersListCsv(
     const itemsByOrder = new Map<string, { summary: string; totalQty: number }>();
     for (const item of itemsRows || []) {
       const existing = itemsByOrder.get(item.order_id) || { summary: "", totalQty: 0 };
-      const desc = item.variant_name
-        ? `${item.product_name} (${item.variant_name}) x${item.quantity}`
+      const variantOrColor = item.color_name || item.variant_name;
+      const desc = variantOrColor
+        ? `${item.product_name} (${variantOrColor}) x${item.quantity}`
         : `${item.product_name} x${item.quantity}`;
       existing.summary = existing.summary ? `${existing.summary}; ${desc}` : desc;
       existing.totalQty += Number(item.quantity || 0);
@@ -413,4 +415,18 @@ export async function* streamOrdersListCsv(
   }
 
   return { totalRows };
+}
+
+/**
+ * Convenience helper to generate full orders CSV as an in-memory string.
+ */
+export async function generateOrdersCsv(rangeOrPeriod: any = "all"): Promise<string> {
+  const resolved = typeof rangeOrPeriod === "object" && rangeOrPeriod?.startSql
+    ? rangeOrPeriod
+    : resolveReportingPeriod(rangeOrPeriod);
+  let csv = "";
+  for await (const chunk of streamOrdersListCsv(resolved)) {
+    csv += chunk;
+  }
+  return csv;
 }

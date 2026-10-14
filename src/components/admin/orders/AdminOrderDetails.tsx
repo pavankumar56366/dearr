@@ -74,11 +74,14 @@ export function AdminOrderDetails({
                 productId: it.productId || "",
                 name: it.productName,
                 slug: "",
-                image: "/product-samples/1.jpeg",
+                image: it.imageUrl || "/product-samples/1.jpeg",
                 unitPrice: it.unitPrice,
                 quantity: it.quantity,
                 lineTotal: it.lineTotal,
                 variantName: it.variantName || undefined,
+                colorName: it.colorName || undefined,
+                colorHex: it.colorHex || undefined,
+                sku: it.sku || undefined,
               })),
               subtotal: o.subtotal,
               discountAmount: o.discountAmount,
@@ -461,8 +464,17 @@ export function AdminOrderDetails({
                           Variant: {item.variantName}
                         </div>
                       )}
+                      {(item as any).colorName && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-600 font-medium">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-black/15 shadow-xs shrink-0"
+                            style={{ backgroundColor: (item as any).colorHex || "#6366F1" }}
+                          />
+                          <span>Color: <strong className="text-neutral-800">{(item as any).colorName}</strong></span>
+                        </div>
+                      )}
                       <div className="text-[11px] text-neutral-400 font-mono">
-                        SKU: {item.productId}
+                        SKU: {(item as any).sku || item.productId}
                       </div>
                     </div>
                   </div>

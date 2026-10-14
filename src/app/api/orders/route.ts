@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { query } from "@/lib/server/db";
 import {
   createOrderFromCart,
   listCustomerOrders,
@@ -7,6 +8,8 @@ import {
 } from "@/lib/server/order";
 import {
   createCheckoutAttemptFromCart,
+  createBuyNowCheckoutAttempt,
+  getCheckoutAttemptById,
   CheckoutAttemptError,
 } from "@/lib/server/checkout-attempt";
 import {
@@ -89,9 +92,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Standard Online Prepaid Flow: Create checkout attempt first.
-    // Unpaid attempts never write to orders table; stock is preserved until verified capture.
-    const attempt = await createCheckoutAttemptFromCart(user.id, shippingData);
+    // Standard Online Prepaid Flow: Create or reuse checkout attempt.
+    let attempt;
+    if (body.intentId) {
+      const existingAttempt = await getCheckoutAttemptById(body.intentId);
+      if (!existingAttempt || existingAttempt.userId !== user.id) {
+        return NextResponse.json({ ok: false, error: "Checkout session not found" }, { status: 404 });
+      }
+      if (existingAttempt.status !== "pending" || new Date(existingAttempt.expiresAt) <= new Date()) {
+        return NextResponse.json({ ok: false, error: "Checkout session has expired. Please try again." }, { status: 410 });
+      }
+
+      const updatedCheckoutData = {
+        ...existingAttempt.checkoutData,
+        shippingAddress: shippingData,
+      };
+      await query(
+        "UPDATE checkout_attempts SET checkout_data = ?, updated_at = NOW() WHERE id = ?",
+        [JSON.stringify(updatedCheckoutData), existingAttempt.id]
+      );
+      existingAttempt.checkoutData = updatedCheckoutData;
+      attempt = existingAttempt;
+    } else if (body.isBuyNow && Array.isArray(body.items) && body.items.length > 0) {
+      attempt = await createBuyNowCheckoutAttempt(user.id, shippingData, body.items);
+    } else {
+      attempt = await createCheckoutAttemptFromCart(user.id, shippingData);
+    }
 
     return NextResponse.json(
       {

@@ -51,6 +51,30 @@ function mapApiProductToSampleProduct(p: any): SampleProduct {
             isActive: Boolean(v.isActive),
           }))
         : undefined,
+    hasColors: Boolean(p.hasColors ?? p.has_colors),
+    colors: Array.isArray(p.colors) && p.colors.length > 0
+      ? p.colors.map((c: any) => ({
+          id: c.id,
+          name: c.name,
+          slug: c.slug,
+          hex: c.hex,
+          sku: c.sku || "",
+          stock: Number(c.stock ?? 0),
+          reservedStock: Number(c.reservedStock ?? c.reserved_stock ?? 0),
+          availableStock: Number(c.availableStock ?? c.available_stock ?? c.stock ?? 0),
+          priceOverride:
+            c.priceOverride !== null && c.priceOverride !== undefined
+              ? Number(c.priceOverride)
+              : null,
+          sortOrder: Number(c.sortOrder ?? c.sort_order ?? 0),
+          isActive: Boolean(c.isActive ?? c.is_active ?? true),
+          images: Array.isArray(c.images)
+            ? c.images.map((img: any) =>
+                typeof img === "string" ? img : img.url || img.imageUrl || img.storagePath
+              )
+            : [],
+        }))
+      : undefined,
   };
 }
 

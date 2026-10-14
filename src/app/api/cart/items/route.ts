@@ -3,6 +3,7 @@ import {
   requireUser,
   handleAuthError,
   addCartItem,
+  addCartItemsBatch,
   CartValidationError,
 } from "@/lib/server";
 
@@ -48,30 +49,62 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!body.productId || typeof body.productId !== "string") {
-      return NextResponse.json(
-        { ok: false, error: "Product ID is required and must be a string" },
-        { status: 400 }
-      );
-    }
+    let updatedCart;
+    if (Array.isArray(body.items)) {
+      if (body.items.length === 0) {
+        return NextResponse.json(
+          { ok: false, error: "Items array cannot be empty" },
+          { status: 400 }
+        );
+      }
+      for (const item of body.items) {
+        if (!item || typeof item !== "object" || !item.productId || typeof item.productId !== "string") {
+          return NextResponse.json(
+            { ok: false, error: "Each item must have a valid productId" },
+            { status: 400 }
+          );
+        }
+        if (item.quantity === undefined || item.quantity === null) {
+          return NextResponse.json(
+            { ok: false, error: "Each item must have a quantity" },
+            { status: 400 }
+          );
+        }
+      }
+      const preparedBatch = body.items.map((it: any) => ({
+        productId: it.productId,
+        variantId: it.variantId || null,
+        colorId: it.colorId || null,
+        quantity: it.quantity,
+      }));
+      updatedCart = await addCartItemsBatch(user.id, preparedBatch);
+    } else {
+      if (!body.productId || typeof body.productId !== "string") {
+        return NextResponse.json(
+          { ok: false, error: "Product ID is required and must be a string" },
+          { status: 400 }
+        );
+      }
 
-    if (body.quantity === undefined || body.quantity === null) {
-      return NextResponse.json(
-        { ok: false, error: "Quantity is required" },
-        { status: 400 }
-      );
-    }
+      if (body.quantity === undefined || body.quantity === null) {
+        return NextResponse.json(
+          { ok: false, error: "Quantity is required" },
+          { status: 400 }
+        );
+      }
 
-    const updatedCart = await addCartItem(user.id, {
-      productId: body.productId,
-      variantId: body.variantId || null,
-      quantity: body.quantity,
-    });
+      updatedCart = await addCartItem(user.id, {
+        productId: body.productId,
+        variantId: body.variantId || null,
+        colorId: body.colorId || null,
+        quantity: body.quantity,
+      });
+    }
 
     return NextResponse.json(
       {
         ok: true,
-        message: "Item added to cart",
+        message: "Item(s) added to cart",
         cart: updatedCart,
       },
       { status: 201 }

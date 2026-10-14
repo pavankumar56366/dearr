@@ -114,6 +114,8 @@ export function AdminProductsList() {
               details: p.details || [],
               tags: p.tags || [],
               variants: p.variants || [],
+              hasColors: Boolean(p.hasColors),
+              colors: p.colors || [],
             }));
             setProducts(mapped);
             return;
@@ -606,21 +608,60 @@ export function AdminProductsList() {
 
                             {/* Stock Badge */}
                             <td className="py-3.5 px-3">
-                              {isOutOfStock ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
-                                  <span>Out of Stock (0)</span>
-                                </span>
-                              ) : isLowStock ? (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                                  <span>Low Stock ({p.stockQuantity})</span>
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                                  <span>In Stock ({p.stockQuantity})</span>
-                                </span>
+                              {p.hasColors ? (() => {
+                                const activeColors = (p.colors || []).filter((c: any) => c.isActive !== false);
+                                const totalColorStock = activeColors.reduce((sum: number, c: any) => sum + Number(c.availableStock ?? c.stock ?? 0), 0);
+                                const hasAnyOutOfStock = activeColors.some((c: any) => Number(c.availableStock ?? c.stock ?? 0) <= 0);
+                                const isColorsOutOfStock = totalColorStock === 0;
+                                const isColorsLowStock = totalColorStock > 0 && totalColorStock <= 3;
+
+                                return (
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-bold text-neutral-600 bg-neutral-100 px-1.5 py-0.5 rounded border border-neutral-200">
+                                        {activeColors.length} {activeColors.length === 1 ? "color" : "colors"}
+                                      </span>
+                                    </div>
+                                    {isColorsOutOfStock ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700 border border-red-200">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                                        <span>Out of Stock (0)</span>
+                                      </span>
+                                    ) : isColorsLowStock ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                        <span>Low Stock ({totalColorStock})</span>
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                        <span>In Stock ({totalColorStock})</span>
+                                      </span>
+                                    )}
+                                    {hasAnyOutOfStock && !isColorsOutOfStock && (
+                                      <span className="text-[9px] text-amber-600 font-medium">
+                                        Some colors out of stock
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })() : (
+                                isOutOfStock ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-50 text-red-700 border border-red-200">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-600" />
+                                    <span>Out of Stock (0)</span>
+                                  </span>
+                                ) : isLowStock ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                                    <span>Low Stock ({p.stockQuantity})</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+                                    <span>In Stock ({p.stockQuantity})</span>
+                                  </span>
+                                )
                               )}
                             </td>
 

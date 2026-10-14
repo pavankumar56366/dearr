@@ -1,9 +1,16 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import ProductCard from "@/components/customer/home/ProductCard";
-import { ChevronRightIcon, CheckIcon } from "@/components/customer/Icons";
+import {
+  ChevronRightIcon,
+  CheckIcon,
+  PlusIcon,
+  MinusIcon,
+  TrashIcon,
+} from "@/components/customer/Icons";
 
 const TRUST_BENEFITS = [
   {
@@ -43,6 +50,12 @@ import ProductNotFound from "./ProductNotFound";
 import { useCart } from "@/context/CartContext";
 import { getProductGalleryImages, getProductPrimaryImage } from "@/lib/product-image";
 
+interface ColorOrderRow {
+  rowId: string;
+  colorId: string;
+  quantity: number;
+}
+
 interface ProductDetailsClientProps {
   product?: any | null;
   initialProduct?: any | null;
@@ -56,6 +69,10 @@ export default function ProductDetailsClient({
   initialRelatedProducts,
   slug: propSlug,
 }: ProductDetailsClientProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const colorQueryParam = searchParams.get("color");
+
   const base = directProduct ?? initialProduct ?? null;
   const activeSlug = propSlug || base?.slug;
 
@@ -132,6 +149,64 @@ export default function ProductDetailsClient({
     };
   }, [activeSlug, initialProduct, initialRelatedProducts]);
 
+  // Determine Color Variants Configuration
+  const hasColors = Boolean(
+    product?.hasColors ??
+      product?.has_colors ??
+      (Array.isArray(product?.colors) && product.colors.length > 0)
+  );
+
+  const productColors: any[] = useMemo(() => {
+    if (!hasColors || !Array.isArray(product?.colors)) return [];
+    return product.colors.filter((c: any) => c.isActive !== false);
+  }, [hasColors, product?.colors]);
+
+  // Initial Color Selection with deep link support
+  const initialSelectedColor = useMemo(() => {
+    if (productColors.length === 0) return null;
+    if (colorQueryParam) {
+      const match = productColors.find(
+        (c) => c.slug?.toLowerCase() === colorQueryParam.toLowerCase()
+      );
+      if (match) return match;
+    }
+    const firstInStock = productColors.find(
+      (c) => (c.availableStock ?? c.stock ?? 0) > 0
+    );
+    return firstInStock || productColors[0];
+  }, [productColors, colorQueryParam]);
+
+  const [activeColorId, setActiveColorId] = useState<string | null>(
+    initialSelectedColor?.id || null
+  );
+
+  useEffect(() => {
+    if (initialSelectedColor && !activeColorId) {
+      setActiveColorId(initialSelectedColor.id);
+    }
+  }, [initialSelectedColor, activeColorId]);
+
+  // Multi-color purchasing rows state
+  const [colorRows, setColorRows] = useState<ColorOrderRow[]>([]);
+
+  // Initialize or reset color rows when product changes
+  useEffect(() => {
+    if (hasColors && productColors.length > 0) {
+      const firstCol = initialSelectedColor || productColors[0];
+      setColorRows((prev) => {
+        if (prev.length > 0) return prev;
+        return [
+          {
+            rowId: `row-${firstCol.id}`,
+            colorId: firstCol.id,
+            quantity: 1,
+          },
+        ];
+      });
+    }
+  }, [hasColors, productColors, initialSelectedColor]);
+
+  // Single-SKU Variant & Quantity state
   const defaultVariant =
     product?.variants?.find((v: any) => v.isActive && v.stockQuantity > 0) ||
     product?.variants?.[0];
@@ -139,8 +214,8 @@ export default function ProductDetailsClient({
   const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(
     defaultVariant?.id
   );
-  const [quantity, setQuantity] = useState(1);
-  const { addItem } = useCart();
+  const [singleQuantity, setSingleQuantity] = useState(1);
+  const { addItem, addBatchItems } = useCart();
 
   useEffect(() => {
     if (product) {
@@ -201,7 +276,7 @@ export default function ProductDetailsClient({
     return <ProductNotFound slug={activeSlug} />;
   }
 
-  const hasVariants = Boolean(product.variants && product.variants.length > 0);
+  const hasVariants = !hasColors && Boolean(product.variants && product.variants.length > 0);
 
   // Normalize category info
   const categoryName =
@@ -214,42 +289,241 @@ export default function ProductDetailsClient({
       : product.categorySlug || "";
 
   // Normalize images
-  const galleryImages = getProductGalleryImages(product);
-  const mainImage = galleryImages[0] || getProductPrimaryImage(product);
+  const galleryImages =
+    Array.isArray(product.images) && product.images.length > 0
+      ? product.images
+      : getProductGalleryImages(product);
+  const mainImage =
+    (Array.isArray(product.images) && (product.images[0]?.url || product.images[0]?.storagePath)) ||
+    getProductPrimaryImage(product);
 
-  // Selected variant adjustments
+  // Color variant helpers
+  const activeColor = productColors.find((c) => c.id === activeColorId) || productColors[0];
+  const activeColorStock = activeColor ? (activeColor.availableStock ?? activeColor.stock ?? 0) : 0;
+  const isAllColorsOutOfStock =
+    hasColors && productColors.every((c) => (c.availableStock ?? c.stock ?? 0) <= 0);
+
+  // Selected variant adjustments for single-SKU
   const currentVariant = product.variants?.find((v: any) => v.id === selectedVariantId);
   const currentPrice = currentVariant?.price ?? product.price;
-  const maxStock = currentVariant ? currentVariant.stockQuantity : product.stockQuantity;
+  const maxStock = hasColors
+    ? productColors.reduce((sum, c) => sum + (c.availableStock ?? c.stock ?? 0), 0)
+    : currentVariant
+    ? currentVariant.stockQuantity
+    : product.stockQuantity;
 
-  // Determine out-of-stock state
+  // Determine overall out-of-stock state
   const isOutOfStock =
     product.isActive === false ||
-    (currentVariant
+    (hasColors
+      ? isAllColorsOutOfStock
+      : currentVariant
       ? !currentVariant.isActive || currentVariant.stockQuantity <= 0
       : product.stockQuantity <= 0);
 
-  // Discount calculation based on active pricing
+  // Multi-color Calculations
+  const multiColorTotalQuantity = colorRows.reduce((sum, r) => sum + r.quantity, 0);
+  const multiColorTotalPrice = colorRows.reduce((sum, r) => {
+    const col = productColors.find((c) => c.id === r.colorId);
+    const unitPrice =
+      col?.priceOverride !== null && col?.priceOverride !== undefined
+        ? Number(col.priceOverride)
+        : Number(product.price);
+    return sum + unitPrice * r.quantity;
+  }, 0);
+
+  // Discount calculation
+  const effectiveDisplayPrice = hasColors
+    ? (activeColor?.priceOverride !== null && activeColor?.priceOverride !== undefined
+        ? Number(activeColor.priceOverride)
+        : Number(product.price))
+    : currentPrice;
+
   const hasDiscount =
-    product.compareAtPrice !== null && product.compareAtPrice > currentPrice;
+    product.compareAtPrice !== null && product.compareAtPrice > effectiveDisplayPrice;
   const discountPercent = hasDiscount
     ? Math.round(
-        ((product.compareAtPrice! - currentPrice) / product.compareAtPrice!) * 100
+        ((product.compareAtPrice! - effectiveDisplayPrice) / product.compareAtPrice!) * 100
       )
     : null;
   const discountBadge = discountPercent ? `${discountPercent}% OFF` : null;
 
+  // Swatch Click Handler with deep linking
+  const handleSelectColor = (color: any) => {
+    setActiveColorId(color.id);
+
+    // Sync deep link URL (?color=slug) without full-page refresh
+    if (typeof window !== "undefined" && color.slug) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("color", color.slug);
+      window.history.replaceState(null, "", url.toString());
+    }
+
+    // Auto-update first row if only 1 row exists, or keep rows synced
+    setColorRows((prev) => {
+      if (prev.length === 0) {
+        return [{ rowId: `row-${color.id}`, colorId: color.id, quantity: 1 }];
+      }
+      const existing = prev.find((r) => r.colorId === color.id);
+      if (existing) return prev;
+      if (prev.length === 1) {
+        return [{ ...prev[0], colorId: color.id, rowId: `row-${color.id}` }];
+      }
+      return prev;
+    });
+  };
+
+  // Add another color row
+  const handleAddAnotherColor = () => {
+    const existingColorIds = new Set(colorRows.map((r) => r.colorId));
+    const nextAvailable =
+      productColors.find(
+        (c) => !existingColorIds.has(c.id) && (c.availableStock ?? c.stock ?? 0) > 0
+      ) || productColors.find((c) => !existingColorIds.has(c.id));
+
+    if (nextAvailable) {
+      setColorRows((prev) => [
+        ...prev,
+        {
+          rowId: `row-${nextAvailable.id}-${Date.now()}`,
+          colorId: nextAvailable.id,
+          quantity: 1,
+        },
+      ]);
+      setActiveColorId(nextAvailable.id);
+    }
+  };
+
+  // Quantity change for a specific color row
+  const handleUpdateRowQuantity = (rowId: string, delta: number) => {
+    setColorRows((prev) =>
+      prev.map((r) => {
+        if (r.rowId !== rowId) return r;
+        const col = productColors.find((c) => c.id === r.colorId);
+        const colStock = col ? Math.min(col.availableStock ?? col.stock ?? 10, 10) : 10;
+        const newQty = Math.max(1, Math.min(r.quantity + delta, colStock));
+        return { ...r, quantity: newQty };
+      })
+    );
+  };
+
+  // Remove a color row
+  const handleRemoveRow = (rowId: string) => {
+    setColorRows((prev) => (prev.length > 1 ? prev.filter((r) => r.rowId !== rowId) : prev));
+  };
+
+  // Change color for an existing row
+  const handleRowColorChange = (rowId: string, newColorId: string) => {
+    setColorRows((prev) =>
+      prev.map((r) => (r.rowId === rowId ? { ...r, colorId: newColorId } : r))
+    );
+    setActiveColorId(newColorId);
+  };
+
+  // Variant selector for single-SKU legacy products
   const handleVariantSelect = (variantId: string) => {
     setSelectedVariantId(variantId);
     const variant = product.variants?.find((v: any) => v.id === variantId);
     if (variant) {
       if (variant.stockQuantity <= 0 || !variant.isActive) {
-        setQuantity(1);
-      } else if (quantity > variant.stockQuantity) {
-        setQuantity(variant.stockQuantity);
+        setSingleQuantity(1);
+      } else if (singleQuantity > variant.stockQuantity) {
+        setSingleQuantity(variant.stockQuantity);
       }
     }
   };
+
+  // Add to Cart Action
+  const handleAddToCart = () => {
+    if (hasColors) {
+      if (colorRows.length === 0) return;
+      const batchItems = colorRows.map((r) => {
+        const col = productColors.find((c) => c.id === r.colorId)!;
+        const colPrice =
+          col?.priceOverride !== null && col?.priceOverride !== undefined
+            ? Number(col.priceOverride)
+            : Number(product.price);
+        return {
+          product: {
+            ...product,
+            price: colPrice,
+            image: col?.primaryImage || mainImage,
+            category: categoryName,
+            categorySlug: categorySlug,
+          },
+          quantity: r.quantity,
+          color: {
+            id: col.id,
+            name: col.name,
+            hex: col.hex,
+            sku: col.sku || null,
+            image: col.primaryImage || null,
+          },
+        };
+      });
+      addBatchItems(batchItems);
+    } else {
+      const cartProduct = {
+        ...product,
+        image: mainImage,
+        category: categoryName,
+        categorySlug: categorySlug,
+      };
+      addItem(cartProduct, singleQuantity, currentVariant);
+    }
+  };
+
+  // Buy Now Action: isolated checkout intent
+  const handleBuyNow = async () => {
+    if (isOutOfStock) return;
+    try {
+      let itemsToOrder: Array<{
+        productId: string;
+        variantId?: string | null;
+        colorId?: string | null;
+        quantity: number;
+      }> = [];
+
+      if (hasColors) {
+        itemsToOrder = colorRows.map((r) => ({
+          productId: product.id,
+          colorId: r.colorId,
+          quantity: r.quantity,
+        }));
+      } else {
+        itemsToOrder = [
+          {
+            productId: product.id,
+            variantId: currentVariant?.id || null,
+            quantity: singleQuantity,
+          },
+        ];
+      }
+
+      const res = await fetch("/api/checkout/intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items: itemsToOrder }),
+      });
+
+      const data = await res.json();
+      if (res.ok && data.ok && data.intentId) {
+        router.push(`/checkout?intentId=${encodeURIComponent(data.intentId)}`);
+        return;
+      }
+
+      if (data?.error) {
+        alert(data.error);
+      }
+    } catch (err) {
+      console.error("[Buy Now Error]", err);
+    }
+  };
+
+  const unusedColors = useMemo(() => {
+    const used = new Set(colorRows.map((r) => r.colorId));
+    return productColors.filter((c) => !used.has(c.id));
+  }, [productColors, colorRows]);
 
   return (
     <div
@@ -322,6 +596,9 @@ export default function ProductDetailsClient({
               isOutOfStock={isOutOfStock}
               discountBadge={discountBadge}
               isFeatured={product.isFeatured}
+              activeColorId={hasColors ? activeColor?.id : null}
+              activeColorName={hasColors ? activeColor?.name : null}
+              colors={productColors}
             />
           </div>
 
@@ -392,7 +669,7 @@ export default function ProductDetailsClient({
               }}
             >
               <ProductPrice
-                price={currentPrice}
+                price={effectiveDisplayPrice}
                 compareAtPrice={product.compareAtPrice}
               />
             </div>
@@ -402,7 +679,228 @@ export default function ProductDetailsClient({
               <p>{product.description}</p>
             </div>
 
-            {/* Reusable Variants Selector (rendered only when variants exist) */}
+            {/* ==========================================================
+                COLOR SWATCH SELECTOR (When product has multiple colors)
+                ========================================================== */}
+            {hasColors && productColors.length > 0 && (
+              <div className="space-y-3 pt-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-neutral-500">
+                      Color:
+                    </span>
+                    <span className="text-sm font-black text-neutral-900">
+                      {activeColor?.name || "Choose Color"}
+                    </span>
+                  </div>
+                  {activeColor && (
+                    <span className="text-xs text-neutral-500">
+                      {activeColorStock > 0 ? (
+                        <span className="text-emerald-700 font-medium">
+                          {activeColorStock} in stock
+                        </span>
+                      ) : (
+                        <span className="text-red-600 font-medium">Out of stock</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+
+                {/* Swatch Strip */}
+                <div
+                  className="flex items-center flex-wrap gap-2.5"
+                  role="radiogroup"
+                  aria-label="Product color choices"
+                >
+                  {productColors.map((color) => {
+                    const isSelected = color.id === activeColorId;
+                    const cStock = color.availableStock ?? color.stock ?? 0;
+                    const isColorOOS = cStock <= 0;
+
+                    return (
+                      <button
+                        key={color.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={isSelected}
+                        aria-disabled={isColorOOS}
+                        id={`swatch-${color.slug || color.id}`}
+                        onClick={() => handleSelectColor(color)}
+                        title={`${color.name}${isColorOOS ? " (Out of Stock)" : ` (${cStock} available)`}`}
+                        aria-label={`${color.name}${isColorOOS ? " - Out of stock" : ""}`}
+                        className={`group relative w-10 h-10 min-w-10 min-h-10 sm:w-11 sm:h-11 rounded-full p-0.5 transition-all focus:outline-none cursor-pointer flex items-center justify-center ${
+                          isSelected
+                            ? "ring-2 ring-primary ring-offset-2 ring-offset-canvas scale-105"
+                            : "hover:scale-105 opacity-90 hover:opacity-100"
+                        } ${isColorOOS ? "opacity-45 cursor-pointer" : ""}`}
+                      >
+                        <span
+                          className={`w-full h-full rounded-full border border-black/15 shadow-xs relative overflow-hidden flex items-center justify-center ${
+                            isColorOOS
+                              ? "before:absolute before:inset-0 before:w-full before:h-[2px] before:bg-neutral-600 before:rotate-45 before:top-1/2 before:-translate-y-1/2"
+                              : ""
+                          }`}
+                          style={{ backgroundColor: color.hex }}
+                        >
+                          {isSelected && !isColorOOS && (
+                            <span className="w-2 h-2 rounded-full bg-white shadow-xs drop-shadow-sm" />
+                          )}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ==========================================================
+                MULTI-COLOR PURCHASING SECTION (PDP Multi-Color Buying)
+                ========================================================== */}
+            {hasColors && productColors.length > 0 && (
+              <div
+                className="p-4 sm:p-5 rounded-2xl border space-y-4"
+                style={{
+                  background: "var(--color-surface)",
+                  borderColor: "var(--color-neutral-200)",
+                }}
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-800">
+                    Selected Color Quantities
+                  </span>
+                  <span className="text-[11px] text-neutral-500">
+                    Max 10 units per color
+                  </span>
+                </div>
+
+                {/* Rows List */}
+                <div className="space-y-3">
+                  {colorRows.map((row) => {
+                    const rowCol = productColors.find((c) => c.id === row.colorId) || productColors[0];
+                    const rowStock = rowCol ? (rowCol.availableStock ?? rowCol.stock ?? 0) : 0;
+                    const rowMaxQty = Math.min(rowStock, 10);
+                    const rowUnitPrice =
+                      rowCol?.priceOverride !== null && rowCol?.priceOverride !== undefined
+                        ? Number(rowCol.priceOverride)
+                        : Number(product.price);
+                    const isRowOOS = rowStock <= 0;
+
+                    return (
+                      <div
+                        key={row.rowId}
+                        className="p-3 rounded-xl bg-neutral-50 border border-neutral-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                      >
+                        {/* Color Selector & Info */}
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="w-7 h-7 rounded-full border border-black/15 shadow-xs shrink-0"
+                            style={{ backgroundColor: rowCol.hex }}
+                          />
+                          <div>
+                            <select
+                              value={row.colorId}
+                              onChange={(e) => handleRowColorChange(row.rowId, e.target.value)}
+                              aria-label="Change color for this row"
+                              className="text-xs font-bold text-neutral-900 bg-transparent border-0 focus:ring-0 cursor-pointer p-0"
+                            >
+                              {productColors.map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.name}
+                                  {(c.availableStock ?? c.stock ?? 0) <= 0 ? " (Out of stock)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[11px] text-neutral-500">
+                                ₹{rowUnitPrice.toLocaleString("en-IN")} each
+                              </span>
+                              <span className="text-neutral-300">•</span>
+                              <span
+                                className={`text-[10px] font-medium ${
+                                  isRowOOS ? "text-red-600" : "text-emerald-700"
+                                }`}
+                              >
+                                {isRowOOS ? "Out of Stock" : `${rowStock} available`}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quantity Stepper & Subtotal */}
+                        <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-auto w-full sm:w-auto">
+                          {/* Stepper */}
+                          <div className="inline-flex items-center rounded-lg border border-neutral-300 bg-white shadow-xs">
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateRowQuantity(row.rowId, -1)}
+                              disabled={row.quantity <= 1 || isRowOOS}
+                              aria-label={`Decrease quantity for ${rowCol.name}`}
+                              className="w-8 h-8 flex items-center justify-center text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 disabled:opacity-30 disabled:pointer-events-none rounded-l-lg transition cursor-pointer"
+                            >
+                              <MinusIcon size={14} />
+                            </button>
+                            <span className="w-8 text-center text-xs font-bold text-neutral-900 select-none">
+                              {row.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateRowQuantity(row.rowId, 1)}
+                              disabled={row.quantity >= rowMaxQty || isRowOOS}
+                              aria-label={`Increase quantity for ${rowCol.name}`}
+                              className="w-8 h-8 flex items-center justify-center text-neutral-600 hover:text-neutral-900 hover:bg-neutral-100 disabled:opacity-30 disabled:pointer-events-none rounded-r-lg transition cursor-pointer"
+                            >
+                              <PlusIcon size={14} />
+                            </button>
+                          </div>
+
+                          {/* Row Subtotal */}
+                          <span className="text-xs font-black text-neutral-900 min-w-[60px] text-right">
+                            ₹{(rowUnitPrice * row.quantity).toLocaleString("en-IN")}
+                          </span>
+
+                          {/* Delete row button (if more than 1 row) */}
+                          {colorRows.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveRow(row.rowId)}
+                              aria-label={`Remove ${rowCol.name} row`}
+                              className="p-1 text-neutral-400 hover:text-red-600 transition cursor-pointer"
+                            >
+                              <TrashIcon size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add Another Color Button */}
+                {unusedColors.length > 0 && (
+                  <button
+                    type="button"
+                    id="btn-add-another-color"
+                    onClick={handleAddAnotherColor}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-neutral-700 hover:text-neutral-950 py-1 transition cursor-pointer"
+                  >
+                    <PlusIcon size={14} />
+                    <span>+ Add another color</span>
+                  </button>
+                )}
+
+                {/* Live Order Summary Strip */}
+                <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-xs">
+                  <span className="text-neutral-600 font-medium">
+                    Order Total ({multiColorTotalQuantity} {multiColorTotalQuantity === 1 ? "item" : "items"}):
+                  </span>
+                  <span className="text-base font-black text-neutral-900">
+                    ₹{multiColorTotalPrice.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Reusable Variants Selector for single-SKU legacy products */}
             {hasVariants && (
               <ProductVariants
                 variants={product.variants}
@@ -412,33 +910,28 @@ export default function ProductDetailsClient({
               />
             )}
 
-            {/* Quantity Selector */}
-            <QuantitySelector
-              quantity={quantity}
-              onQuantityChange={setQuantity}
-              min={1}
-              max={isOutOfStock ? 0 : Math.min(maxStock, 10)}
-              disabled={isOutOfStock}
-            />
+            {/* Quantity Selector for single-SKU legacy products */}
+            {!hasColors && (
+              <QuantitySelector
+                quantity={singleQuantity}
+                onQuantityChange={setSingleQuantity}
+                min={1}
+                max={isOutOfStock ? 0 : Math.min(maxStock, 10)}
+                disabled={isOutOfStock}
+              />
+            )}
 
             {/* Product Actions (Add to Cart, Buy Now, Wishlist, Toast, and Mobile Sticky Bar) */}
             <ProductActions
               productId={product.id}
               productSlug={product.slug}
               productName={product.name}
-              price={currentPrice * quantity}
+              price={hasColors ? multiColorTotalPrice : currentPrice * singleQuantity}
               isOutOfStock={isOutOfStock}
               hasVariants={hasVariants}
               selectedVariantId={selectedVariantId}
-              onAddToCart={() => {
-                const cartProduct = {
-                  ...product,
-                  image: mainImage,
-                  category: categoryName,
-                  categorySlug: categorySlug,
-                };
-                addItem(cartProduct, quantity, currentVariant);
-              }}
+              onAddToCart={handleAddToCart}
+              onBuyNow={handleBuyNow}
             />
 
             {/* 3D Printing Highlights Badge */}

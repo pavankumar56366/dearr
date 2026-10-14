@@ -1,4 +1,4 @@
-import { cache } from "react";
+import { cache, Suspense } from "react";
 import type { Metadata } from "next";
 import { findProductBySlug, getRelatedProducts } from "@/lib/server";
 import {
@@ -100,10 +100,18 @@ export default async function ProductPage({ params }: ProductPageProps) {
   }
 
   return (
-    <ProductDetailsClient
-      initialProduct={product}
-      initialRelatedProducts={relatedProducts}
-      slug={cleanSlug}
-    />
+    <Suspense
+      fallback={
+        <div className="min-h-[60vh] flex items-center justify-center">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+        </div>
+      }
+    >
+      <ProductDetailsClient
+        initialProduct={product}
+        initialRelatedProducts={relatedProducts}
+        slug={cleanSlug}
+      />
+    </Suspense>
   );
 }

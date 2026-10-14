@@ -44,8 +44,13 @@ export interface OrderItemSnapshot {
   orderId: string;
   productId: string | null;
   variantId: string | null;
+  colorId?: string | null;
   productName: string;
   variantName: string | null;
+  colorName?: string | null;
+  colorHex?: string | null;
+  sku?: string | null;
+  imageUrl?: string | null;
   unitPrice: number;
   quantity: number;
   discountAmount: number;
@@ -305,8 +310,13 @@ function mapOrderItemRow(row: any): OrderItemSnapshot {
     orderId: row.order_id,
     productId: row.product_id || null,
     variantId: row.variant_id || null,
+    colorId: row.color_id || null,
     productName: row.product_name,
     variantName: row.variant_name || null,
+    colorName: row.color_name || null,
+    colorHex: row.color_hex || null,
+    sku: row.sku || null,
+    imageUrl: row.image_url || null,
     unitPrice: Number(row.unit_price),
     quantity: Number(row.quantity),
     discountAmount: Number(row.discount_amount),
@@ -816,11 +826,12 @@ export async function listAllOrders(
   if (orderIds.length > 0) {
     const placeholders = orderIds.map(() => "?").join(",");
     const itemRows = await query<any[]>(
-      `SELECT oi.id, oi.order_id, oi.product_id, oi.variant_id,
-              oi.product_name, oi.variant_name, oi.unit_price, oi.quantity,
+      `SELECT oi.id, oi.order_id, oi.product_id, oi.variant_id, oi.color_id,
+              oi.product_name, oi.variant_name, oi.color_name, oi.color_hex, oi.sku, oi.image_url,
+              oi.unit_price, oi.quantity,
               oi.discount_amount, oi.line_total,
               p.slug AS product_slug,
-              (SELECT pi.storage_path FROM product_images pi WHERE pi.product_id = oi.product_id ORDER BY pi.sort_order ASC LIMIT 1) AS product_image
+              (SELECT pi.storage_path FROM product_images pi WHERE pi.product_id = oi.product_id ORDER BY pi.sort_order ASC LIMIT 1) AS fallback_image
        FROM order_items oi
        LEFT JOIN products p ON oi.product_id = p.id
        WHERE oi.order_id IN (${placeholders})
@@ -834,10 +845,14 @@ export async function listAllOrders(
         id: it.id,
         productId: it.product_id,
         variantId: it.variant_id,
+        colorId: it.color_id || null,
         productName: it.product_name,
         variantName: it.variant_name,
+        colorName: it.color_name || null,
+        colorHex: it.color_hex || null,
+        sku: it.sku || null,
         productSlug: it.product_slug || "",
-        productImage: it.product_image || "/product-samples/1.jpeg",
+        productImage: it.image_url || it.fallback_image || "/product-samples/1.jpeg",
         unitPrice: Number(it.unit_price || 0),
         quantity: Number(it.quantity || 1),
         discountAmount: Number(it.discount_amount || 0),
@@ -1011,7 +1026,7 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
 
   await withTransaction(async (conn) => {
     const orderRows = await conn.execute(
-      "SELECT id, status, payment_status FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, status, payment_status, dispatched_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
       [cleanOrderId]
     );
     const orders = (orderRows as any)[0] as any[];
@@ -1029,17 +1044,23 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       throw new OrderValidationError("Order is already cancelled", 400);
     }
 
-    // Restore stock ONLY if order had inventory deducted (paid or confirmed)
-    const shouldRestoreStock = currentPaymentStatus === "paid" || currentStatus === "confirmed";
+    // Restore stock ONLY if order had inventory deducted (paid or confirmed) and was NOT already dispatched
+    const isDispatched = Boolean(orders[0].dispatched_at || currentStatus === "shipped");
+    const shouldRestoreStock = (currentPaymentStatus === "paid" || currentStatus === "confirmed") && !isDispatched;
     if (shouldRestoreStock) {
       const itemRows = await conn.execute(
-        "SELECT product_id, variant_id, quantity FROM order_items WHERE order_id = ?",
+        "SELECT product_id, variant_id, color_id, quantity FROM order_items WHERE order_id = ?",
         [cleanOrderId]
       );
       const items = (itemRows as any)[0] as any[];
 
       for (const item of items || []) {
-        if (item.variant_id) {
+        if (item.color_id) {
+          await conn.execute(
+            "UPDATE product_colors SET stock = stock + ?, updated_at = NOW() WHERE id = ?",
+            [item.quantity, item.color_id]
+          );
+        } else if (item.variant_id) {
           await conn.execute(
             "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
             [item.quantity, item.variant_id]

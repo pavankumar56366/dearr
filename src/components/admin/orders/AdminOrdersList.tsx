@@ -963,7 +963,7 @@ export function AdminOrdersList() {
                         ? order.itemCount
                         : order.items.length;
                       const productNamesList = order.items.length > 0
-                        ? order.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")
+                        ? order.items.map((i) => `${i.quantity}x ${i.name}${(i as any).colorName ? ` (${(i as any).colorName})` : ""}`).join(", ")
                         : (itemCount > 0 ? `${itemCount} items` : "No items");
 
                       return (
@@ -1104,7 +1104,7 @@ export function AdminOrdersList() {
                     ? order.itemCount
                     : order.items.length;
                   const productNamesList = order.items.length > 0
-                    ? order.items.map((i) => `${i.quantity}x ${i.name}`).join(", ")
+                    ? order.items.map((i) => `${i.quantity}x ${i.name}${(i as any).colorName ? ` (${(i as any).colorName})` : ""}`).join(", ")
                     : (itemCount > 0 ? `${itemCount} items` : "No items");
 
                   return (

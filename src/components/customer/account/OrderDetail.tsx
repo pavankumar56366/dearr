@@ -221,6 +221,17 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                 >
                   {item.productName}
                 </Link>
+                {item.colorName && (
+                  <div className="flex items-center gap-1.5 mt-1 text-xs text-neutral-600">
+                    <span
+                      className="w-3 h-3 rounded-full border border-black/15 shadow-xs shrink-0"
+                      style={{ backgroundColor: item.colorHex || "#6366F1" }}
+                    />
+                    <span>
+                      Color: <strong className="text-neutral-800">{item.colorName}</strong>
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3 mt-1 text-xs text-neutral-500">
                   <span>Qty: {item.quantity}</span>
                   <span className="text-neutral-300">•</span>

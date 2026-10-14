@@ -110,8 +110,10 @@ export async function PATCH(
       stockQuantity: body.stockQuantity !== undefined ? body.stockQuantity : body.stock_quantity,
       isFeatured: body.isFeatured !== undefined ? body.isFeatured : body.is_featured,
       isActive: body.isActive !== undefined ? body.isActive : body.is_active,
+      hasColors: body.hasColors !== undefined ? body.hasColors : body.has_colors,
       images: body.images,
       variants: body.variants,
+      colors: body.colors,
     });
 
     if (!updated) {

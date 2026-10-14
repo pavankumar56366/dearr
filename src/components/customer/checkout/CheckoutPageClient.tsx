@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useCart } from "@/context/CartContext";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useCart, type CartItem } from "@/context/CartContext";
 import {
   createAdminOrderFromCheckout,
   saveAdminOrder,
@@ -48,7 +48,13 @@ const INITIAL_ADDRESS: DeliveryAddressFormValues = {
 
 export default function CheckoutPageClient() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const intentId = searchParams.get("intentId");
   const { items, subtotal, totalCount, hasUnavailableItems, clearCart } = useCart();
+
+  const [intentData, setIntentData] = useState<any>(null);
+  const [intentLoading, setIntentLoading] = useState<boolean>(Boolean(intentId));
+  const [intentError, setIntentError] = useState<string | null>(null);
 
   const [currentStep, setCurrentStep] = useState<CheckoutStep>("delivery");
   const [address, setAddress] = useState<DeliveryAddressFormValues>(INITIAL_ADDRESS);
@@ -65,6 +71,38 @@ export default function CheckoutPageClient() {
     freeShippingThreshold: number;
     defaultShippingFee: number;
   }>({ freeShippingThreshold: 999, defaultShippingFee: 50 });
+
+  // Load Buy Now intent when intentId query is present
+  useEffect(() => {
+    if (!intentId) return;
+    let isMounted = true;
+    async function fetchIntent() {
+      try {
+        setIntentLoading(true);
+        const res = await fetch(`/api/checkout/intent?intentId=${encodeURIComponent(intentId || "")}`);
+        const data = await res.json();
+        if (isMounted) {
+          if (res.ok && data.ok && data.intent) {
+            setIntentData(data.intent);
+          } else {
+            setIntentError(data.error || "Checkout session has expired or is invalid.");
+          }
+        }
+      } catch {
+        if (isMounted) {
+          setIntentError("Failed to load checkout session.");
+        }
+      } finally {
+        if (isMounted) {
+          setIntentLoading(false);
+        }
+      }
+    }
+    fetchIntent();
+    return () => {
+      isMounted = false;
+    };
+  }, [intentId]);
 
   // Load public store settings for dynamic shipping calculations
   useEffect(() => {
@@ -91,8 +129,40 @@ export default function CheckoutPageClient() {
     };
   }, []);
 
-  const shippingFee = subtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee;
-  const totalPayable = Math.max(0, subtotal + shippingFee);
+  const activeItems: CartItem[] = useMemo(() => {
+    if (intentData) {
+      return (intentData.items || []).map((it: any) => ({
+        id: it.id,
+        productId: it.productId,
+        slug: `product-${it.productId}`,
+        name: it.productName,
+        image: it.imageUrl || "/product-samples/1.jpeg",
+        category: "3D Printing",
+        price: it.unitPrice,
+        compareAtPrice: null,
+        quantity: it.quantity,
+        stockQuantity: it.quantity,
+        colorId: it.colorId || undefined,
+        colorName: it.colorName || undefined,
+        colorHex: it.colorHex || undefined,
+        sku: it.sku || undefined,
+        variantName: it.variantName || undefined,
+        isActive: true,
+      }));
+    }
+    return items;
+  }, [intentData, items]);
+
+  const activeSubtotal = intentData ? intentData.subtotal : subtotal;
+  const activeTotalCount = intentData
+    ? (intentData.items || []).reduce((count: number, it: any) => count + it.quantity, 0)
+    : totalCount;
+  const activeShippingFee = intentData
+    ? intentData.shippingAmount
+    : (activeSubtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee);
+  const activeTotalPayable = intentData
+    ? intentData.totalAmount
+    : Math.max(0, activeSubtotal + activeShippingFee);
 
   // Pre-load Razorpay checkout script & fetch customer saved addresses
   useEffect(() => {
@@ -275,8 +345,8 @@ export default function CheckoutPageClient() {
 
     (async () => {
       try {
-        const orderPayload: any =
-          selectedAddressId !== "new"
+        const orderPayload: any = {
+          ...(selectedAddressId !== "new"
             ? { addressId: selectedAddressId }
             : {
                 shippingFullName: address.fullName,
@@ -288,7 +358,9 @@ export default function CheckoutPageClient() {
                 shippingPostalCode: address.postalCode,
                 shippingCountry: address.country || "India",
                 saveAddress: saveNewAddress,
-              };
+              }),
+          ...(intentId ? { intentId } : {}),
+        };
 
         const res = await fetch("/api/orders", {
           method: "POST",
@@ -418,7 +490,9 @@ export default function CheckoutPageClient() {
                       saveAdminOrder(adminOrder);
                     } catch {}
 
-                    await clearCart();
+                    if (!intentId) {
+                      await clearCart();
+                    }
                     setIsProcessing(false);
                     router.push(`/order-confirmed?orderNumber=${finalOrderNumber}`);
                   } catch (err: any) {
@@ -506,7 +580,9 @@ export default function CheckoutPageClient() {
             saveAdminOrder(adminOrder);
           } catch {}
 
-          await clearCart();
+          if (!intentId) {
+            await clearCart();
+          }
           setIsProcessing(false);
           router.push(`/order-confirmed?orderNumber=${createdOrder.orderNumber}`);
           return;
@@ -547,8 +623,34 @@ export default function CheckoutPageClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
+  if (intentLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8 text-neutral-600">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          <p className="text-sm font-semibold">Preparing your checkout...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (intentError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-8 text-neutral-600">
+        <div className="max-w-md w-full bg-white p-6 rounded-2xl border border-neutral-200 text-center flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-full bg-rose-50 text-rose-600 flex items-center justify-center font-bold text-xl">!</div>
+          <h2 className="text-lg font-bold text-neutral-900">Checkout Session Expired</h2>
+          <p className="text-xs text-neutral-600">{intentError}</p>
+          <Link href="/" className="px-5 py-2.5 rounded-xl bg-neutral-900 text-white text-xs font-bold hover:bg-neutral-800 transition">
+            Return to Shop
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   // Empty cart state
-  if (items.length === 0 && currentStep !== "confirmation") {
+  if (activeItems.length === 0 && currentStep !== "confirmation") {
     return (
       <div
         className="min-h-screen pb-32 md:pb-20"
@@ -724,18 +826,18 @@ export default function CheckoutPageClient() {
           {/* Right Column: Order Summary Card */}
           <div className="lg:col-span-5 w-full">
             <CheckoutSummary
-              items={items}
-              subtotal={subtotal}
-              totalCount={totalCount}
+              items={activeItems}
+              subtotal={activeSubtotal}
+              totalCount={activeTotalCount}
               address={address}
               onEditAddress={() => setCurrentStep("delivery")}
               isProcessing={isProcessing}
               onProceedToPayment={handleProceedToPayment}
               isAddressValid={isAddressValidated}
               hasUnavailableItems={hasUnavailableItems}
-              shippingFee={shippingFee}
+              shippingFee={activeShippingFee}
               freeShippingThreshold={storeSettings.freeShippingThreshold}
-              totalPayable={totalPayable}
+              totalPayable={activeTotalPayable}
               actionLabel={
                 currentStep === "payment"
                   ? "Place Order & Pay via Razorpay"

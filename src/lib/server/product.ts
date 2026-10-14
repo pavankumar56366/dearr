@@ -6,6 +6,7 @@ import { PoolConnection } from "mysql2/promise";
 export interface ProductImage {
   id: string;
   productId: string;
+  colorId: string | null;
   storagePath: string;
   url: string;
   altText: string | null;
@@ -21,6 +22,25 @@ export interface ProductVariant {
   price: number | null;
   stockQuantity: number;
   isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ProductColor {
+  id: string;
+  productId: string;
+  name: string;
+  slug: string;
+  hex: string;
+  sku: string | null;
+  stock: number;
+  reservedStock: number;
+  availableStock: number;
+  priceOverride: number | null;
+  sortOrder: number;
+  isActive: boolean;
+  images: ProductImage[];
+  primaryImage: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -44,9 +64,11 @@ export interface Product {
   stockQuantity: number;
   isFeatured: boolean;
   isActive: boolean;
+  hasColors: boolean;
   image?: string;
   images: ProductImage[];
   variants: ProductVariant[];
+  colors: ProductColor[];
   createdAt: Date;
   updatedAt: Date;
 }
@@ -62,6 +84,26 @@ export interface ProductListFilters {
   sort?: "price-asc" | "price-desc" | "newest" | "featured";
 }
 
+export interface CreateProductColorInput {
+  id?: string;
+  name: string;
+  slug?: string;
+  hex: string;
+  sku?: string | null;
+  stock: number;
+  priceOverride?: number | null;
+  sortOrder?: number;
+  isActive?: boolean;
+}
+
+export interface CreateProductImageInput {
+  id?: string;
+  colorId?: string | null;
+  storagePath: string;
+  altText?: string | null;
+  sortOrder?: number;
+}
+
 export interface CreateProductInput {
   id?: string;
   categoryId?: string | null;
@@ -73,12 +115,8 @@ export interface CreateProductInput {
   stockQuantity: number;
   isFeatured?: boolean;
   isActive?: boolean;
-  images?: Array<{
-    id?: string;
-    storagePath: string;
-    altText?: string | null;
-    sortOrder?: number;
-  }>;
+  hasColors?: boolean;
+  images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
     name: string;
@@ -87,6 +125,7 @@ export interface CreateProductInput {
     stockQuantity: number;
     isActive?: boolean;
   }>;
+  colors?: CreateProductColorInput[];
 }
 
 export interface UpdateProductInput {
@@ -99,12 +138,8 @@ export interface UpdateProductInput {
   stockQuantity?: number;
   isFeatured?: boolean;
   isActive?: boolean;
-  images?: Array<{
-    id?: string;
-    storagePath: string;
-    altText?: string | null;
-    sortOrder?: number;
-  }>;
+  hasColors?: boolean;
+  images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
     name: string;
@@ -113,6 +148,7 @@ export interface UpdateProductInput {
     stockQuantity: number;
     isActive?: boolean;
   }>;
+  colors?: CreateProductColorInput[];
 }
 
 export class ProductValidationError extends Error {
@@ -174,6 +210,35 @@ export function toPublicUrl(storagePath: string | null | undefined): string {
 }
 
 /**
+ * Validates a hexadecimal color code (#RGB or #RRGGBB).
+ */
+export function validateHexColor(hex: string): string {
+  if (!hex || typeof hex !== "string") {
+    throw new ProductValidationError("Hex color is required", 400);
+  }
+  const clean = hex.trim().toUpperCase();
+  if (!/^#([0-9A-F]{3}|[0-9A-F]{6})$/i.test(clean)) {
+    throw new ProductValidationError(
+      `Invalid hex color format: '${hex}'. Must be a valid hex color code (e.g., #FF69B4 or #FFF)`,
+      400
+    );
+  }
+  return clean;
+}
+
+/**
+ * Normalizes a color name to a clean URL slug.
+ */
+export function generateColorSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug || "color";
+}
+
+/**
  * Maps raw database rows or API objects to a sanitized ProductImage object.
  */
 export function toProductImage(row: any): ProductImage {
@@ -182,6 +247,7 @@ export function toProductImage(row: any): ProductImage {
   return {
     id: row.id || `img-${row.product_id || row.productId || crypto.randomUUID()}`,
     productId: row.product_id || row.productId || "",
+    colorId: row.color_id || row.colorId || null,
     storagePath: rawPath || pubUrl,
     url: pubUrl,
     altText: row.alt_text ?? row.altText ?? null,
@@ -212,20 +278,75 @@ function toProductVariant(row: any): ProductVariant {
 }
 
 /**
+ * Maps raw database rows and associated images to a sanitized ProductColor object.
+ */
+export function toProductColor(row: any, images: ProductImage[] = []): ProductColor {
+  const colorImages = images.filter((img) => img.colorId === row.id);
+  const primaryImage = colorImages.length > 0 ? colorImages[0].url : null;
+  const stock = Number(row.stock ?? 0);
+  const reservedStock = Number(row.reserved_stock ?? 0);
+  const availableStock = Math.max(0, stock - reservedStock);
+
+  return {
+    id: row.id,
+    productId: row.product_id,
+    name: row.name,
+    slug: row.slug,
+    hex: row.hex,
+    sku: row.sku || null,
+    stock,
+    reservedStock,
+    availableStock,
+    priceOverride:
+      row.price_override !== null && row.price_override !== undefined
+        ? Number(row.price_override)
+        : null,
+    sortOrder: Number(row.sort_order ?? 0),
+    isActive: Boolean(row.is_active === 1 || row.is_active === true),
+    images: colorImages,
+    primaryImage,
+    createdAt: new Date(row.created_at),
+    updatedAt: new Date(row.updated_at),
+  };
+}
+
+/**
  * Maps raw database row and associated relations to a sanitized Product object.
  */
 function toProduct(
   row: any,
   category: ProductCategoryInfo | null = null,
   images: ProductImage[] = [],
-  variants: ProductVariant[] = []
+  variants: ProductVariant[] = [],
+  colors: ProductColor[] = []
 ): Product {
-  const primaryImageUrl =
-    images.length > 0 && images[0].url
-      ? images[0].url
-      : row.primary_image
-      ? toPublicUrl(row.primary_image)
-      : "/product-samples/1.jpeg";
+  const hasColors = Boolean(row.has_colors === 1 || row.has_colors === true);
+
+  // Fallback image precedence:
+  // 1. First active in-stock color primary image (if colors enabled)
+  // 2. First shared image (colorId === null)
+  // 3. First available image
+  // 4. Sample placeholder
+  let primaryImageUrl = "";
+  if (hasColors && colors.length > 0) {
+    const activeColorWithImage = colors.find((c) => c.isActive && c.primaryImage);
+    if (activeColorWithImage?.primaryImage) {
+      primaryImageUrl = activeColorWithImage.primaryImage;
+    }
+  }
+
+  if (!primaryImageUrl) {
+    const sharedImage = images.find((img) => !img.colorId);
+    if (sharedImage?.url) {
+      primaryImageUrl = sharedImage.url;
+    } else if (images.length > 0 && images[0].url) {
+      primaryImageUrl = images[0].url;
+    } else if (row.primary_image) {
+      primaryImageUrl = toPublicUrl(row.primary_image);
+    } else {
+      primaryImageUrl = "/product-samples/1.jpeg";
+    }
+  }
 
   return {
     id: row.id,
@@ -242,9 +363,11 @@ function toProduct(
     stockQuantity: Number(row.stock_quantity ?? 0),
     isFeatured: Boolean(row.is_featured),
     isActive: Boolean(row.is_active),
+    hasColors,
     image: primaryImageUrl,
     images,
     variants,
+    colors,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -252,7 +375,7 @@ function toProduct(
 
 /**
  * Finds a single product by primary key UUID.
- * Includes category, images, and variants.
+ * Includes category, images, variants, and color variants.
  */
 export async function findProductById(
   id: string,
@@ -291,7 +414,7 @@ export async function findProductById(
       }
     : null;
 
-  const [imageRows, variantRows] = await Promise.all([
+  const [imageRows, variantRows, colorRows] = await Promise.all([
     query<any[]>(
       "SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC, created_at ASC",
       [cleanId]
@@ -300,17 +423,26 @@ export async function findProductById(
       "SELECT * FROM product_variants WHERE product_id = ? ORDER BY created_at ASC",
       [cleanId]
     ),
+    query<any[]>(
+      "SELECT * FROM product_colors WHERE product_id = ? ORDER BY sort_order ASC, created_at ASC",
+      [cleanId]
+    ),
   ]);
 
   const images = (imageRows || []).map(toProductImage);
   const variants = (variantRows || []).map(toProductVariant);
+  let colors = (colorRows || []).map((cr) => toProductColor(cr, images));
 
-  return toProduct(row, category, images, variants);
+  if (!includeInactive) {
+    colors = colors.filter((c) => c.isActive);
+  }
+
+  return toProduct(row, category, images, variants, colors);
 }
 
 /**
  * Finds a single product by unique URL slug.
- * Includes category, images, and variants.
+ * Includes category, images, variants, and color variants.
  */
 export async function findProductBySlug(
   slug: string,
@@ -349,7 +481,7 @@ export async function findProductBySlug(
       }
     : null;
 
-  const [imageRows, variantRows] = await Promise.all([
+  const [imageRows, variantRows, colorRows] = await Promise.all([
     query<any[]>(
       "SELECT * FROM product_images WHERE product_id = ? ORDER BY sort_order ASC, created_at ASC",
       [row.id]
@@ -358,12 +490,21 @@ export async function findProductBySlug(
       "SELECT * FROM product_variants WHERE product_id = ? ORDER BY created_at ASC",
       [row.id]
     ),
+    query<any[]>(
+      "SELECT * FROM product_colors WHERE product_id = ? ORDER BY sort_order ASC, created_at ASC",
+      [row.id]
+    ),
   ]);
 
   const images = (imageRows || []).map(toProductImage);
   const variants = (variantRows || []).map(toProductVariant);
+  let colors = (colorRows || []).map((cr) => toProductColor(cr, images));
 
-  return toProduct(row, category, images, variants);
+  if (!includeInactive) {
+    colors = colors.filter((c) => c.isActive);
+  }
+
+  return toProduct(row, category, images, variants, colors);
 }
 
 /**
@@ -419,6 +560,7 @@ export async function getRelatedProducts(
           {
             id: `img-${row.id}`,
             productId: row.id,
+            colorId: null,
             storagePath: row.primary_image,
             url: toPublicUrl(row.primary_image),
             altText: row.name,
@@ -543,15 +685,19 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
 
   const productIds = productRows.map((r) => r.id);
 
-  // Batch query images and variants for retrieved products
+  // Batch query images, variants, and colors for retrieved products
   const placeholders = productIds.map(() => "?").join(", ");
-  const [imagesRows, variantsRows] = await Promise.all([
+  const [imagesRows, variantsRows, colorsRows] = await Promise.all([
     query<any[]>(
       `SELECT * FROM product_images WHERE product_id IN (${placeholders}) ORDER BY sort_order ASC, created_at ASC`,
       productIds
     ),
     query<any[]>(
       `SELECT * FROM product_variants WHERE product_id IN (${placeholders}) ORDER BY created_at ASC`,
+      productIds
+    ),
+    query<any[]>(
+      `SELECT * FROM product_colors WHERE product_id IN (${placeholders}) ORDER BY sort_order ASC, created_at ASC`,
       productIds
     ),
   ]);
@@ -574,6 +720,19 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
     variantsByProductId.get(v.productId)!.push(v);
   }
 
+  const colorsByProductId = new Map<string, ProductColor[]>();
+  for (const row of colorsRows || []) {
+    const productImages = imagesByProductId.get(row.product_id) || [];
+    const color = toProductColor(row, productImages);
+    if (!colorsByProductId.has(row.product_id)) {
+      colorsByProductId.set(row.product_id, []);
+    }
+    // If public filter (filters.isActive === 1 or not explicitly admin-view), only include active colors
+    if (filters.isActive === false || filters.isActive === undefined || color.isActive) {
+      colorsByProductId.get(row.product_id)!.push(color);
+    }
+  }
+
   const products = productRows.map((row) => {
     const category: ProductCategoryInfo | null = row.category_id
       ? {
@@ -587,7 +746,8 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
       row,
       category,
       imagesByProductId.get(row.id) || [],
-      variantsByProductId.get(row.id) || []
+      variantsByProductId.get(row.id) || [],
+      colorsByProductId.get(row.id) || []
     );
   });
 
@@ -665,12 +825,14 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       categoryId = (catRows as any[])[0].id;
     }
 
+    const hasColors = Boolean(input.hasColors);
+
     // Insert Product row
     const insertProductSql = `
       INSERT INTO products (
         id, category_id, name, slug, description, price, compare_at_price,
-        stock_quantity, is_featured, is_active
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        stock_quantity, is_featured, is_active, has_colors
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await conn.execute(insertProductSql, [
       id,
@@ -683,9 +845,72 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       stockQuantity,
       isFeatured ? 1 : 0,
       isActive ? 1 : 0,
+      hasColors ? 1 : 0,
     ]);
 
-    // Insert Images if provided
+    // Insert Colors if provided and hasColors is enabled
+    if (hasColors && input.colors && Array.isArray(input.colors)) {
+      if (input.colors.length > 12) {
+        throw new ProductValidationError("Maximum 12 colors allowed per product", 400);
+      }
+      const seenNames = new Set<string>();
+      const seenSlugs = new Set<string>();
+
+      for (let i = 0; i < input.colors.length; i++) {
+        const c = input.colors[i];
+        if (!c.name || typeof c.name !== "string" || c.name.trim().length === 0) {
+          throw new ProductValidationError("Color name is required", 400);
+        }
+        const colorName = c.name.trim();
+        const normName = colorName.toLowerCase();
+        if (seenNames.has(normName)) {
+          throw new ProductValidationError(`Duplicate color name '${colorName}' within product`, 400);
+        }
+        seenNames.add(normName);
+
+        const hex = validateHexColor(c.hex);
+        const colorSlug = c.slug ? generateColorSlug(c.slug) : generateColorSlug(colorName);
+        if (seenSlugs.has(colorSlug)) {
+          throw new ProductValidationError(`Duplicate color slug '${colorSlug}' within product`, 400);
+        }
+        seenSlugs.add(colorSlug);
+
+        const cStock =
+          typeof c.stock === "number" && !isNaN(c.stock) ? Math.max(0, Math.floor(c.stock)) : 0;
+        const cPrice =
+          c.priceOverride !== undefined &&
+          c.priceOverride !== null &&
+          !isNaN(c.priceOverride) &&
+          c.priceOverride >= 0
+            ? c.priceOverride
+            : null;
+
+        const cSku = c.sku ? c.sku.trim().toUpperCase() : null;
+        if (cSku) {
+          const [existingSku] = await conn.execute(
+            "SELECT id FROM product_colors WHERE sku = ? LIMIT 1",
+            [cSku]
+          );
+          if ((existingSku as any[]).length > 0) {
+            throw new ProductValidationError(`Color SKU '${cSku}' already exists`, 409);
+          }
+        }
+
+        const colorId = c.id?.trim() || crypto.randomUUID();
+        const sortOrder = c.sortOrder !== undefined ? c.sortOrder : i;
+        const cActive = c.isActive !== false ? 1 : 0;
+
+        await conn.execute(
+          `INSERT INTO product_colors (
+            id, product_id, name, slug, hex, sku, stock, reserved_stock,
+            price_override, sort_order, is_active, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NOW(), NOW())`,
+          [colorId, id, colorName, colorSlug, hex, cSku, cStock, cPrice, sortOrder, cActive]
+        );
+      }
+    }
+
+    // Insert Images if provided (with optional colorId for color-specific images)
     if (input.images && Array.isArray(input.images)) {
       for (let i = 0; i < input.images.length; i++) {
         const img = input.images[i];
@@ -693,10 +918,11 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
           throw new ProductValidationError("Each image must have a valid storagePath", 400);
         }
         const imgId = img.id?.trim() || crypto.randomUUID();
+        const colorId = img.colorId?.trim() || null;
         const sortOrder = img.sortOrder !== undefined ? img.sortOrder : i;
         await conn.execute(
-          "INSERT INTO product_images (id, product_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, ?)",
-          [imgId, id, img.storagePath.trim(), img.altText?.trim() || null, sortOrder]
+          "INSERT INTO product_images (id, product_id, color_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+          [imgId, id, colorId, img.storagePath.trim(), img.altText?.trim() || null, sortOrder]
         );
       }
     }
@@ -861,10 +1087,122 @@ export async function updateProduct(
       values.push(input.isActive ? 1 : 0);
     }
 
+    // Has Colors toggle
+    if (input.hasColors !== undefined) {
+      fields.push("has_colors = ?");
+      values.push(input.hasColors ? 1 : 0);
+    }
+
     if (fields.length > 0) {
       values.push(cleanId);
       const updateSql = `UPDATE products SET ${fields.join(", ")} WHERE id = ?`;
       await conn.execute(updateSql, values);
+    }
+
+    // Sync Colors if provided
+    if (input.colors !== undefined && Array.isArray(input.colors)) {
+      if (input.colors.length > 12) {
+        throw new ProductValidationError("Maximum 12 colors allowed per product", 400);
+      }
+
+      const [existingColorRows]: any = await conn.execute(
+        "SELECT id FROM product_colors WHERE product_id = ?",
+        [cleanId]
+      );
+      const existingColorIds = new Set<string>(existingColorRows.map((r: any) => String(r.id)));
+      const incomingColorIds = new Set<string>(input.colors.filter((c) => c.id).map((c) => String(c.id!)));
+
+      // Handle removed colors safely
+      for (const oldId of Array.from(existingColorIds)) {
+        if (!incomingColorIds.has(oldId)) {
+          const [orderRefs]: any = await conn.execute(
+            "SELECT id FROM order_items WHERE color_id = ? LIMIT 1",
+            [oldId]
+          );
+          const [cartRefs]: any = await conn.execute(
+            "SELECT id FROM cart_items WHERE color_id = ? LIMIT 1",
+            [oldId]
+          );
+          if (orderRefs.length > 0 || cartRefs.length > 0) {
+            // Soft-deactivate to preserve historical integrity
+            await conn.execute(
+              "UPDATE product_colors SET is_active = 0, updated_at = NOW() WHERE id = ?",
+              [oldId]
+            );
+          } else {
+            await conn.execute("DELETE FROM product_colors WHERE id = ?", [oldId]);
+          }
+        }
+      }
+
+      // Upsert colors
+      const seenNames = new Set<string>();
+      const seenSlugs = new Set<string>();
+
+      for (let i = 0; i < input.colors.length; i++) {
+        const c = input.colors[i];
+        if (!c.name || typeof c.name !== "string" || c.name.trim().length === 0) {
+          throw new ProductValidationError("Color name is required", 400);
+        }
+        const colorName = c.name.trim();
+        const normName = colorName.toLowerCase();
+        if (seenNames.has(normName)) {
+          throw new ProductValidationError(`Duplicate color name '${colorName}' within product`, 400);
+        }
+        seenNames.add(normName);
+
+        const hex = validateHexColor(c.hex);
+        const colorSlug = c.slug ? generateColorSlug(c.slug) : generateColorSlug(colorName);
+        if (seenSlugs.has(colorSlug)) {
+          throw new ProductValidationError(`Duplicate color slug '${colorSlug}' within product`, 400);
+        }
+        seenSlugs.add(colorSlug);
+
+        const cStock =
+          typeof c.stock === "number" && !isNaN(c.stock) ? Math.max(0, Math.floor(c.stock)) : 0;
+        const cPrice =
+          c.priceOverride !== undefined &&
+          c.priceOverride !== null &&
+          !isNaN(c.priceOverride) &&
+          c.priceOverride >= 0
+            ? c.priceOverride
+            : null;
+
+        const cSku = c.sku ? c.sku.trim().toUpperCase() : null;
+        if (cSku) {
+          const [existingSku] = await conn.execute(
+            "SELECT id FROM product_colors WHERE sku = ? AND id != ? LIMIT 1",
+            [cSku, c.id || ""]
+          );
+          if ((existingSku as any[]).length > 0) {
+            throw new ProductValidationError(`Color SKU '${cSku}' already exists`, 409);
+          }
+        }
+
+        const sortOrder = c.sortOrder !== undefined ? c.sortOrder : i;
+        const cActive = c.isActive !== false ? 1 : 0;
+
+        if (c.id && existingColorIds.has(c.id)) {
+          // Update existing
+          await conn.execute(
+            `UPDATE product_colors
+             SET name = ?, slug = ?, hex = ?, sku = ?, stock = ?, price_override = ?,
+                 sort_order = ?, is_active = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [colorName, colorSlug, hex, cSku, cStock, cPrice, sortOrder, cActive, c.id]
+          );
+        } else {
+          // Insert new color
+          const newColorId = c.id?.trim() || crypto.randomUUID();
+          await conn.execute(
+            `INSERT INTO product_colors (
+              id, product_id, name, slug, hex, sku, stock, reserved_stock,
+              price_override, sort_order, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, NOW(), NOW())`,
+            [newColorId, cleanId, colorName, colorSlug, hex, cSku, cStock, cPrice, sortOrder, cActive]
+          );
+        }
+      }
     }
 
     // Replace images if an images array was provided
@@ -876,10 +1214,11 @@ export async function updateProduct(
           throw new ProductValidationError("Each image must have a valid storagePath", 400);
         }
         const imgId = img.id?.trim() || crypto.randomUUID();
+        const colorId = img.colorId?.trim() || null;
         const sortOrder = img.sortOrder !== undefined ? img.sortOrder : i;
         await conn.execute(
-          "INSERT INTO product_images (id, product_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, ?)",
-          [imgId, cleanId, img.storagePath.trim(), img.altText?.trim() || null, sortOrder]
+          "INSERT INTO product_images (id, product_id, color_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, ?, ?)",
+          [imgId, cleanId, colorId, img.storagePath.trim(), img.altText?.trim() || null, sortOrder]
         );
       }
     }
