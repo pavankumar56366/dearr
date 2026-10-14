@@ -299,6 +299,7 @@ export async function* streamOrdersListCsv(
     "dispatched_at",
     "delivered_at",
     "cancelled_at",
+    "address_changed",
   ];
 
   yield headers.join(",") + "\r\n";
@@ -324,6 +325,7 @@ export async function* streamOrdersListCsv(
          o.payment_status,
          o.status,
          o.total_amount,
+         o.address_change_count,
          o.created_at,
          o.dispatched_at,
          o.delivered_at,
@@ -386,6 +388,8 @@ export async function* streamOrdersListCsv(
         ? "Cash on Delivery"
         : "Razorpay (Online)";
 
+      const hasAddressChanged = Number(o.address_change_count || 0) > 0;
+
       const row = [
         sanitizeCsvCell(o.order_number),
         sanitizeCsvCell(formatKolkataDisplay(new Date(o.created_at))),
@@ -401,6 +405,7 @@ export async function* streamOrdersListCsv(
         sanitizeCsvCell(o.dispatched_at ? formatKolkataDisplay(new Date(o.dispatched_at)) : ""),
         sanitizeCsvCell(o.delivered_at ? formatKolkataDisplay(new Date(o.delivered_at)) : ""),
         sanitizeCsvCell(o.cancelled_at ? formatKolkataDisplay(new Date(o.cancelled_at)) : ""),
+        sanitizeCsvCell(hasAddressChanged ? "yes" : "no"),
       ];
 
       batchLines.push(row.join(","));

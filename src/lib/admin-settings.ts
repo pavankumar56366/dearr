@@ -42,6 +42,9 @@ export interface AdminSettings {
   allowOrderCancellation: boolean;
   cancellationWindowHours: number;
   notifyOnNewOrder: boolean;
+  allowAddressChange: boolean;
+  addressChangeWindowHours: number;
+  maxAddressChangesPerOrder: number;
 
   // Customer Settings
   allowCustomerSignup: boolean;
@@ -111,6 +114,9 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   allowOrderCancellation: true,
   cancellationWindowHours: 12,
   notifyOnNewOrder: true,
+  allowAddressChange: true,
+  addressChangeWindowHours: 6,
+  maxAddressChangesPerOrder: 2,
 
   // Customer Settings
   allowCustomerSignup: true,

@@ -4,6 +4,7 @@ import {
   getOrderById,
   updateOrderStatus,
   cancelOrder,
+  getOrderAddressHistory,
   OrderValidationError,
   type OrderStatus,
 } from "@/lib/server/order";
@@ -26,8 +27,9 @@ export async function GET(
     const { id } = await context.params;
 
     const order = await getOrderById(id, { isAdmin: true });
+    const addressHistory = await getOrderAddressHistory(order.id, undefined, true);
 
-    return NextResponse.json({ ok: true, order });
+    return NextResponse.json({ ok: true, order: { ...order, addressHistory } });
   } catch (err) {
     if (err instanceof OrderValidationError) {
       return NextResponse.json(

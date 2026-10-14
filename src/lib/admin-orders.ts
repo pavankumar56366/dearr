@@ -71,6 +71,9 @@ export interface AdminOrder {
   discountCode?: string;
   notes?: string;
   itemCount?: number;
+  addressChangeCount?: number;
+  addressEditDeadline?: string | null;
+  addressHistory?: any[];
 }
 
 export interface OrderMetrics {

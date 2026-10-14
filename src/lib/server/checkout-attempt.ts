@@ -914,6 +914,11 @@ export async function finalizeOrderFromAttempt(
     const orderId = crypto.randomUUID();
     const orderNumber = await generateOrderNumber();
 
+    const storeSettings = await getStoreSettings();
+    const addressEditDeadline = storeSettings.allowAddressChange
+      ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)
+      : null;
+
     // 7. Insert placed order with confirmed status and paid payment_status
     await conn.execute(
       `INSERT INTO orders (
@@ -922,6 +927,7 @@ export async function finalizeOrderFromAttempt(
          shipping_full_name, shipping_phone,
          shipping_address_line_1, shipping_address_line_2,
          shipping_city, shipping_state, shipping_postal_code, shipping_country,
+         address_edit_deadline, address_change_count,
          dispatched_at, delivered_at, cancelled_at,
          created_at, updated_at
        ) VALUES (?, ?, ?, 'confirmed', 'paid',
@@ -929,6 +935,7 @@ export async function finalizeOrderFromAttempt(
                  ?, ?,
                  ?, ?,
                  ?, ?, ?, ?,
+                 ?, 0,
                  NULL, NULL, NULL,
                  NOW(), NOW())`,
       [
@@ -948,6 +955,7 @@ export async function finalizeOrderFromAttempt(
         shipping.shippingState || "",
         shipping.shippingPostalCode || "",
         shipping.shippingCountry || "India",
+        addressEditDeadline,
       ]
     );
 

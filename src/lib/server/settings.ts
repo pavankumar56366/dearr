@@ -1,4 +1,5 @@
 import "server-only";
+import crypto from "crypto";
 import { query } from "./db";
 import {
   AdminSettings,
@@ -45,7 +46,8 @@ export async function getStoreSettings(): Promise<AdminSettings> {
  * Merges partial updates with existing settings and guarantees persistence.
  */
 export async function updateStoreSettings(
-  updates: Partial<AdminSettings>
+  updates: Partial<AdminSettings>,
+  actorAdminId?: string
 ): Promise<AdminSettings> {
   const current = await getStoreSettings();
 
@@ -73,6 +75,25 @@ export async function updateStoreSettings(
     throw new Error("Cancellation window must be greater than zero hours");
   }
 
+  // Address Change Policies Validation
+  if (updates.allowAddressChange !== undefined && typeof updates.allowAddressChange !== "boolean") {
+    throw new Error("allowAddressChange must be a boolean value");
+  }
+
+  if (updates.addressChangeWindowHours !== undefined) {
+    const hours = Number(updates.addressChangeWindowHours);
+    if (!Number.isInteger(hours) || hours < 1 || hours > 72) {
+      throw new Error("Address change window must be an integer between 1 and 72 hours");
+    }
+  }
+
+  if (updates.maxAddressChangesPerOrder !== undefined) {
+    const maxChanges = Number(updates.maxAddressChangesPerOrder);
+    if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 10) {
+      throw new Error("Maximum address changes per order must be an integer between 1 and 10");
+    }
+  }
+
   const nextSettings: AdminSettings = {
     ...current,
     ...updates,
@@ -93,6 +114,18 @@ export async function updateStoreSettings(
       updates.cancellationWindowHours !== undefined
         ? Number(updates.cancellationWindowHours)
         : current.cancellationWindowHours,
+    allowAddressChange:
+      updates.allowAddressChange !== undefined
+        ? Boolean(updates.allowAddressChange)
+        : current.allowAddressChange ?? true,
+    addressChangeWindowHours:
+      updates.addressChangeWindowHours !== undefined
+        ? Number(updates.addressChangeWindowHours)
+        : current.addressChangeWindowHours ?? 6,
+    maxAddressChangesPerOrder:
+      updates.maxAddressChangesPerOrder !== undefined
+        ? Number(updates.maxAddressChangesPerOrder)
+        : current.maxAddressChangesPerOrder ?? 2,
   };
 
   const jsonString = JSON.stringify(nextSettings);
@@ -106,5 +139,143 @@ export async function updateStoreSettings(
     [jsonString]
   );
 
+  // Record audit history if an administrator performed the change
+  if (actorAdminId) {
+    try {
+      const changedKeys = (Object.keys(updates) as (keyof AdminSettings)[]).filter(
+        (key) => updates[key] !== undefined && updates[key] !== current[key]
+      );
+
+      for (const key of changedKeys) {
+        const auditId = crypto.randomUUID();
+        const oldVal = current[key] !== undefined ? JSON.stringify(current[key]) : null;
+        const newVal = JSON.stringify(nextSettings[key]);
+
+        await query(
+          `INSERT INTO settings_audit_history (id, actor_id, setting_name, old_value, new_value, created_at)
+           VALUES (?, ?, ?, ?, ?, NOW())`,
+          [auditId, actorAdminId, String(key), oldVal, newVal]
+        );
+      }
+
+      if (changedKeys.length > 0) {
+        const logId = crypto.randomUUID();
+        await query(
+          `INSERT INTO audit_logs (id, actor_id, action, entity, entity_id, details, created_at)
+           VALUES (?, ?, 'update_settings', 'store_settings', '1', ?, NOW())`,
+          [
+            logId,
+            actorAdminId,
+            JSON.stringify({
+              changedKeys,
+              changes: changedKeys.reduce((acc, k) => {
+                acc[k] = { previous: current[k], updated: nextSettings[k] };
+                return acc;
+              }, {} as Record<string, any>),
+            }),
+          ]
+        );
+      }
+    } catch (auditErr) {
+      console.warn("[updateStoreSettings] Failed to record settings audit history:", auditErr);
+    }
+  }
+
   return nextSettings;
+}
+
+export interface SettingsAuditRecord {
+  id: string;
+  actorId: string;
+  settingName: string;
+  oldValue: any;
+  newValue: any;
+  createdAt: Date;
+}
+
+/**
+ * Retrieves audit history for administrative store settings modifications.
+ */
+export async function getSettingsAuditHistory(limit = 50): Promise<SettingsAuditRecord[]> {
+  try {
+    const safeLimit = Math.max(1, Math.min(limit, 200));
+    const rows = await query<any[]>(
+      `SELECT id, actor_id, setting_name, old_value, new_value, created_at
+       FROM settings_audit_history
+       ORDER BY created_at DESC
+       LIMIT ?`,
+      [safeLimit]
+    );
+
+    return (rows || []).map((r) => ({
+      id: r.id,
+      actorId: r.actor_id,
+      settingName: r.setting_name,
+      oldValue: typeof r.old_value === "string" ? JSON.parse(r.old_value) : r.old_value,
+      newValue: typeof r.new_value === "string" ? JSON.parse(r.new_value) : r.new_value,
+      createdAt: new Date(r.created_at),
+    }));
+  } catch (err) {
+    console.warn("[getSettingsAuditHistory] Failed to retrieve settings audit history:", err);
+    return [];
+  }
+}
+
+/**
+ * Database-backed persistent rate limiter across multiple Node.js instances.
+ * Increments request count for the given rate_key and returns whether the request is allowed.
+ */
+export async function checkRateLimit(
+  rateKey: string,
+  maxHits = 5,
+  windowSeconds = 60
+): Promise<{ allowed: boolean; remaining: number; retryAfterSeconds: number }> {
+  try {
+    const now = new Date();
+    const rows = await query<any[]>(
+      `SELECT hits, reset_at FROM rate_limits WHERE rate_key = ? LIMIT 1`,
+      [rateKey]
+    );
+
+    if (!rows || rows.length === 0) {
+      const resetAt = new Date(now.getTime() + windowSeconds * 1000);
+      await query(
+        `INSERT INTO rate_limits (rate_key, hits, reset_at) VALUES (?, 1, ?)`,
+        [rateKey, resetAt]
+      );
+      return { allowed: true, remaining: maxHits - 1, retryAfterSeconds: 0 };
+    }
+
+    const record = rows[0];
+    const resetAt = new Date(record.reset_at);
+
+    if (now >= resetAt) {
+      // Window expired, reset window
+      const newResetAt = new Date(now.getTime() + windowSeconds * 1000);
+      await query(
+        `UPDATE rate_limits SET hits = 1, reset_at = ? WHERE rate_key = ?`,
+        [newResetAt, rateKey]
+      );
+      return { allowed: true, remaining: maxHits - 1, retryAfterSeconds: 0 };
+    }
+
+    // Within window
+    if (record.hits >= maxHits) {
+      const retryAfter = Math.ceil((resetAt.getTime() - now.getTime()) / 1000);
+      return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, retryAfter) };
+    }
+
+    await query(
+      `UPDATE rate_limits SET hits = hits + 1 WHERE rate_key = ?`,
+      [rateKey]
+    );
+    return {
+      allowed: true,
+      remaining: Math.max(0, maxHits - (record.hits + 1)),
+      retryAfterSeconds: 0,
+    };
+  } catch (err) {
+    console.warn("[checkRateLimit] Fallback on error:", err);
+    return { allowed: true, remaining: 1, retryAfterSeconds: 0 };
+  }
 }

@@ -227,6 +227,7 @@ export function AdminOrdersList() {
             postalCode: "",
             country: "India",
           },
+          addressChangeCount: Number(o.addressChangeCount || 0),
           createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
           updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
         }));
@@ -973,12 +974,22 @@ export function AdminOrdersList() {
                         >
                           {/* Order Number */}
                           <td className="py-3.5 px-4 font-mono font-bold text-neutral-900">
-                            <Link
-                              href={`/admin/orders/${order.id}`}
-                              className="bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md tracking-wider hover:bg-primary/20 hover:border-primary/40 transition-colors"
-                            >
-                              {order.orderNumber}
-                            </Link>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Link
+                                href={`/admin/orders/${order.id}`}
+                                className="bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md tracking-wider hover:bg-primary/20 hover:border-primary/40 transition-colors"
+                              >
+                                {order.orderNumber}
+                              </Link>
+                              {Boolean(order.addressChangeCount && order.addressChangeCount > 0) && (
+                                <span
+                                  title={`Delivery address was modified ${order.addressChangeCount} time(s)`}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap"
+                                >
+                                  Address updated
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Customer */}
@@ -1113,12 +1124,22 @@ export function AdminOrdersList() {
                       className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-3"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <Link
-                          href={`/admin/orders/${order.id}`}
-                          className="font-mono font-bold text-xs bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded text-neutral-900 hover:bg-primary/20 transition-colors"
-                        >
-                          {order.orderNumber}
-                        </Link>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link
+                            href={`/admin/orders/${order.id}`}
+                            className="font-mono font-bold text-xs bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded text-neutral-900 hover:bg-primary/20 transition-colors"
+                          >
+                            {order.orderNumber}
+                          </Link>
+                          {Boolean(order.addressChangeCount && order.addressChangeCount > 0) && (
+                            <span
+                              title={`Delivery address was modified ${order.addressChangeCount} time(s)`}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap"
+                            >
+                              Address updated
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           {renderOrderStatusBadge(order.orderStatus)}
 

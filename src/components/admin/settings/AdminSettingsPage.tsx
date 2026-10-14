@@ -31,6 +31,8 @@ interface FormErrors {
   freeShippingThreshold?: string;
   defaultShippingFee?: string;
   cancellationWindowHours?: string;
+  addressChangeWindowHours?: string;
+  maxAddressChangesPerOrder?: string;
 }
 
 export function AdminSettingsPage() {
@@ -212,6 +214,16 @@ export function AdminSettingsPage() {
     if (formData.cancellationWindowHours < 1) {
       newErrors.cancellationWindowHours = "Cancellation window must be at least 1 hour";
     }
+    if (formData.allowAddressChange) {
+      const windowHours = Number(formData.addressChangeWindowHours);
+      if (!Number.isInteger(windowHours) || windowHours < 1 || windowHours > 72) {
+        newErrors.addressChangeWindowHours = "Address change window must be an integer between 1 and 72 hours";
+      }
+      const maxChanges = Number(formData.maxAddressChangesPerOrder);
+      if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 10) {
+        newErrors.maxAddressChangesPerOrder = "Maximum address changes must be an integer between 1 and 10";
+      }
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -235,6 +247,8 @@ export function AdminSettingsPage() {
       freeShippingThreshold: true,
       defaultShippingFee: true,
       cancellationWindowHours: true,
+      addressChangeWindowHours: true,
+      maxAddressChangesPerOrder: true,
     });
 
     if (!validateForm()) {
@@ -832,6 +846,79 @@ export function AdminSettingsPage() {
               formData.notifyOnNewOrder,
               (v) => updateField("notifyOnNewOrder", v),
               "toggle-notifyOnNewOrder"
+            )}
+
+            {/* Customer Delivery Address Change Policies */}
+            {renderToggle(
+              "Allow customers to change delivery address",
+              "Permit buyers to update their delivery address from their account dashboard within an admin-controlled time window prior to dispatch.",
+              formData.allowAddressChange,
+              (v) => updateField("allowAddressChange", v),
+              "toggle-allowAddressChange"
+            )}
+
+            {formData.allowAddressChange && (
+              <>
+                <div className="py-3 flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <label
+                      htmlFor="addressChangeWindowHours"
+                      className="text-xs font-bold text-neutral-800"
+                    >
+                      Address change window (Hours)
+                    </label>
+                    <p className="text-[11px] text-neutral-500">
+                      Elapsed hours after order placement during which address changes are permitted (1–72 hours).
+                    </p>
+                  </div>
+                  <div className="w-28 shrink-0">
+                    <input
+                      id="addressChangeWindowHours"
+                      type="number"
+                      min={1}
+                      max={72}
+                      value={formData.addressChangeWindowHours ?? 6}
+                      onChange={(e) =>
+                        updateField(
+                          "addressChangeWindowHours",
+                          parseInt(e.target.value, 10) || 1
+                        )
+                      }
+                      className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="py-3 flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <label
+                      htmlFor="maxAddressChangesPerOrder"
+                      className="text-xs font-bold text-neutral-800"
+                    >
+                      Maximum address changes per order
+                    </label>
+                    <p className="text-[11px] text-neutral-500">
+                      Maximum number of successful delivery address updates permitted per order (1–10).
+                    </p>
+                  </div>
+                  <div className="w-28 shrink-0">
+                    <input
+                      id="maxAddressChangesPerOrder"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={formData.maxAddressChangesPerOrder ?? 2}
+                      onChange={(e) =>
+                        updateField(
+                          "maxAddressChangesPerOrder",
+                          parseInt(e.target.value, 10) || 1
+                        )
+                      }
+                      className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>
