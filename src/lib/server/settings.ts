@@ -94,6 +94,37 @@ export async function updateStoreSettings(
     }
   }
 
+  // Abandonment Recovery Policies Validation
+  if (updates.recoverySheetEnabled !== undefined && typeof updates.recoverySheetEnabled !== "boolean") {
+    throw new Error("recoverySheetEnabled must be a boolean value");
+  }
+
+  if (updates.alternativesEnabled !== undefined && typeof updates.alternativesEnabled !== "boolean") {
+    throw new Error("alternativesEnabled must be a boolean value");
+  }
+
+  if (updates.feedbackEnabled !== undefined && typeof updates.feedbackEnabled !== "boolean") {
+    throw new Error("feedbackEnabled must be a boolean value");
+  }
+
+  if (updates.maxAlternatives !== undefined) {
+    const maxAlt = Number(updates.maxAlternatives);
+    if (!Number.isInteger(maxAlt) || maxAlt < 1 || maxAlt > 4) {
+      throw new Error("Maximum alternatives must be an integer between 1 and 4");
+    }
+  }
+
+  if (updates.feedbackReasons !== undefined) {
+    if (!Array.isArray(updates.feedbackReasons) || updates.feedbackReasons.length === 0) {
+      throw new Error("Feedback reasons must be a non-empty array of strings");
+    }
+    for (const r of updates.feedbackReasons) {
+      if (typeof r !== "string" || r.trim().length === 0 || r.length > 100) {
+        throw new Error("Each feedback reason must be a string between 1 and 100 characters");
+      }
+    }
+  }
+
   const nextSettings: AdminSettings = {
     ...current,
     ...updates,
@@ -126,6 +157,26 @@ export async function updateStoreSettings(
       updates.maxAddressChangesPerOrder !== undefined
         ? Number(updates.maxAddressChangesPerOrder)
         : current.maxAddressChangesPerOrder ?? 2,
+    recoverySheetEnabled:
+      updates.recoverySheetEnabled !== undefined
+        ? Boolean(updates.recoverySheetEnabled)
+        : current.recoverySheetEnabled ?? true,
+    alternativesEnabled:
+      updates.alternativesEnabled !== undefined
+        ? Boolean(updates.alternativesEnabled)
+        : current.alternativesEnabled ?? true,
+    feedbackEnabled:
+      updates.feedbackEnabled !== undefined
+        ? Boolean(updates.feedbackEnabled)
+        : current.feedbackEnabled ?? true,
+    maxAlternatives:
+      updates.maxAlternatives !== undefined
+        ? Number(updates.maxAlternatives)
+        : current.maxAlternatives ?? 4,
+    feedbackReasons:
+      updates.feedbackReasons !== undefined
+        ? updates.feedbackReasons.map((r) => r.trim())
+        : current.feedbackReasons ?? DEFAULT_ADMIN_SETTINGS.feedbackReasons,
   };
 
   const jsonString = JSON.stringify(nextSettings);

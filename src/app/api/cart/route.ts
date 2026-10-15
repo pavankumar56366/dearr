@@ -5,6 +5,7 @@ import {
   getCartForUser,
   clearCartForUser,
   CartValidationError,
+  recordInternalEvent,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,15 @@ export async function GET() {
   try {
     const user = await requireUser();
     const cart = await getCartForUser(user.id);
+
+    await recordInternalEvent({
+      eventType: "cart_viewed",
+      userId: user.id,
+      metadata: {
+        itemCount: cart?.itemCount ?? cart?.items?.length ?? 0,
+        subtotal: cart?.totals?.subtotal ?? 0,
+      },
+    });
 
     return NextResponse.json({
       ok: true,

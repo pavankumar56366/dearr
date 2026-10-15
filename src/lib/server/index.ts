@@ -303,6 +303,11 @@ export {
   type CreateCheckoutAttemptInput,
   type BuyNowItemInput,
   CheckoutAttemptError,
+  markAttemptAbandoned,
+  markAttemptFailed,
+  recordRecoveryShown,
+  getAttemptRecoveryStatus,
+  ABANDONED_ATTEMPT_RETENTION_DAYS,
 } from "./checkout-attempt";
 
 export {
@@ -314,3 +319,63 @@ export {
   resolveOrderExportAmounts,
   type ExportType,
 } from "./order-export";
+
+export {
+  recordInternalEvent,
+  getInternalEventsForAttempt,
+  type InternalEventType,
+  type RecordInternalEventInput,
+  type InternalEventRecord,
+} from "./events";
+
+export {
+  recordProductPriceChange,
+  recordPriceChange,
+  getProductPriceHistory,
+  type RecordPriceChangeInput,
+  type ProductPriceHistoryRecord,
+} from "./price-history";
+
+export {
+  getLowerPricedAlternatives,
+  findLowerPricedAlternatives,
+  swapCartItemForAlternative,
+  AlternativesError,
+  AlternativesConflictError,
+  type AlternativeItem,
+  type SwapCartItemInput,
+} from "./alternatives";
+
+export {
+  submitCheckoutFeedback,
+  getFeedbackForAttempt,
+  getAttemptFeedback,
+  sanitizeFeedbackComment,
+  FeedbackValidationError,
+  type SubmitFeedbackInput,
+  type CheckoutFeedbackRecord,
+} from "./checkout-feedback";
+
+export {
+  recordNotificationConsent,
+  withdrawNotificationConsent,
+  subscribeNotificationConsent,
+  getNotificationConsentsForUser,
+  unsubscribeNotificationConsent,
+  getConsentsForAttempt,
+  ConsentValidationError,
+  type ConsentChannel,
+  type RecordConsentInput,
+  type SubscribeNotificationConsentInput,
+  type NotificationConsentRecord,
+} from "./notification-consent";
+
+export {
+  getAbandonmentSummaryMetrics,
+  getRecentAbandonedCheckouts,
+  listRecentAbandonedCheckouts,
+  generateAbandonmentCsv,
+  streamAbandonmentCsv,
+  type AbandonmentSummaryMetrics,
+  type AbandonedCheckoutRow,
+} from "./abandonment-analytics";

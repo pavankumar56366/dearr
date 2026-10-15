@@ -11,15 +11,19 @@ import {
 import { getApplicableDiscountForProduct, computeDiscountAmount } from "./discount";
 import { getStoreSettings } from "./settings";
 
+import { recordInternalEvent } from "./events";
+
 export const ATTEMPT_EXPIRY_MINUTES = 30;
-export const ATTEMPT_RETENTION_DAYS = 30;
+export const ATTEMPT_RETENTION_DAYS = 90;
+export const ABANDONED_ATTEMPT_RETENTION_DAYS = 90;
 
 export type CheckoutAttemptStatus =
   | "pending"
   | "verified"
   | "converted"
   | "expired"
-  | "failed";
+  | "failed"
+  | "abandoned";
 
 export interface CheckoutAttemptRecord {
   id: string;
@@ -29,6 +33,10 @@ export interface CheckoutAttemptRecord {
   providerOrderId: string | null;
   providerPaymentId: string | null;
   orderId: string | null;
+  recoveryShownAt?: Date | null;
+  abandonedAt?: Date | null;
+  gatewayErrorCode?: string | null;
+  gatewayErrorDesc?: string | null;
   status: CheckoutAttemptStatus;
   amount: number;
   currency: string;
@@ -118,7 +126,7 @@ export async function createCheckoutAttempt(
     ]
   );
 
-  return {
+  const record: CheckoutAttemptRecord = {
     id,
     userId: input.userId,
     cartId: input.cartId || null,
@@ -135,6 +143,19 @@ export async function createCheckoutAttempt(
     createdAt: now,
     updatedAt: now,
   };
+
+  await recordInternalEvent({
+    eventType: "checkout_started",
+    attemptId: id,
+    userId: input.userId,
+    metadata: {
+      amount: input.amount,
+      provider,
+      cartId: input.cartId || null,
+    },
+  });
+
+  return record;
 }
 
 /**
@@ -162,7 +183,7 @@ export async function createCheckoutAttemptFromCart(
   const cleanUserId = validateId(userId, "User ID");
   const validatedAddress = validateShippingAddress(shippingInput);
 
-  return await withTransaction(async (conn) => {
+  const attemptRecord = await withTransaction(async (conn) => {
     // 1. Fetch active cart
     const [cartRows]: any = await conn.execute(
       `SELECT id, user_id, status
@@ -427,7 +448,7 @@ export async function createCheckoutAttemptFromCart(
       );
     }
 
-    return {
+    const createdAttempt: CheckoutAttemptRecord = {
       id: attemptId,
       userId: cleanUserId,
       cartId: cart.id,
@@ -444,7 +465,20 @@ export async function createCheckoutAttemptFromCart(
       createdAt: now,
       updatedAt: now,
     };
+    return createdAttempt;
   });
+
+  await recordInternalEvent({
+    eventType: "checkout_started",
+    attemptId: attemptRecord.id,
+    userId: attemptRecord.userId,
+    metadata: {
+      amount: attemptRecord.amount,
+      cartId: attemptRecord.cartId,
+    },
+  });
+
+  return attemptRecord;
 }
 
 /**
@@ -462,7 +496,7 @@ export async function createBuyNowCheckoutAttempt(
     throw new CheckoutAttemptError("At least one item is required for Buy Now", 400);
   }
 
-  return await withTransaction(async (conn) => {
+  const attemptRecord = await withTransaction(async (conn) => {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ATTEMPT_EXPIRY_MINUTES * 60 * 1000);
     const attemptId = crypto.randomUUID();
@@ -690,7 +724,7 @@ export async function createBuyNowCheckoutAttempt(
       );
     }
 
-    return {
+    const createdAttempt: CheckoutAttemptRecord = {
       id: attemptId,
       userId: cleanUserId,
       cartId: null,
@@ -707,7 +741,20 @@ export async function createBuyNowCheckoutAttempt(
       createdAt: now,
       updatedAt: now,
     };
+    return createdAttempt;
   });
+
+  await recordInternalEvent({
+    eventType: "checkout_started",
+    attemptId: attemptRecord.id,
+    userId: attemptRecord.userId,
+    metadata: {
+      amount: attemptRecord.amount,
+      isBuyNow: true,
+    },
+  });
+
+  return attemptRecord;
 }
 
 /**
@@ -819,7 +866,7 @@ export async function finalizeOrderFromAttempt(
 
     // 2. Idempotency guard: If already converted, return existing order id
     if (attemptRow.status === "converted" && attemptRow.order_id) {
-      return { orderId: attemptRow.order_id };
+      return { orderId: attemptRow.order_id, alreadyConverted: true };
     }
 
     // 3. Check for payment ID collision across payments table
@@ -830,7 +877,7 @@ export async function finalizeOrderFromAttempt(
     if (existingPaymentCollisions && existingPaymentCollisions.length > 0) {
       const collision = existingPaymentCollisions[0];
       if (attemptRow.order_id && collision.order_id === attemptRow.order_id) {
-        return { orderId: attemptRow.order_id };
+        return { orderId: attemptRow.order_id, alreadyConverted: true };
       }
       throw new CheckoutAttemptError(
         "Payment ID has already been assigned to an existing order",
@@ -1045,13 +1092,29 @@ export async function finalizeOrderFromAttempt(
   if (!finalOrder) {
     throw new CheckoutAttemptError("Failed to load finalized order", 500);
   }
+
+  if (!(txnResult as any).alreadyConverted) {
+    await recordInternalEvent({
+      eventType: "payment_success",
+      attemptId: cleanAttemptId,
+      orderId: finalOrder.id,
+      userId: finalOrder.userId,
+      metadata: {
+        orderNumber: finalOrder.orderNumber,
+        amount: finalOrder.totalAmount,
+        currency: finalOrder.currency,
+        providerPaymentId: cleanPaymentId,
+      },
+    });
+  }
+
   return finalOrder;
 }
 
 /**
  * Idempotent scheduled cleanup:
  * 1. Expires unpaid checkout attempts older than 30 minutes.
- * 2. Purges expired checkout attempts older than 30 days retention.
+ * 2. Purges expired checkout attempts older than 90 days retention.
  *
  * Placed orders and order items are NEVER deleted by this cleanup.
  */
@@ -1096,19 +1159,21 @@ export async function cleanupCheckoutAttempts(): Promise<{
     }
   }
 
-  // Step 2: Mark pending attempts past expiry as expired
+  // Step 2: Mark pending attempts past expiry as expired and set 90-day retention
   const expireResult: any = await query(
     `UPDATE checkout_attempts
-     SET status = 'expired', updated_at = NOW()
+     SET status = 'expired',
+         retention_until = DATE_ADD(NOW(), INTERVAL ${ABANDONED_ATTEMPT_RETENTION_DAYS} DAY),
+         updated_at = NOW()
      WHERE status = 'pending'
        AND expires_at < NOW()`
   );
   const expiredCount = Number(expireResult?.affectedRows || 0);
 
-  // Step 3: Purge attempts past 30-day retention (and clean up reservations)
+  // Step 3: Purge attempts past retention (and clean up reservations)
   const toPurge = await query<any[]>(
     `SELECT id FROM checkout_attempts
-     WHERE status IN ('expired', 'failed')
+     WHERE status IN ('expired', 'failed', 'abandoned')
        AND retention_until < NOW()`
   );
   if (toPurge && toPurge.length > 0) {
@@ -1122,7 +1187,7 @@ export async function cleanupCheckoutAttempts(): Promise<{
 
   const purgeResult: any = await query(
     `DELETE FROM checkout_attempts
-     WHERE status IN ('expired', 'failed')
+     WHERE status IN ('expired', 'failed', 'abandoned')
        AND retention_until < NOW()`
   );
   const purgedCount = Number(purgeResult?.affectedRows || 0);
@@ -1171,6 +1236,371 @@ export async function releaseCheckoutAttemptReservations(
     return await runWithConn(conn);
   }
   return await withTransaction(runWithConn);
+}
+
+/**
+ * Handles customer dismissal of payment modal safely.
+ *
+ * Guarantees:
+ * 1. Checks if attempt has already been converted to a placed order. If so, suppresses abandonment and returns order ID.
+ * 2. Idempotent: repeated dismissals do not corrupt data or produce duplicate events.
+ * 3. Transitions status to 'abandoned' and extends retention to 90 days.
+ * 4. Records `checkout.abandoned` in internal_events.
+ */
+export async function markAttemptAbandoned(
+  attemptId: string,
+  userId?: string
+): Promise<{
+  success: boolean;
+  status: CheckoutAttemptStatus;
+  isPaid: boolean;
+  orderId?: string | null;
+  orderNumber?: string | null;
+}> {
+  const cleanId = (attemptId || "").trim();
+  if (!cleanId) {
+    throw new CheckoutAttemptError("Attempt ID is required", 400);
+  }
+
+  return await withTransaction(async (conn) => {
+    const [rows]: any = await conn.execute(
+      "SELECT * FROM checkout_attempts WHERE id = ? FOR UPDATE",
+      [cleanId]
+    );
+    if (!rows || rows.length === 0) {
+      throw new CheckoutAttemptError("Checkout attempt not found", 404);
+    }
+    const attempt = rows[0];
+
+    // Ownership check if userId supplied
+    if (userId && attempt.user_id !== userId) {
+      throw new CheckoutAttemptError("Forbidden: Unauthorized attempt access", 403);
+    }
+
+    // Guard: If already converted, never mark abandoned
+    if (attempt.status === "converted" && attempt.order_id) {
+      const [ordRows]: any = await conn.execute(
+        "SELECT order_number FROM orders WHERE id = ? LIMIT 1",
+        [attempt.order_id]
+      );
+      return {
+        success: true,
+        status: "converted",
+        isPaid: true,
+        orderId: attempt.order_id,
+        orderNumber: ordRows?.[0]?.order_number || null,
+      };
+    }
+
+    // Check payments table to see if payment was already captured or verified
+    const [payRows]: any = await conn.execute(
+      `SELECT id, status, order_id FROM payments
+       WHERE (order_id = ? OR provider_order_id = ?) AND status IN ('captured', 'verified')
+       LIMIT 1`,
+      [attempt.id, attempt.provider_order_id || attempt.id]
+    );
+    if (payRows && payRows.length > 0) {
+      return {
+        success: true,
+        status: attempt.status,
+        isPaid: true,
+        orderId: attempt.order_id || payRows[0].order_id,
+      };
+    }
+
+    const isAlreadyAbandoned = attempt.status === "abandoned";
+    if (!isAlreadyAbandoned) {
+      await conn.execute(
+        `UPDATE checkout_attempts
+         SET status = 'abandoned',
+             abandoned_at = NOW(),
+             retention_until = DATE_ADD(NOW(), INTERVAL ? DAY),
+             updated_at = NOW()
+         WHERE id = ?`,
+        [ABANDONED_ATTEMPT_RETENTION_DAYS, cleanId]
+      );
+
+      await recordInternalEvent({
+        eventType: "razorpay_dismissed",
+        attemptId: cleanId,
+        userId: attempt.user_id,
+        metadata: {
+          amount: Number(attempt.amount),
+          cartId: attempt.cart_id,
+        },
+      });
+
+      await recordInternalEvent({
+        eventType: "checkout.abandoned",
+        attemptId: cleanId,
+        userId: attempt.user_id,
+        metadata: {
+          amount: Number(attempt.amount),
+          cartId: attempt.cart_id,
+        },
+      });
+    }
+
+    return {
+      success: true,
+      status: "abandoned",
+      isPaid: false,
+    };
+  });
+}
+
+/**
+ * Handles verified payment gateway failures safely.
+ *
+ * Guarantees:
+ * 1. Checks if attempt has already been converted to a placed order. If so, suppresses failure.
+ * 2. Sanitizes external error code and description to prevent secret leakage or injection.
+ * 3. Sets status = 'failed' and extends retention to 90 days.
+ * 4. Records `payment_failed` in internal_events.
+ */
+export async function markAttemptFailed(
+  attemptId: string,
+  errorDetails?: {
+    code?: string;
+    description?: string;
+    source?: string;
+    step?: string;
+    reason?: string;
+  },
+  userId?: string
+): Promise<{
+  success: boolean;
+  status: CheckoutAttemptStatus;
+  isPaid: boolean;
+  orderId?: string | null;
+  orderNumber?: string | null;
+}> {
+  const cleanId = (attemptId || "").trim();
+  if (!cleanId) {
+    throw new CheckoutAttemptError("Attempt ID is required", 400);
+  }
+
+  const safeCode = (errorDetails?.code || "PAYMENT_FAILED").trim().slice(0, 100);
+  const safeDesc = (
+    errorDetails?.description ||
+    "Payment could not be completed. Your cart remains saved so you can retry."
+  )
+    .trim()
+    .slice(0, 500);
+
+  return await withTransaction(async (conn) => {
+    const [rows]: any = await conn.execute(
+      "SELECT * FROM checkout_attempts WHERE id = ? FOR UPDATE",
+      [cleanId]
+    );
+    if (!rows || rows.length === 0) {
+      throw new CheckoutAttemptError("Checkout attempt not found", 404);
+    }
+    const attempt = rows[0];
+
+    // Ownership check if userId supplied
+    if (userId && attempt.user_id !== userId) {
+      throw new CheckoutAttemptError("Forbidden: Unauthorized attempt access", 403);
+    }
+
+    // Guard: If already converted, do not downgrade
+    if (attempt.status === "converted" && attempt.order_id) {
+      const [ordRows]: any = await conn.execute(
+        "SELECT order_number FROM orders WHERE id = ? LIMIT 1",
+        [attempt.order_id]
+      );
+      return {
+        success: true,
+        status: "converted",
+        isPaid: true,
+        orderId: attempt.order_id,
+        orderNumber: ordRows?.[0]?.order_number || null,
+      };
+    }
+
+    // Check payments table
+    const [payRows]: any = await conn.execute(
+      `SELECT id, status, order_id FROM payments
+       WHERE (order_id = ? OR provider_order_id = ?) AND status IN ('captured', 'verified')
+       LIMIT 1`,
+      [attempt.id, attempt.provider_order_id || attempt.id]
+    );
+    if (payRows && payRows.length > 0) {
+      return {
+        success: true,
+        status: attempt.status,
+        isPaid: true,
+        orderId: attempt.order_id || payRows[0].order_id,
+      };
+    }
+
+    await conn.execute(
+      `UPDATE checkout_attempts
+       SET status = 'failed',
+           gateway_error_code = ?,
+           gateway_error_desc = ?,
+           retention_until = DATE_ADD(NOW(), INTERVAL ? DAY),
+           updated_at = NOW()
+       WHERE id = ?`,
+      [safeCode, safeDesc, ABANDONED_ATTEMPT_RETENTION_DAYS, cleanId]
+    );
+
+    // Release reservations on failure so stock is not permanently blocked
+    await releaseCheckoutAttemptReservations(cleanId, conn);
+
+    await recordInternalEvent({
+      eventType: "payment_failed",
+      attemptId: cleanId,
+      userId: attempt.user_id,
+      metadata: {
+        code: safeCode,
+        description: safeDesc,
+        amount: Number(attempt.amount),
+      },
+    });
+
+    return {
+      success: true,
+      status: "failed",
+      isPaid: false,
+    };
+  });
+}
+
+/**
+ * Idempotently records that the recovery sheet has been presented to the customer.
+ * Prevents multiple presentations for the same attempt.
+ */
+export async function recordRecoveryShown(
+  attemptId: string,
+  userId?: string
+): Promise<{ success: boolean; alreadyShown: boolean }> {
+  const cleanId = (attemptId || "").trim();
+  if (!cleanId) return { success: false, alreadyShown: false };
+
+  const attempt = await getCheckoutAttemptById(cleanId);
+  if (!attempt) return { success: false, alreadyShown: false };
+  if (userId && attempt.userId !== userId) {
+    throw new CheckoutAttemptError("Forbidden: Unauthorized attempt access", 403);
+  }
+
+  if (attempt.recoveryShownAt) {
+    return { success: true, alreadyShown: true };
+  }
+
+  const result: any = await query(
+    `UPDATE checkout_attempts
+     SET recovery_shown_at = NOW(), updated_at = NOW()
+     WHERE id = ? AND recovery_shown_at IS NULL`,
+    [cleanId]
+  );
+
+  return {
+    success: true,
+    alreadyShown: result.affectedRows === 0,
+  };
+}
+
+/**
+ * Checks authoritative attempt recovery status.
+ *
+ * Guarantees:
+ * - If paid / converted -> recovery suppressed, routes to order confirmation.
+ * - If recovery already shown -> recovery suppressed.
+ * - If settings have recovery sheet disabled -> recovery suppressed.
+ * - Otherwise eligible to show recovery sheet.
+ */
+export async function getAttemptRecoveryStatus(
+  attemptId: string,
+  userId?: string
+): Promise<{
+  eligible: boolean;
+  attemptId: string;
+  status: CheckoutAttemptStatus;
+  isPaid: boolean;
+  orderId?: string | null;
+  orderNumber?: string | null;
+  alreadyShown: boolean;
+  recoveryShownAt?: Date | null;
+  cartSnapshot?: any;
+  errorCode?: string | null;
+  errorDescription?: string | null;
+}> {
+  const cleanId = (attemptId || "").trim();
+  if (!cleanId) {
+    throw new CheckoutAttemptError("Attempt ID is required", 400);
+  }
+
+  const attempt = await getCheckoutAttemptById(cleanId);
+  if (!attempt) {
+    throw new CheckoutAttemptError("Checkout attempt not found", 404);
+  }
+
+  if (userId && attempt.userId !== userId) {
+    throw new CheckoutAttemptError("Forbidden: Unauthorized attempt access", 403);
+  }
+
+  // 1. If converted, load order number and return suppressed
+  if (attempt.status === "converted" && attempt.orderId) {
+    const order = await getOrderById(attempt.orderId);
+    return {
+      eligible: false,
+      attemptId: attempt.id,
+      status: "converted",
+      isPaid: true,
+      orderId: attempt.orderId,
+      orderNumber: order?.orderNumber || null,
+      alreadyShown: Boolean(attempt.recoveryShownAt),
+      recoveryShownAt: attempt.recoveryShownAt || null,
+    };
+  }
+
+  // 2. Check store settings toggle
+  const settings = await getStoreSettings();
+  if (settings.recoverySheetEnabled === false) {
+    return {
+      eligible: false,
+      attemptId: attempt.id,
+      status: attempt.status,
+      isPaid: false,
+      alreadyShown: Boolean(attempt.recoveryShownAt),
+      recoveryShownAt: attempt.recoveryShownAt || null,
+    };
+  }
+
+  // 3. If already shown, suppress
+  const alreadyShown = Boolean(attempt.recoveryShownAt);
+  if (alreadyShown) {
+    return {
+      eligible: false,
+      attemptId: attempt.id,
+      status: attempt.status,
+      isPaid: false,
+      alreadyShown: true,
+      recoveryShownAt: attempt.recoveryShownAt || null,
+      cartSnapshot: attempt.checkoutData,
+      errorCode: attempt.gatewayErrorCode || null,
+      errorDescription: attempt.gatewayErrorDesc || null,
+    };
+  }
+
+  // 4. Eligible if status is 'abandoned' or 'failed' or 'pending' (past dismissal)
+  const isEligibleStatus =
+    attempt.status === "abandoned" ||
+    attempt.status === "failed" ||
+    attempt.status === "pending";
+
+  return {
+    eligible: isEligibleStatus && !alreadyShown,
+    attemptId: attempt.id,
+    status: attempt.status,
+    isPaid: false,
+    alreadyShown: false,
+    recoveryShownAt: null,
+    cartSnapshot: attempt.checkoutData,
+    errorCode: attempt.gatewayErrorCode || null,
+    errorDescription: attempt.gatewayErrorDesc || null,
+  };
 }
 
 /**
@@ -1228,6 +1658,10 @@ function mapAttemptRow(row: any): CheckoutAttemptRecord {
     providerOrderId: row.provider_order_id || null,
     providerPaymentId: row.provider_payment_id || null,
     orderId: row.order_id || null,
+    recoveryShownAt: row.recovery_shown_at ? new Date(row.recovery_shown_at) : null,
+    abandonedAt: row.abandoned_at ? new Date(row.abandoned_at) : null,
+    gatewayErrorCode: row.gateway_error_code || null,
+    gatewayErrorDesc: row.gateway_error_desc || null,
     status: row.status as CheckoutAttemptStatus,
     amount: Number(row.amount),
     currency: row.currency,

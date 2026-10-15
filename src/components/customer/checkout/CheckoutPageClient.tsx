@@ -19,6 +19,7 @@ import PaymentMethod, { type PaymentOption } from "./PaymentMethod";
 import CheckoutSummary from "./CheckoutSummary";
 import CheckoutEmptyState from "./CheckoutEmptyState";
 import CheckoutDemoSuccess from "./CheckoutDemoSuccess";
+import { CartRecoverySheet } from "./CartRecoverySheet";
 import { ArrowLeftIcon, ChevronRightIcon, SecureLockIcon } from "@/components/customer/Icons";
 
 function loadRazorpayScript(): Promise<boolean> {
@@ -70,7 +71,18 @@ export default function CheckoutPageClient() {
   const [storeSettings, setStoreSettings] = useState<{
     freeShippingThreshold: number;
     defaultShippingFee: number;
+    recoverySheetEnabled?: boolean;
+    alternativesEnabled?: boolean;
+    feedbackEnabled?: boolean;
+    feedbackReasons?: string[];
   }>({ freeShippingThreshold: 999, defaultShippingFee: 50 });
+
+  // Recovery sheet state
+  const [showRecoverySheet, setShowRecoverySheet] = useState(false);
+  const [recoveryAttemptId, setRecoveryAttemptId] = useState<string | null>(null);
+  const [isRecoveryFailed, setIsRecoveryFailed] = useState(false);
+  const [recoveryErrorCode, setRecoveryErrorCode] = useState<string | null>(null);
+  const [recoveryErrorDesc, setRecoveryErrorDesc] = useState<string | null>(null);
 
   // Load Buy Now intent when intentId query is present
   useEffect(() => {
@@ -116,6 +128,12 @@ export default function CheckoutPageClient() {
             setStoreSettings({
               freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 999),
               defaultShippingFee: Number(data.settings.defaultShippingFee ?? 50),
+              recoverySheetEnabled: data.settings.recoverySheetEnabled !== false,
+              alternativesEnabled: data.settings.alternativesEnabled !== false,
+              feedbackEnabled: data.settings.feedbackEnabled !== false,
+              feedbackReasons: Array.isArray(data.settings.feedbackReasons)
+                ? data.settings.feedbackReasons
+                : undefined,
             });
           }
         }
@@ -404,6 +422,11 @@ export default function CheckoutPageClient() {
                 name: "Dearr Store",
                 description: `Order ${createdOrder.orderNumber}`,
                 order_id: payData.razorpayOrderId,
+                notes: {
+                  attemptId: createdOrder.id,
+                  orderId: createdOrder.id,
+                },
+                _attemptId: createdOrder.id,
                 prefill: {
                   name: address.fullName,
                   email: address.email,
@@ -514,6 +537,34 @@ export default function CheckoutPageClient() {
                         }),
                       });
                     } catch {}
+
+                    const targetAttemptId = data.attemptId || (data.isAttempt ? createdOrder.id : null);
+                    if (targetAttemptId) {
+                      try {
+                        const dismissRes = await fetch(`/api/checkout/attempts/${targetAttemptId}/dismissed`, {
+                          method: "POST",
+                        });
+                        const dismissData = await dismissRes.json();
+                        if (dismissData.isPaid && dismissData.orderNumber) {
+                          router.push(`/order-confirmed?orderNumber=${dismissData.orderNumber}`);
+                          return;
+                        }
+
+                        const statRes = await fetch(`/api/checkout/attempts/${targetAttemptId}/recovery-status`);
+                        const statData = await statRes.json();
+                        if (statData.isPaid && statData.orderNumber) {
+                          router.push(`/order-confirmed?orderNumber=${statData.orderNumber}`);
+                          return;
+                        }
+                        if (statData.eligible) {
+                          setRecoveryAttemptId(targetAttemptId);
+                          setIsRecoveryFailed(false);
+                          setRecoveryErrorCode(null);
+                          setRecoveryErrorDesc(null);
+                          setShowRecoverySheet(true);
+                        }
+                      } catch {}
+                    }
                   },
                 },
               };
@@ -524,6 +575,7 @@ export default function CheckoutPageClient() {
 
               rzp.on("payment.failed", async function (failResp: any) {
                 setIsProcessing(false);
+                const errorCode = failResp?.error?.code || null;
                 const desc =
                   failResp?.error?.description ||
                   "Payment failed. Your order remains safely pending.";
@@ -539,9 +591,49 @@ export default function CheckoutPageClient() {
                     }),
                   });
                 } catch {}
+
+                const targetAttemptId = data.attemptId || (data.isAttempt ? createdOrder.id : null);
+                if (targetAttemptId) {
+                  try {
+                    const failRes = await fetch(`/api/checkout/attempts/${targetAttemptId}/failed`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        code: errorCode,
+                        description: desc,
+                        source: failResp?.error?.source,
+                        step: failResp?.error?.step,
+                        reason: failResp?.error?.reason,
+                      }),
+                    });
+                    const failData = await failRes.json();
+                    if (failData.isPaid && failData.orderNumber) {
+                      router.push(`/order-confirmed?orderNumber=${failData.orderNumber}`);
+                      return;
+                    }
+
+                    const statRes = await fetch(`/api/checkout/attempts/${targetAttemptId}/recovery-status`);
+                    const statData = await statRes.json();
+                    if (statData.isPaid && statData.orderNumber) {
+                      router.push(`/order-confirmed?orderNumber=${statData.orderNumber}`);
+                      return;
+                    }
+                    if (statData.eligible) {
+                      setRecoveryAttemptId(targetAttemptId);
+                      setIsRecoveryFailed(true);
+                      setRecoveryErrorCode(errorCode);
+                      setRecoveryErrorDesc(desc);
+                      setShowRecoverySheet(true);
+                    }
+                  } catch {}
+                }
               });
 
               rzp.open();
+              const targetAttemptId = data.attemptId || (data.isAttempt ? createdOrder.id : null);
+              if (targetAttemptId) {
+                fetch(`/api/checkout/attempts/${targetAttemptId}/opened`, { method: "POST" }).catch(() => {});
+              }
               setIsProcessing(false);
               return;
             } catch (err: any) {
@@ -847,6 +939,31 @@ export default function CheckoutPageClient() {
           </div>
         </div>
       </main>
+
+      {/* Cart Abandonment / Payment Failure Recovery Sheet */}
+      {recoveryAttemptId && (
+        <CartRecoverySheet
+          isOpen={showRecoverySheet}
+          attemptId={recoveryAttemptId}
+          isFailed={isRecoveryFailed}
+          errorCode={recoveryErrorCode}
+          errorDescription={recoveryErrorDesc}
+          customerEmail={address.email}
+          customerPhone={address.phone}
+          defaultReasons={storeSettings.feedbackReasons}
+          onClose={() => setShowRecoverySheet(false)}
+          onRetryPayment={() => {
+            setShowRecoverySheet(false);
+            handleProceedToPayment();
+          }}
+          onCartSwapped={() => {
+            setShowRecoverySheet(false);
+            if (typeof window !== "undefined") {
+              window.location.reload();
+            }
+          }}
+        />
+      )}
     </div>
   );
 }

@@ -3,7 +3,12 @@ import crypto from "crypto";
 import { query, withTransaction } from "./db";
 import { type PaymentStatus, type OrderStatus, type OrderRecord, getOrderById } from "./order";
 import { getRazorpayClient, verifyRazorpaySignature } from "./razorpay";
-import { finalizeOrderFromAttempt } from "./checkout-attempt";
+import {
+  finalizeOrderFromAttempt,
+  markAttemptAbandoned,
+  markAttemptFailed,
+} from "./checkout-attempt";
+import { recordInternalEvent } from "./events";
 
 /**
  * Custom error class for payment validation failures.
@@ -1313,6 +1318,53 @@ export async function handlePaymentFailure(
   const cleanUserId = validateId(input.userId, "User ID");
 
   return await withTransaction(async (conn) => {
+    // 0. Check if cleanOrderId is a checkout_attempt
+    const [attemptRows]: any = await conn.execute(
+      "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1 FOR UPDATE",
+      [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+    );
+
+    if (attemptRows && attemptRows.length > 0) {
+      const attempt = attemptRows[0];
+      if (attempt.user_id !== cleanUserId) {
+        throw new PaymentValidationError(
+          "Forbidden: You do not have permission to access payment records for this attempt",
+          403
+        );
+      }
+      if (attempt.status === "converted" && attempt.order_id) {
+        return {
+          success: true,
+          orderId: attempt.order_id,
+          orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+          paymentStatus: "paid",
+          orderStatus: "confirmed",
+          status: "ignored",
+          ignored: true,
+          message: "Attempt is already converted to a paid order; failure callback ignored safely.",
+        };
+      }
+      await markAttemptFailed(
+        attempt.id,
+        {
+          code: input.errorCode,
+          description: input.errorDescription,
+          source: input.errorSource,
+          step: input.errorStep,
+          reason: input.errorReason,
+        },
+        cleanUserId
+      );
+      return {
+        success: true,
+        orderId: attempt.id,
+        orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+        paymentStatus: "failed",
+        orderStatus: "pending",
+        status: "failed",
+      };
+    }
+
     // 1. Fetch internal order with row lock
     const [orderRows] = (await conn.execute(
       `SELECT id, order_number, user_id, status, payment_status, total_amount, currency
@@ -1544,6 +1596,46 @@ export async function handlePaymentCancellation(
 ): Promise<HandlePaymentCancellationResult> {
   const cleanOrderId = validateId(input.orderId, "Order ID");
   const cleanUserId = validateId(input.userId, "User ID");
+
+  // 0. Check if cleanOrderId is a checkout_attempt
+  const [attemptRows]: any = await query(
+    "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
+    [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+  );
+
+  if (attemptRows && attemptRows.length > 0) {
+    const attempt = attemptRows[0];
+    if (attempt.user_id !== cleanUserId) {
+      throw new PaymentValidationError(
+        "Forbidden: You do not have permission to access this checkout attempt",
+        403
+      );
+    }
+    if (attempt.status === "converted" && attempt.order_id) {
+      return {
+        success: true,
+        cancelled: false,
+        orderId: attempt.order_id,
+        orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+        paymentStatus: "paid",
+        orderStatus: "confirmed",
+        status: "paid",
+        ignored: true,
+        message: "Attempt is already converted to a paid order; cancellation callback ignored safely.",
+      };
+    }
+    await markAttemptAbandoned(attempt.id, cleanUserId);
+    return {
+      success: true,
+      cancelled: true,
+      orderId: attempt.id,
+      orderNumber: `ATT-${attempt.id.slice(0, 8).toUpperCase()}`,
+      paymentStatus: "pending",
+      orderStatus: "pending",
+      status: "abandoned",
+      message: "Checkout was closed by customer. Attempt marked as abandoned for recovery.",
+    };
+  }
 
   return await withTransaction(async (conn) => {
     // 1. Fetch internal order with row lock

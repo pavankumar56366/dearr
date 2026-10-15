@@ -20,6 +20,12 @@ export async function GET() {
         defaultShippingFee: Number(settings.defaultShippingFee ?? 50),
         codEnabled: Boolean(settings.codEnabled),
         prepaidEnabled: Boolean(settings.prepaidEnabled),
+        recoverySheetEnabled: Boolean(settings.recoverySheetEnabled ?? true),
+        alternativesEnabled: Boolean(settings.alternativesEnabled ?? true),
+        feedbackEnabled: Boolean(settings.feedbackEnabled ?? true),
+        feedbackReasons: Array.isArray(settings.feedbackReasons)
+          ? settings.feedbackReasons
+          : undefined,
       },
     });
   } catch (err: unknown) {

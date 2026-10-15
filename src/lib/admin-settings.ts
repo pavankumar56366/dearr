@@ -63,6 +63,13 @@ export interface AdminSettings {
   // Store Appearance
   primaryColor: string;
   secondaryColor: string;
+
+  // Abandonment Recovery Settings
+  recoverySheetEnabled: boolean;
+  alternativesEnabled: boolean;
+  feedbackEnabled: boolean;
+  maxAlternatives: number;
+  feedbackReasons: string[];
 }
 
 export const ADMIN_SETTINGS_STORAGE_KEY = "dearr_admin_settings";
@@ -135,6 +142,24 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   // Store Appearance
   primaryColor: APPROVED_DEARR_PALETTE.primary,
   secondaryColor: APPROVED_DEARR_PALETTE.secondary,
+
+  // Abandonment Recovery Settings
+  recoverySheetEnabled: true,
+  alternativesEnabled: true,
+  feedbackEnabled: true,
+  maxAlternatives: 4,
+  feedbackReasons: [
+    "Price is too high",
+    "Found it cheaper elsewhere",
+    "Shipping charges too high",
+    "Delivery takes too long",
+    "Payment problem",
+    "Wanted Cash on Delivery",
+    "Not sure about product quality",
+    "Just browsing",
+    "Need to compare more",
+    "Other",
+  ],
 };
 
 /**

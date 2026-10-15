@@ -2,6 +2,7 @@ import "server-only";
 import crypto from "crypto";
 import { query, withTransaction } from "./db";
 import { PoolConnection } from "mysql2/promise";
+import { recordProductPriceChange } from "./price-history";
 
 export interface ProductImage {
   id: string;
@@ -1035,6 +1036,18 @@ export async function updateProduct(
       if (typeof input.price !== "number" || isNaN(input.price) || input.price < 0) {
         throw new ProductValidationError("Product price must be a valid non-negative number", 400);
       }
+      const prevPrice = Number(current.price || 0);
+      if (Math.abs(prevPrice - input.price) > 0.009) {
+        await recordProductPriceChange(
+          {
+            productId: cleanId,
+            previousPrice: prevPrice,
+            newPrice: input.price,
+            changeSource: "admin",
+          },
+          conn
+        );
+      }
       fields.push("price = ?");
       values.push(input.price);
     }
@@ -1106,10 +1119,16 @@ export async function updateProduct(
       }
 
       const [existingColorRows]: any = await conn.execute(
-        "SELECT id FROM product_colors WHERE product_id = ?",
+        "SELECT id, price_override FROM product_colors WHERE product_id = ?",
         [cleanId]
       );
       const existingColorIds = new Set<string>(existingColorRows.map((r: any) => String(r.id)));
+      const existingColorPriceMap = new Map<string, number | null>(
+        existingColorRows.map((r: any) => [
+          String(r.id),
+          r.price_override !== null && r.price_override !== undefined ? Number(r.price_override) : null,
+        ])
+      );
       const incomingColorIds = new Set<string>(input.colors.filter((c) => c.id).map((c) => String(c.id!)));
 
       // Handle removed colors safely
@@ -1183,6 +1202,26 @@ export async function updateProduct(
         const cActive = c.isActive !== false ? 1 : 0;
 
         if (c.id && existingColorIds.has(c.id)) {
+          // Check for price change on existing color
+          const oldColorPrice = existingColorPriceMap.get(c.id);
+          const baseProductPrice = input.price !== undefined ? input.price : Number(current.price || 0);
+          const effectiveOldPrice =
+            oldColorPrice !== null && oldColorPrice !== undefined ? oldColorPrice : Number(current.price || 0);
+          const effectiveNewPrice = cPrice !== null && cPrice !== undefined ? cPrice : baseProductPrice;
+
+          if (Math.abs(effectiveOldPrice - effectiveNewPrice) > 0.009) {
+            await recordProductPriceChange(
+              {
+                productId: cleanId,
+                colorId: c.id,
+                previousPrice: effectiveOldPrice,
+                newPrice: effectiveNewPrice,
+                changeSource: "admin",
+              },
+              conn
+            );
+          }
+
           // Update existing
           await conn.execute(
             `UPDATE product_colors

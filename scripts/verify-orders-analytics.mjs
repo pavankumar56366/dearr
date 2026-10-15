@@ -538,9 +538,9 @@ test("25.1: Fail-closed target policy in migration runner rejects unrecognized h
   assert.strictEqual(isApprovedLocalTarget("localhost", "dearr_prod"), false, "Unapproved prod db must fail closed");
 });
 
-test("25.2: 30-minute expiry and 30-day post-expiry retention policy derivation", () => {
+test("25.2: 30-minute expiry and retention policy derivation", () => {
   assert.strictEqual(ATTEMPT_EXPIRY_MINUTES, 30, "Expiry must be 30 minutes");
-  assert.strictEqual(ATTEMPT_RETENTION_DAYS, 30, "Retention must be 30 days");
+  assert.strictEqual(ATTEMPT_RETENTION_DAYS, 90, "Retention must be 90 days");
 
   const creationTime = new Date("2026-10-12T10:00:00.000Z");
   const expiresAt = new Date(creationTime.getTime() + ATTEMPT_EXPIRY_MINUTES * 60 * 1000);
@@ -548,11 +548,11 @@ test("25.2: 30-minute expiry and 30-day post-expiry retention policy derivation"
 
   // Expiry is 10:30 (30 mins after creation)
   assert.strictEqual(expiresAt.toISOString(), "2026-10-12T10:30:00.000Z");
-  // Retention is derived from expires_at + 30 days (NOT creation + 30 days)
-  assert.strictEqual(retentionUntil.toISOString(), "2026-11-11T10:30:00.000Z");
+  // Retention is derived from expires_at + 90 days (NOT creation + 90 days)
+  assert.strictEqual(retentionUntil.toISOString(), "2027-01-10T10:30:00.000Z");
 
   const diffMs = retentionUntil.getTime() - expiresAt.getTime();
-  assert.strictEqual(diffMs, 30 * 24 * 60 * 60 * 1000, "Retention must be exactly 30 days AFTER expiry");
+  assert.strictEqual(diffMs, 90 * 24 * 60 * 60 * 1000, "Retention must be exactly 90 days AFTER expiry");
 });
 
 test("25.3: Pure Node.js ESM cleanup runner exists and is executable without tsx", () => {

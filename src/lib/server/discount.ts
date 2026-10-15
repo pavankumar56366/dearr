@@ -1,6 +1,7 @@
 import "server-only";
 import crypto from "crypto";
 import { query, withTransaction } from "./db";
+import { recordInternalEvent } from "./events";
 
 // ---------------------------------------------------------------------------
 // Types & Interfaces
@@ -855,6 +856,19 @@ export async function createDiscount(input: CreateDiscountInput): Promise<Discou
   if (!created) {
     throw new Error("Failed to retrieve discount immediately after creation");
   }
+
+  await recordInternalEvent({
+    eventType: "coupon.created",
+    metadata: {
+      discountId: id,
+      name: created.name,
+      code: created.code,
+      discountType: created.discountType,
+      value: created.value,
+      scope: created.scope,
+      isActive: created.isActive,
+    },
+  });
 
   return created;
 }

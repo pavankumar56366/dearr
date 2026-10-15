@@ -67,6 +67,9 @@ export async function PATCH(request: NextRequest) {
         err.message.includes("greater than zero") ||
         err.message.includes("between 1 and 72") ||
         err.message.includes("between 1 and 10") ||
+        err.message.includes("between 1 and 4") ||
+        err.message.includes("Feedback reasons") ||
+        err.message.includes("feedback reason") ||
         err.message.includes("must be a boolean"))
     ) {
       return NextResponse.json({ ok: false, error: err.message }, { status: 400 });
