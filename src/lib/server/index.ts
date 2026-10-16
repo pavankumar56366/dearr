@@ -40,6 +40,7 @@ export {
   requireUser,
   requireAdmin,
   assertOwnerOrAdmin,
+  assertSafeOrigin,
   handleAuthError,
   type SessionPayload,
 } from "./auth";
@@ -266,6 +267,8 @@ export {
 export {
   getStoreSettings,
   updateStoreSettings,
+  checkRateLimit,
+  clearRateLimit,
 } from "./settings";
 
 export {

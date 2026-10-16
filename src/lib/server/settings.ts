@@ -279,7 +279,8 @@ export async function getSettingsAuditHistory(limit = 50): Promise<SettingsAudit
 export async function checkRateLimit(
   rateKey: string,
   maxHits = 5,
-  windowSeconds = 60
+  windowSeconds = 60,
+  increment = true
 ): Promise<{ allowed: boolean; remaining: number; retryAfterSeconds: number }> {
   try {
     const now = new Date();
@@ -289,6 +290,9 @@ export async function checkRateLimit(
     );
 
     if (!rows || rows.length === 0) {
+      if (!increment) {
+        return { allowed: true, remaining: maxHits, retryAfterSeconds: 0 };
+      }
       const resetAt = new Date(now.getTime() + windowSeconds * 1000);
       await query(
         `INSERT INTO rate_limits (rate_key, hits, reset_at) VALUES (?, 1, ?)`,
@@ -301,6 +305,9 @@ export async function checkRateLimit(
     const resetAt = new Date(record.reset_at);
 
     if (now >= resetAt) {
+      if (!increment) {
+        return { allowed: true, remaining: maxHits, retryAfterSeconds: 0 };
+      }
       // Window expired, reset window
       const newResetAt = new Date(now.getTime() + windowSeconds * 1000);
       await query(
@@ -316,6 +323,14 @@ export async function checkRateLimit(
       return { allowed: false, remaining: 0, retryAfterSeconds: Math.max(1, retryAfter) };
     }
 
+    if (!increment) {
+      return {
+        allowed: true,
+        remaining: Math.max(0, maxHits - record.hits),
+        retryAfterSeconds: 0,
+      };
+    }
+
     await query(
       `UPDATE rate_limits SET hits = hits + 1 WHERE rate_key = ?`,
       [rateKey]
@@ -328,5 +343,21 @@ export async function checkRateLimit(
   } catch (err) {
     console.warn("[checkRateLimit] Fallback on error:", err);
     return { allowed: true, remaining: 1, retryAfterSeconds: 0 };
+  }
+}
+
+/**
+ * Resets or clears one or more rate limit keys (e.g. upon successful authentication).
+ */
+export async function clearRateLimit(rateKeys: string | string[]): Promise<void> {
+  try {
+    const keys = (Array.isArray(rateKeys) ? rateKeys : [rateKeys])
+      .map((k) => k?.trim())
+      .filter(Boolean);
+    if (keys.length === 0) return;
+    const placeholders = keys.map(() => "?").join(", ");
+    await query(`DELETE FROM rate_limits WHERE rate_key IN (${placeholders})`, keys);
+  } catch (err) {
+    console.warn("[clearRateLimit] Failed to clear rate limits:", err);
   }
 }

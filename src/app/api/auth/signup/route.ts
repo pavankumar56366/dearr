@@ -6,12 +6,17 @@ import {
   createSessionToken,
   setSessionCookie,
   attachSessionCookie,
+  checkRateLimit,
+  assertSafeOrigin,
+  AuthError,
 } from "@/lib/server";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
+
     let body: any;
     try {
       body = await request.json();
@@ -19,6 +24,31 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
+      );
+    }
+
+    const clientIp =
+      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+      request.headers.get("x-real-ip") ||
+      "127.0.0.1";
+
+    const isLocalLoopback = clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "localhost";
+    const maxSignupsPerIp = isLocalLoopback ? 100 : 5;
+
+    const signupRateKey = `signup:ip:${clientIp}`;
+    const ipCheck = await checkRateLimit(signupRateKey, maxSignupsPerIp, 3600, false);
+    if (!ipCheck.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Too many accounts registered from this network. Please try again in ${ipCheck.retryAfterSeconds} seconds.`,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(ipCheck.retryAfterSeconds),
+          },
+        }
       );
     }
 
@@ -119,6 +149,9 @@ export async function POST(request: Request) {
       role: "customer",
     });
 
+    // Record registration against IP to enforce registration throttle
+    await checkRateLimit(signupRateKey, maxSignupsPerIp, 3600, true);
+
     // Create signed session token
     const token = await createSessionToken(newUser);
     await setSessionCookie(token);
@@ -142,6 +175,12 @@ export async function POST(request: Request) {
     attachSessionCookie(response, token);
     return response;
   } catch (err: unknown) {
+    if (err instanceof AuthError) {
+      return NextResponse.json(
+        { ok: false, error: err.message },
+        { status: err.statusCode }
+      );
+    }
     const message = err instanceof Error ? err.message : "Internal server error";
     console.error("[POST /api/auth/signup]", message);
     return NextResponse.json(

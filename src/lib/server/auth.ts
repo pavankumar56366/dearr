@@ -315,3 +315,39 @@ export function handleAuthError(
     { status: 500 }
   );
 }
+
+/**
+ * Asserts that a state-changing mutation originates from a trusted origin.
+ * Prevents Cross-Site Request Forgery (CSRF) for cookie-authenticated requests.
+ */
+export function assertSafeOrigin(request: Request): void {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+
+  if (!origin) {
+    const referer = request.headers.get("referer");
+    if (referer && host) {
+      try {
+        const refererUrl = new URL(referer);
+        if (refererUrl.host !== host) {
+          throw new AuthError("Cross-origin request blocked", 403);
+        }
+      } catch (err: any) {
+        if (err instanceof AuthError) throw err;
+      }
+    }
+    return;
+  }
+
+  if (host) {
+    try {
+      const originUrl = new URL(origin);
+      if (originUrl.host !== host) {
+        throw new AuthError("Cross-origin request blocked", 403);
+      }
+    } catch (err: any) {
+      if (err instanceof AuthError) throw err;
+      throw new AuthError("Invalid origin header", 403);
+    }
+  }
+}
