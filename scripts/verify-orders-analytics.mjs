@@ -809,7 +809,7 @@ test("27.3: Signature verification rejects malformed or invalid-format signature
 });
 
 test("27.4: Webhook signature verification and constant-time payload comparison", () => {
-  const webhookSecret = "whsec_test_local_secret_54321";
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || "example_test_fixture_webhook_secret";
   const rawBody = JSON.stringify({
     event: "payment.captured",
     payload: {

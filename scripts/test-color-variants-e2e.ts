@@ -462,18 +462,28 @@ async function runTests() {
   );
 
   // =========================================================================
-  // Summary
+  // Summary & Resource Cleanup
   // =========================================================================
   console.log("\n=================================================");
   console.log(`Test Results: ${testPassedCount} Passed, ${testFailedCount} Failed`);
   console.log("=================================================\n");
 
+  // Drain and close database pool connections so process exits naturally
+  if ((globalThis as any)._dearrMysqlPool) {
+    await (globalThis as any)._dearrMysqlPool.end();
+  }
+
   if (testFailedCount > 0) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-runTests().catch((err) => {
+runTests().catch(async (err) => {
   console.error("\nFATAL ERROR IN TEST SUITE:", err);
-  process.exit(1);
+  if ((globalThis as any)._dearrMysqlPool) {
+    try {
+      await (globalThis as any)._dearrMysqlPool.end();
+    } catch {}
+  }
+  process.exitCode = 1;
 });
