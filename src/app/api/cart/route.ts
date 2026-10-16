@@ -6,6 +6,8 @@ import {
   clearCartForUser,
   CartValidationError,
   recordInternalEvent,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -34,13 +36,13 @@ export async function GET() {
       },
     });
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       cart,
     });
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );
@@ -53,19 +55,20 @@ export async function GET() {
  * DELETE /api/cart
  * Clears all items from the currently authenticated customer's active shopping cart.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const cart = await clearCartForUser(user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       message: "Cart cleared successfully",
       cart,
     });
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

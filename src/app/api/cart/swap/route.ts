@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   swapCartItemForAlternative,
   AlternativesError,
@@ -23,11 +23,12 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const body = await request.json();
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
       );
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     } = body;
 
     if (!sourceProductId || !alternativeProductId) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "sourceProductId and alternativeProductId are required" },
         { status: 400 }
       );
@@ -59,27 +60,24 @@ export async function POST(request: NextRequest) {
         expectedAlternativePrice !== undefined
           ? Number(expectedAlternativePrice)
           : undefined,
-      attemptId: attemptId ? String(attemptId).trim() : undefined,
+      attemptId: attemptId || undefined,
     });
 
-    // Return the refreshed authoritative cart
     const refreshedCart = await getCartForUser(user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
-      message: swapResult.message,
-      swappedItem: swapResult.swappedItem,
-      newAttempt: swapResult.newAttempt,
-      newAttemptId: swapResult.newAttemptId,
+      message: "Alternative accepted and applied to cart.",
+      swap: swapResult,
       cart: refreshedCart,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     if (err instanceof AlternativesError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
-        { status: err.statusCode || 400 }
+        { status: err.statusCode }
       );
     }
-    return handleAuthError(err, "Failed to swap cart item");
+    return handleAuthError(err, "Failed to apply alternative product");
   }
 }

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   handlePaymentFailure,
   PaymentValidationError,
@@ -12,15 +12,17 @@ import {
  *
  * Guarantees:
  * 1. Customer must be authenticated via session cookie (`requireUser()`).
- * 2. Identity derived from verified session (`session.id`), enforcing IDOR protection.
- * 3. Never marks an order as paid; never corrupts an already-paid order.
- * 4. Protects verified payments from being overwritten.
- * 5. Idempotent: safe duplicate calls return 200 without duplicate database mutations.
- * 6. Zero secret leakage: never exposes internal secrets, DB queries, or stack traces.
+ * 2. Origin check enforced via `assertSafeOrigin()` for cookie-authenticated browser requests.
+ * 3. Identity derived from verified session (`session.id`), enforcing IDOR protection.
+ * 4. Never marks an order as paid; never corrupts an already-paid order.
+ * 5. Protects verified payments from being overwritten.
+ * 6. Idempotent: safe duplicate calls return 200 without duplicate database mutations.
+ * 7. Zero secret leakage: never exposes internal secrets, DB queries, or stack traces.
  */
 export async function POST(req: Request) {
   let session;
   try {
+    assertSafeOrigin(req);
     session = await requireUser();
   } catch (error) {
     return handleAuthError(error);
@@ -30,7 +32,7 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Invalid JSON request body" },
       { status: 400 }
     );
@@ -58,7 +60,7 @@ export async function POST(req: Request) {
     body?.currency !== undefined ? String(body.currency) : undefined;
 
   if (!rawOrderId || typeof rawOrderId !== "string" || !rawOrderId.trim()) {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Order ID (orderId) is required and must be a string" },
       { status: 400 }
     );
@@ -79,7 +81,7 @@ export async function POST(req: Request) {
       currency: rawCurrency,
     });
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         ...result,
@@ -88,14 +90,14 @@ export async function POST(req: Request) {
     );
   } catch (error: any) {
     if (error instanceof PaymentValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: error.message },
         { status: error.statusCode }
       );
     }
 
     console.error("[API_PAYMENTS_FAIL_ERROR]", error?.message || error);
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: false,
         error: "An unexpected error occurred while processing payment failure",

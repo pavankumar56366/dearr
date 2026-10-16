@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, jsonPrivate } from "@/lib/server";
 import {
   getAttemptRecoveryStatus,
   CheckoutAttemptError,
@@ -25,7 +25,7 @@ export async function GET(
     const { id: attemptId } = await context.params;
 
     if (!attemptId || typeof attemptId !== "string" || !attemptId.trim()) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Attempt ID is required" },
         { status: 400 }
       );
@@ -34,13 +34,13 @@ export async function GET(
     const cleanAttemptId = attemptId.trim();
     const status = await getAttemptRecoveryStatus(cleanAttemptId, user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       ...status,
     });
   } catch (err: any) {
     if (err instanceof CheckoutAttemptError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode || 400 }
       );

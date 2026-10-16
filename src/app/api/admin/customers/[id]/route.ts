@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin, handleAuthError } from "@/lib/server/auth";
+import { requireAdmin, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import { getAdminCustomerById, updateAdminCustomerRecord } from "@/lib/server/customer";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +23,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ ok: false, error: "Customer not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, customer });
+    return jsonPrivate({ ok: true, customer });
   } catch (err: unknown) {
     return handleAuthError(err, "Failed to retrieve customer details");
   }
@@ -34,6 +34,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
     const { id } = await context.params;
     const decodedId = decodeURIComponent(id);

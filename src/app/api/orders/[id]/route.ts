@@ -3,7 +3,9 @@ import {
   requireUser,
   requireAdmin,
   handleAuthError,
-} from "@/lib/server/auth";
+  assertSafeOrigin,
+  jsonPrivate,
+} from "@/lib/server";
 import {
   getOrderById,
   updateOrderStatus,
@@ -35,10 +37,10 @@ export async function GET(
       isAdmin: user.role === "admin",
     });
 
-    return NextResponse.json({ ok: true, order });
+    return jsonPrivate({ ok: true, order });
   } catch (err) {
     if (err instanceof OrderValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );
@@ -63,6 +65,7 @@ export async function PATCH(
   context: RouteContext
 ) {
   try {
+    assertSafeOrigin(request);
     const admin = await requireAdmin();
     const { id } = await context.params;
     const body = await request.json();
@@ -75,16 +78,16 @@ export async function PATCH(
       // In B-17: Only fulfillment status is mutable. paymentStatus is strictly ignored/rejected.
       order = await updateOrderStatus(id, body.status as OrderStatus);
     } else {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Request must include 'status' or 'action'" },
         { status: 400 }
       );
     }
 
-    return NextResponse.json({ ok: true, order });
+    return jsonPrivate({ ok: true, order });
   } catch (err) {
     if (err instanceof OrderValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

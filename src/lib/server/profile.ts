@@ -9,6 +9,7 @@ export interface UserProfile {
   phone: string | null;
   role: "customer" | "admin";
   status: "active" | "suspended";
+  tokenVersion: number;
   adminNotes?: string | null;
   emailVerifiedAt: Date | null;
   createdAt: Date;
@@ -53,6 +54,7 @@ interface RawProfileRow {
   phone: string | null;
   role: "customer" | "admin";
   status?: "active" | "suspended";
+  token_version?: number | null;
   admin_notes?: string | null;
   email_verified_at: string | Date | null;
   password_reset_token_hash?: string | null;
@@ -73,6 +75,7 @@ function toSanitizedProfile(row: RawProfileRow): UserProfile {
     phone: row.phone ?? null,
     role: row.role,
     status: row.status || "active",
+    tokenVersion: row.token_version != null ? Number(row.token_version) : 1,
     adminNotes: row.admin_notes ?? null,
     emailVerifiedAt: row.email_verified_at ? new Date(row.email_verified_at) : null,
     createdAt: new Date(row.created_at),
@@ -89,7 +92,7 @@ export async function findProfileByEmail(email: string): Promise<UserProfile | n
   if (!normalizedEmail) return null;
 
   const sql = `
-    SELECT id, email, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
+    SELECT id, email, full_name, phone, role, status, token_version, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE email = ?
     LIMIT 1
@@ -114,7 +117,7 @@ export async function findProfileWithPasswordByEmail(
   if (!normalizedEmail) return null;
 
   const sql = `
-    SELECT id, email, password_hash, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
+    SELECT id, email, password_hash, full_name, phone, role, status, token_version, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE email = ?
     LIMIT 1
@@ -141,7 +144,7 @@ export async function findProfileById(id: string): Promise<UserProfile | null> {
   if (!cleanId) return null;
 
   const sql = `
-    SELECT id, email, full_name, phone, role, status, admin_notes, email_verified_at, created_at, updated_at
+    SELECT id, email, full_name, phone, role, status, token_version, admin_notes, email_verified_at, created_at, updated_at
     FROM profiles
     WHERE id = ?
     LIMIT 1
@@ -178,8 +181,8 @@ export async function createProfile(input: CreateProfileInput): Promise<UserProf
   // passwordHash may be NULL for Google-only accounts with no Dearr password
 
   const sql = `
-    INSERT INTO profiles (id, email, password_hash, full_name, phone, role, status, admin_notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO profiles (id, email, password_hash, full_name, phone, role, status, token_version, admin_notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
   `;
 
   await query(sql, [id, normalizedEmail, input.passwordHash ?? null, fullName, phone, role, status, adminNotes]);
@@ -260,6 +263,7 @@ export async function updateProfile(
 /**
  * Updates a user's password hash securely.
  * Restricted to internal authentication / password reset flows.
+ * Increments token_version to invalidate all existing sessions server-side.
  */
 export async function updateProfilePassword(
   id: string,
@@ -270,11 +274,29 @@ export async function updateProfilePassword(
 
   const sql = `
     UPDATE profiles
-    SET password_hash = ?, password_reset_token_hash = NULL, password_reset_expires_at = NULL
+    SET password_hash = ?, password_reset_token_hash = NULL, password_reset_expires_at = NULL, token_version = token_version + 1
     WHERE id = ?
   `;
   await query(sql, [newPasswordHash, cleanId]);
   return true;
+}
+
+/**
+ * Increments the token_version for a user profile in MySQL.
+ * Invalidates all previously issued JWT tokens for this user on logout or security events.
+ */
+export async function incrementTokenVersion(id: string): Promise<boolean> {
+  const cleanId = id?.trim();
+  if (!cleanId) return false;
+
+  try {
+    const sql = `UPDATE profiles SET token_version = token_version + 1 WHERE id = ?`;
+    const result: any = await query(sql, [cleanId]);
+    return Boolean(result && (result.affectedRows > 0 || result.changedRows > 0));
+  } catch (err) {
+    console.error("[incrementTokenVersion] Failed to increment token_version:", err);
+    return false;
+  }
 }
 
 /**

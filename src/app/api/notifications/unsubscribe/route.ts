@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   withdrawNotificationConsent,
   ConsentValidationError,
@@ -19,6 +19,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     let body: any = {};
     try {
@@ -32,14 +33,14 @@ export async function POST(request: NextRequest) {
       contactValue: body.contactValue,
     });
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       message: "Notification consent successfully withdrawn",
       withdrawnCount: result.withdrawnCount,
     });
   } catch (err: any) {
     if (err instanceof ConsentValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode || 400 }
       );

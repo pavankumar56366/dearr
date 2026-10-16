@@ -134,7 +134,7 @@ async function runB08SecurityVerification() {
     // 1.3 Audit JWT claims (minimal non-sensitive payload)
     if (tokenCustomerA) {
       const decoded = decodeJwt(tokenCustomerA);
-      const allowedKeys = new Set(["sub", "email", "fullName", "role", "iat", "exp"]);
+      const allowedKeys = new Set(["sub", "email", "fullName", "role", "tokenVersion", "iat", "exp"]);
       const extraKeys = Object.keys(decoded).filter((k) => !allowedKeys.has(k));
 
       const hasRequired =

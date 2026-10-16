@@ -5,6 +5,8 @@ import {
   addCartItem,
   addCartItemsBatch,
   CartValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,7 @@ export const runtime = "nodejs";
  * }
  *
  * Strict Ownership & Validation:
+ * - Requires verified same-origin request via assertSafeOrigin().
  * - Requires authenticated session via requireUser() (401 if unauthenticated).
  * - Client-supplied userId or cartId are ignored.
  * - Product must be active and in-stock.
@@ -30,20 +33,21 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
 
     let body: any;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
       );
     }
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Request body must be a valid JSON object" },
         { status: 400 }
       );
@@ -52,56 +56,49 @@ export async function POST(request: Request) {
     let updatedCart;
     if (Array.isArray(body.items)) {
       if (body.items.length === 0) {
-        return NextResponse.json(
+        return jsonPrivate(
           { ok: false, error: "Items array cannot be empty" },
           { status: 400 }
         );
       }
       for (const item of body.items) {
-        if (!item || typeof item !== "object" || !item.productId || typeof item.productId !== "string") {
-          return NextResponse.json(
+        if (!item.productId || typeof item.productId !== "string") {
+          return jsonPrivate(
             { ok: false, error: "Each item must have a valid productId" },
             { status: 400 }
           );
         }
-        if (item.quantity === undefined || item.quantity === null) {
-          return NextResponse.json(
-            { ok: false, error: "Each item must have a quantity" },
+        if (typeof item.quantity !== "number" || item.quantity <= 0) {
+          return jsonPrivate(
+            { ok: false, error: "Each item quantity must be a positive number" },
             { status: 400 }
           );
         }
       }
-      const preparedBatch = body.items.map((it: any) => ({
-        productId: it.productId,
-        variantId: it.variantId || null,
-        colorId: it.colorId || null,
-        quantity: it.quantity,
-      }));
-      updatedCart = await addCartItemsBatch(user.id, preparedBatch);
+      updatedCart = await addCartItemsBatch(user.id, body.items);
     } else {
       if (!body.productId || typeof body.productId !== "string") {
-        return NextResponse.json(
-          { ok: false, error: "Product ID is required and must be a string" },
+        return jsonPrivate(
+          { ok: false, error: "Valid productId is required" },
           { status: 400 }
         );
       }
 
-      if (body.quantity === undefined || body.quantity === null) {
-        return NextResponse.json(
-          { ok: false, error: "Quantity is required" },
+      if (typeof body.quantity !== "number" || body.quantity <= 0) {
+        return jsonPrivate(
+          { ok: false, error: "Quantity must be a positive integer" },
           { status: 400 }
         );
       }
 
       updatedCart = await addCartItem(user.id, {
         productId: body.productId,
-        variantId: body.variantId || null,
-        colorId: body.colorId || null,
+        variantId: body.variantId ?? body.colorId ?? null,
         quantity: body.quantity,
       });
     }
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         message: "Item(s) added to cart",
@@ -111,7 +108,7 @@ export async function POST(request: Request) {
     );
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

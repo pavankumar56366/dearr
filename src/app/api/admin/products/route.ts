@@ -6,6 +6,8 @@ import {
   createProduct,
   ProductValidationError,
   ProductListFilters,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +63,7 @@ export async function GET(request: Request) {
 
     const result = await listProducts(filters);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       products: result.products,
       pagination: result.pagination,
@@ -77,6 +79,7 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     let body: any;

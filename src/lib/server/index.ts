@@ -15,6 +15,7 @@ export {
   updateProfile,
   updateCustomerProfile,
   updateProfilePassword,
+  incrementTokenVersion,
   type UserProfile,
   type UserProfileWithPassword,
   type CreateProfileInput,
@@ -383,3 +384,9 @@ export {
   type AbandonmentSummaryMetrics,
   type AbandonedCheckoutRow,
 } from "./abandonment-analytics";
+
+export {
+  withPrivateCacheHeaders,
+  jsonPrivate,
+  PRIVATE_CACHE_CONTROL,
+} from "./response";

@@ -4,6 +4,8 @@ import {
   updateCustomerProfile,
   handleAuthError,
   assertOwnerOrAdmin,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +66,7 @@ export async function GET() {
   try {
     const user = await requireUser();
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       profile: {
         id: user.id,
@@ -86,14 +88,16 @@ export async function GET() {
  *
  * Security Enforcements:
  * 1. Authentication: Verified dearr_session cookie strictly required (401).
- * 2. IDOR Protection: Reject any request targeting a user ID other than the authenticated user (403).
- * 3. Role Escalation: Reject any attempt to modify or declare role (403).
- * 4. Credential Protection: Protected fields (password_hash, etc.) are strictly ignored/prevented.
- * 5. Input Validation: Validate full name (2-150 chars) and Indian phone number (10 digits) (400).
- * 6. Empty Payloads: Reject requests providing no valid update fields (400).
+ * 2. CSRF Protection: assertSafeOrigin() enforced against hostile cross-origin requests (403).
+ * 3. IDOR Protection: Reject any request targeting a user ID other than the authenticated user (403).
+ * 4. Role Escalation: Reject any attempt to modify or declare role (403).
+ * 5. Credential Protection: Protected fields (password_hash, etc.) are strictly ignored/prevented.
+ * 6. Input Validation: Validate full name (2-150 chars) and Indian phone number (10 digits) (400).
+ * 7. Empty Payloads: Reject requests providing no valid update fields (400).
  */
 export async function PATCH(request: Request) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
 
     let body: any;
@@ -208,7 +212,7 @@ export async function PATCH(request: Request) {
     }
 
     // Return sanitized profile (guaranteed never to return password_hash)
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       profile: {
         id: updated.id,

@@ -162,7 +162,7 @@ async function runTests() {
     // -------------------------------------------------------------------------
     console.log("\n[Test 1] Eligible product in cart allows COD order placement");
     currentMockSessionToken = customerSessionToken;
-    await clearCartHandler();
+    await clearCartHandler(new Request("http://localhost:3000/api/cart", { method: "DELETE" }));
 
     // Add eligible product to cart
     await addCartItemHandler(
@@ -209,7 +209,7 @@ async function runTests() {
     // Test 2: Ineligible product rejects COD with HTTP 400
     // -------------------------------------------------------------------------
     console.log("\n[Test 2] Ineligible product in cart rejects COD with HTTP 400");
-    await clearCartHandler();
+    await clearCartHandler(new Request("http://localhost:3000/api/cart", { method: "DELETE" }));
 
     await addCartItemHandler(
       new Request("http://localhost/api/cart/items", {
@@ -257,7 +257,7 @@ async function runTests() {
     // Test 3: Mixed-eligibility cart rejects COD, does NOT silently split orders
     // -------------------------------------------------------------------------
     console.log("\n[Test 3] Mixed-eligibility cart rejects COD and leaves cart intact");
-    await clearCartHandler();
+    await clearCartHandler(new Request("http://localhost:3000/api/cart", { method: "DELETE" }));
 
     // Add both eligible and ineligible
     await addCartItemHandler(

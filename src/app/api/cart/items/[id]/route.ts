@@ -5,6 +5,8 @@ import {
   updateCartItemQuantity,
   removeCartItem,
   CartValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -24,12 +26,13 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const { id } = await params;
     const cleanItemId = id?.trim();
 
     if (!cleanItemId) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Cart item ID is required" },
         { status: 400 }
       );
@@ -39,36 +42,51 @@ export async function PATCH(
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
       );
     }
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Request body must be a valid JSON object" },
         { status: 400 }
       );
     }
 
     if (body.quantity === undefined || body.quantity === null) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Quantity is required" },
         { status: 400 }
       );
     }
 
-    const updatedCart = await updateCartItemQuantity(user.id, cleanItemId, body.quantity);
+    const quantity = Number(body.quantity);
+    if (!Number.isInteger(quantity) || quantity < 0) {
+      return jsonPrivate(
+        { ok: false, error: "Quantity must be a non-negative integer" },
+        { status: 400 }
+      );
+    }
 
-    return NextResponse.json({
+    const updatedCart = await updateCartItemQuantity(
+      user.id,
+      cleanItemId,
+      quantity
+    );
+
+    return jsonPrivate({
       ok: true,
-      message: "Cart item updated",
+      message:
+        quantity === 0
+          ? "Item removed from cart"
+          : "Cart item quantity updated",
       cart: updatedCart,
     });
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );
@@ -79,35 +97,35 @@ export async function PATCH(
 
 /**
  * DELETE /api/cart/items/[id]
- * Removes an item from the authenticated customer's active shopping cart.
+ * Removes a line item from the customer's active shopping cart.
  */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const { id } = await params;
     const cleanItemId = id?.trim();
 
     if (!cleanItemId) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Cart item ID is required" },
         { status: 400 }
       );
     }
 
-    const result = await removeCartItem(user.id, cleanItemId);
+    const updatedCart = await removeCartItem(user.id, cleanItemId);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       message: "Item removed from cart",
-      removed: result.removed,
-      cart: result.cart,
+      cart: updatedCart,
     });
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

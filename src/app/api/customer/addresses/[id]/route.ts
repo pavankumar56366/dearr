@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   getCustomerAddressById,
   updateCustomerAddress,
@@ -12,6 +12,7 @@ export async function PATCH(
 ) {
   let session;
   try {
+    assertSafeOrigin(req);
     session = await requireUser();
   } catch (err) {
     return handleAuthError(err);
@@ -21,7 +22,7 @@ export async function PATCH(
   const addressId = id?.trim();
 
   if (!addressId) {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Address ID is required" },
       { status: 400 }
     );
@@ -31,7 +32,7 @@ export async function PATCH(
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Invalid JSON request payload" },
       { status: 400 }
     );
@@ -40,7 +41,7 @@ export async function PATCH(
   try {
     const existing = await getCustomerAddressById(session.id, addressId);
     if (!existing) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Address not found or unauthorized" },
         { status: 404 }
       );
@@ -59,10 +60,10 @@ export async function PATCH(
       isDefault: body.isDefault !== undefined ? Boolean(body.isDefault) : undefined,
     });
 
-    return NextResponse.json({ ok: true, address: updated });
+    return jsonPrivate({ ok: true, address: updated });
   } catch (error: any) {
     console.error("[API_ADDRESSES_UPDATE_ERROR]", error?.message || error);
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: error?.message || "Failed to update address" },
       { status: 500 }
     );
@@ -70,11 +71,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   let session;
   try {
+    assertSafeOrigin(req);
     session = await requireUser();
   } catch (err) {
     return handleAuthError(err);
@@ -84,7 +86,7 @@ export async function DELETE(
   const addressId = id?.trim();
 
   if (!addressId) {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Address ID is required" },
       { status: 400 }
     );
@@ -93,17 +95,17 @@ export async function DELETE(
   try {
     const existing = await getCustomerAddressById(session.id, addressId);
     if (!existing) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Address not found or unauthorized" },
         { status: 404 }
       );
     }
 
     const success = await deleteCustomerAddress(session.id, addressId);
-    return NextResponse.json({ ok: success });
+    return jsonPrivate({ ok: success });
   } catch (error: any) {
     console.error("[API_ADDRESSES_DELETE_ERROR]", error?.message || error);
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Failed to delete address" },
       { status: 500 }
     );

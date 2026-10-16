@@ -7,6 +7,8 @@ import {
   updateProduct,
   deactivateProduct,
   ProductValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       product,
     });
@@ -63,6 +65,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     const { id } = await params;
@@ -145,10 +148,11 @@ export async function PATCH(
  * Preserves historical orders and relational references.
  */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     const { id } = await params;

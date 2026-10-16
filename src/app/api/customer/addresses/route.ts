@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   listCustomerAddresses,
   createCustomerAddress,
@@ -16,10 +16,10 @@ export async function GET() {
 
   try {
     const addresses = await listCustomerAddresses(session.id);
-    return NextResponse.json({ ok: true, addresses });
+    return jsonPrivate({ ok: true, addresses });
   } catch (error: any) {
     console.error("[API_ADDRESSES_GET_ERROR]", error?.message || error);
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Failed to retrieve saved addresses" },
       { status: 500 }
     );
@@ -29,6 +29,7 @@ export async function GET() {
 export async function POST(req: Request) {
   let session;
   try {
+    assertSafeOrigin(req);
     session = await requireUser();
   } catch (err) {
     return handleAuthError(err);
@@ -38,7 +39,7 @@ export async function POST(req: Request) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Invalid JSON request payload" },
       { status: 400 }
     );
@@ -47,7 +48,7 @@ export async function POST(req: Request) {
   const parseResult = deliveryAddressSchema.safeParse(body);
   if (!parseResult.success) {
     const issues = parseResult.error.issues.map((i) => i.message);
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: issues[0] || "Invalid address data" },
       { status: 400 }
     );
@@ -67,10 +68,10 @@ export async function POST(req: Request) {
       isDefault: Boolean(body.isDefault),
     });
 
-    return NextResponse.json({ ok: true, address }, { status: 201 });
+    return jsonPrivate({ ok: true, address }, { status: 201 });
   } catch (error: any) {
     console.error("[API_ADDRESSES_CREATE_ERROR]", error?.message || error);
-    return NextResponse.json(
+    return jsonPrivate(
       { ok: false, error: "Failed to create customer address" },
       { status: 500 }
     );

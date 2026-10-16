@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   updateOrderShippingAddress,
   OrderValidationError,
@@ -12,10 +12,11 @@ interface RouteContext {
 /**
  * PATCH /api/orders/[id]/shipping-address — Customer or admin delivery address update
  *
- * Enforces ownership, deadline, status locks, serviceability, rate limiting, and row-level atomicity.
+ * Enforces safe origin, ownership, deadline, status locks, serviceability, rate limiting, and row-level atomicity.
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const { id } = await context.params;
     const body = await request.json();
@@ -42,7 +43,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       isAdmin: user.role === "admin",
     });
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       message: "Delivery address updated successfully.",
       order: result.order,
@@ -50,7 +51,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
   } catch (err) {
     if (err instanceof OrderValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

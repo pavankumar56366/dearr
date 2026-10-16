@@ -8,6 +8,7 @@ import {
   checkRateLimit,
   clearRateLimit,
   assertSafeOrigin,
+  jsonPrivate,
   AuthError,
 } from "@/lib/server";
 
@@ -48,7 +49,7 @@ export async function POST(request: Request) {
       "127.0.0.1";
 
     const isLocalLoopback = clientIp === "127.0.0.1" || clientIp === "::1" || clientIp === "localhost";
-    const maxIpFailures = isLocalLoopback ? 200 : 15;
+    const maxIpFailures = isLocalLoopback ? 100 : 15;
 
     const ipRateKey = `login:fail:ip:${clientIp}`;
 
@@ -69,10 +70,30 @@ export async function POST(request: Request) {
       );
     }
 
+    // 2. Global unknown accounts spray barrier
+    // Prevents attackers from rotating client-supplied forwarding headers to bypass IP limits with fake accounts
+    const UNKNOWN_ACCOUNTS_LIMIT = 15;
+    const unknownAccountsKey = "login:fail:unknown_accounts";
+    const unknownCheck = await checkRateLimit(unknownAccountsKey, UNKNOWN_ACCOUNTS_LIMIT, 900, false);
+    if (!unknownCheck.allowed) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `Too many failed login attempts. Please try again in ${unknownCheck.retryAfterSeconds} seconds.`,
+        },
+        {
+          status: 429,
+          headers: {
+            "Retry-After": String(unknownCheck.retryAfterSeconds),
+          },
+        }
+      );
+    }
+
     // Lookup user with password hash (restricted server-side operation)
     const userWithPassword = await findProfileWithPasswordByEmail(email);
 
-    // 2. Account-level rate limit check (bounded to existing DB users by internal user ID)
+    // 3. Account-level rate limit check (bounded to existing DB users by internal user ID)
     let accountRateKey: string | null = null;
     if (userWithPassword) {
       accountRateKey = `login:fail:account:${userWithPassword.id}`;
@@ -93,9 +114,11 @@ export async function POST(request: Request) {
       }
     }
 
-    // If user does not exist, increment only IP failure counter to prevent DB bloat from attacker-supplied emails
+    // If user does not exist, increment IP failure counter and global unknown accounts limiter
+    // This prevents DB bloat from attacker-supplied emails and neutralizes header rotation attacks
     if (!userWithPassword) {
       await checkRateLimit(ipRateKey, maxIpFailures, 900, true);
+      await checkRateLimit(unknownAccountsKey, UNKNOWN_ACCOUNTS_LIMIT, 900, true);
       return NextResponse.json(
         { ok: false, error: "Invalid email or password" },
         { status: 401 }
@@ -139,8 +162,8 @@ export async function POST(request: Request) {
     const token = await createSessionToken(userWithPassword);
     await setSessionCookie(token);
 
-    // Return sanitized profile
-    const response = NextResponse.json(
+    // Return sanitized profile with private anti-caching headers
+    const response = jsonPrivate(
       {
         ok: true,
         user: {

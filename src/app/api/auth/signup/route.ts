@@ -8,6 +8,7 @@ import {
   attachSessionCookie,
   checkRateLimit,
   assertSafeOrigin,
+  jsonPrivate,
   AuthError,
 } from "@/lib/server";
 
@@ -157,7 +158,7 @@ export async function POST(request: Request) {
     await setSessionCookie(token);
 
     // Return sanitized customer data (never expose password_hash)
-    const response = NextResponse.json(
+    const response = jsonPrivate(
       {
         ok: true,
         user: {

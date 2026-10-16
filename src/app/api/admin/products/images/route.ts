@@ -5,6 +5,8 @@ import {
   saveProductImage,
   deleteProductImage,
   StorageError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +25,7 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
     // Assert administrator privileges
     await requireAdmin();
 
@@ -95,6 +98,7 @@ export async function POST(request: Request) {
  */
 export async function DELETE(request: Request) {
   try {
+    assertSafeOrigin(request);
     // Assert administrator privileges
     await requireAdmin();
 

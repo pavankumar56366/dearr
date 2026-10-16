@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   markAttemptAbandoned,
   CheckoutAttemptError,
@@ -20,11 +20,12 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const { id: attemptId } = await context.params;
 
     if (!attemptId || typeof attemptId !== "string" || !attemptId.trim()) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Attempt ID is required" },
         { status: 400 }
       );
@@ -41,7 +42,7 @@ export async function POST(
 
     const result = await markAttemptAbandoned(cleanAttemptId, user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       status: result.status,
       isPaid: result.isPaid,
@@ -50,7 +51,7 @@ export async function POST(
     });
   } catch (err: any) {
     if (err instanceof CheckoutAttemptError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode || 400 }
       );

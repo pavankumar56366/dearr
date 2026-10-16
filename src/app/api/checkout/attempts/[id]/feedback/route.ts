@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   submitCheckoutFeedback,
   getFeedbackForAttempt,
@@ -19,11 +19,12 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const { id: attemptId } = await context.params;
 
     if (!attemptId || typeof attemptId !== "string" || !attemptId.trim()) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Attempt ID is required" },
         { status: 400 }
       );
@@ -51,7 +52,7 @@ export async function POST(
       ipAddress: clientIp,
     });
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         message: feedback.skipped ? "Feedback skipped" : "Feedback saved successfully",
@@ -61,9 +62,9 @@ export async function POST(
     );
   } catch (err: any) {
     if (err instanceof FeedbackValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
-        { status: err.statusCode || 400 }
+        { status: err.statusCode }
       );
     }
     return handleAuthError(err, "Failed to submit checkout feedback");
@@ -73,7 +74,7 @@ export async function POST(
 /**
  * GET /api/checkout/attempts/[id]/feedback
  *
- * Returns feedback for this attempt if already submitted.
+ * Retrieves submitted feedback for an attempt.
  */
 export async function GET(
   request: NextRequest,
@@ -84,20 +85,19 @@ export async function GET(
     const { id: attemptId } = await context.params;
 
     if (!attemptId || typeof attemptId !== "string" || !attemptId.trim()) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Attempt ID is required" },
         { status: 400 }
       );
     }
 
     const feedback = await getFeedbackForAttempt(attemptId.trim(), user.id);
-
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       hasFeedback: Boolean(feedback),
       feedback,
     });
-  } catch (err: any) {
-    return handleAuthError(err, "Failed to retrieve checkout feedback");
+  } catch (err) {
+    return handleAuthError(err, "Failed to retrieve feedback");
   }
 }

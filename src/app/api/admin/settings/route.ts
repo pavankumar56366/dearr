@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin, handleAuthError } from "@/lib/server/auth";
+import { requireAdmin, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   getStoreSettings,
   updateStoreSettings,
@@ -20,12 +20,12 @@ export async function GET(request: NextRequest) {
     const url = new URL(request.url);
     if (url.searchParams.get("audit") === "true") {
       const history = await getSettingsAuditHistory(50);
-      return NextResponse.json({ ok: true, history });
+      return jsonPrivate({ ok: true, history });
     }
 
     const settings = await getStoreSettings();
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       settings,
     });
@@ -36,26 +36,27 @@ export async function GET(request: NextRequest) {
 
 /**
  * PATCH /api/admin/settings — Update Dearr store settings in MySQL.
- * Enforces requireAdmin(). Validates parameters, logs audit history with admin.id, and persists to MySQL.
+ * Enforces requireAdmin() and assertSafeOrigin(). Validates parameters, logs audit history with admin.id, and persists to MySQL.
  */
 export async function PATCH(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const admin = await requireAdmin();
 
     let body: any;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
+      return jsonPrivate({ ok: false, error: "Invalid JSON body" }, { status: 400 });
     }
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json({ ok: false, error: "Request body must be an object" }, { status: 400 });
+      return jsonPrivate({ ok: false, error: "Request body must be an object" }, { status: 400 });
     }
 
     const updated = await updateStoreSettings(body, admin.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       settings: updated,
     });
@@ -72,8 +73,20 @@ export async function PATCH(request: NextRequest) {
         err.message.includes("feedback reason") ||
         err.message.includes("must be a boolean"))
     ) {
-      return NextResponse.json({ ok: false, error: err.message }, { status: 400 });
+      return jsonPrivate({ ok: false, error: err.message }, { status: 400 });
     }
+    return handleAuthError(err, "Failed to update store settings");
+  }
+}
+
+/**
+ * POST /api/admin/settings — Convenience alias for PATCH with CSRF validation.
+ */
+export async function POST(request: NextRequest) {
+  try {
+    assertSafeOrigin(request);
+    return await PATCH(request);
+  } catch (err: unknown) {
     return handleAuthError(err, "Failed to update store settings");
   }
 }

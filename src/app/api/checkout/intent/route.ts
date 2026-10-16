@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   createBuyNowCheckoutAttempt,
   getCheckoutAttemptById,
@@ -16,11 +16,12 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const body = await request.json();
 
     if (!body || !Array.isArray(body.items) || body.items.length === 0) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Items array is required for Buy Now" },
         { status: 400 }
       );
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
 
     const attempt = await createBuyNowCheckoutAttempt(user.id, defaultAddress, body.items);
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         intentId: attempt.id,
@@ -58,9 +59,9 @@ export async function POST(request: NextRequest) {
     );
   } catch (err: any) {
     if (err instanceof CheckoutAttemptError || err instanceof OrderValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
-        { status: err.statusCode || 400 }
+        { status: err.statusCode }
       );
     }
     return handleAuthError(err, "Failed to create checkout intent");
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
     const intentId = url.searchParams.get("intentId");
 
     if (!intentId) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "intentId query parameter is required" },
         { status: 400 }
       );
@@ -86,14 +87,14 @@ export async function GET(request: NextRequest) {
 
     const attempt = await getCheckoutAttemptById(intentId);
     if (!attempt || attempt.userId !== user.id) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Checkout session not found" },
         { status: 404 }
       );
     }
 
     if (attempt.status !== "pending" || new Date(attempt.expiresAt) <= new Date()) {
-      return NextResponse.json(
+      return jsonPrivate(
         {
           ok: false,
           error: "Checkout session has expired. Please select your items again.",
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       intent: {
         id: attempt.id,

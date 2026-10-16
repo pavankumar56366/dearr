@@ -883,7 +883,9 @@ async function runCustomerE2E() {
     assert("11.3 Customer cannot send failure callbacks for another customer's order (HTTP 403)", resIdorFail.status === 403);
 
     // Logout
-    const resLogout = await logoutHandler();
+    const resLogout = await logoutHandler(
+      new Request("http://localhost:3000/api/auth/logout", { method: "POST" })
+    );
     assert("11.4 Customer logout invalidates session cookie successfully (HTTP 200)", resLogout.status === 200);
 
     // Post-logout access check

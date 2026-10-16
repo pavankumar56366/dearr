@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import {
   recordNotificationConsent,
   ConsentValidationError,
@@ -20,11 +20,12 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const body = await request.json();
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
       );
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       userAgent,
     });
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         message: "Notification preference recorded successfully",
@@ -61,9 +62,9 @@ export async function POST(request: NextRequest) {
     );
   } catch (err: any) {
     if (err instanceof ConsentValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
-        { status: err.statusCode || 400 }
+        { status: err.statusCode }
       );
     }
     return handleAuthError(err, "Failed to record notification consent");

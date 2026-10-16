@@ -243,6 +243,7 @@ async function run() {
   if (passedTests !== totalTests) {
     process.exit(1);
   }
+  process.exit(0);
 }
 
 run().catch((err) => {

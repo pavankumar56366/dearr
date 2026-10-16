@@ -164,6 +164,18 @@ async function runBrowserAcceptance() {
     feedbackEnabled: true,
   });
 
+  // Ensure customer A has a saved default address for checkout
+  await createCustomerAddress(customerAId, {
+    fullName: "QA Customer A",
+    phone: "9876543210",
+    addressLine1: "123 Test St",
+    city: "Bengaluru",
+    state: "Karnataka",
+    postalCode: "560001",
+    country: "India",
+    isDefault: true,
+  });
+
   // Launch Playwright Chrome / Edge
   const chromePath = fs.existsSync("C:/Program Files/Google/Chrome/Application/chrome.exe")
     ? "C:/Program Files/Google/Chrome/Application/chrome.exe"

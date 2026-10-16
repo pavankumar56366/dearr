@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireUser, handleAuthError } from "@/lib/server/auth";
+import { requireUser, handleAuthError, assertSafeOrigin, withPrivateCacheHeaders } from "@/lib/server";
 import { query } from "@/lib/server/db";
 import {
   createOrderFromCart,
@@ -34,6 +34,7 @@ export const dynamic = "force-dynamic";
  */
 export async function POST(request: NextRequest) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     const body = await request.json();
 
@@ -295,7 +296,7 @@ export async function GET(request: NextRequest) {
       placedOnly: true, // Only show valid placed orders
     });
 
-    return NextResponse.json({ ok: true, ...result });
+    return withPrivateCacheHeaders(NextResponse.json({ ok: true, ...result }));
   } catch (err) {
     if (err instanceof OrderValidationError || err instanceof CheckoutAttemptError) {
       return NextResponse.json(
