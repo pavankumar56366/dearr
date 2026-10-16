@@ -74,6 +74,7 @@ export interface SampleProduct {
   variants?: SampleProductVariant[];
   hasColors?: boolean;
   colors?: SampleProductColor[];
+  codEnabled?: boolean;
 }
 
 export interface SampleCategory {

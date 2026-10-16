@@ -22,17 +22,104 @@ import CheckoutDemoSuccess from "./CheckoutDemoSuccess";
 import { CartRecoverySheet } from "./CartRecoverySheet";
 import { ArrowLeftIcon, ChevronRightIcon, SecureLockIcon } from "@/components/customer/Icons";
 
+const RAZORPAY_SCRIPT_ID = "razorpay-checkout-script";
+const RAZORPAY_SCRIPT_SRC = "https://checkout.razorpay.com/v1/checkout.js";
+const SCRIPT_LOAD_TIMEOUT_MS = 10000;
+
+let razorpayScriptLoadingPromise: Promise<boolean> | null = null;
+
+interface WindowWithRazorpay extends Window {
+  Razorpay?: new (options: Record<string, unknown>) => {
+    open: () => void;
+    on: (event: string, callback: (response: unknown) => void) => void;
+  };
+}
+
 function loadRazorpayScript(): Promise<boolean> {
-  return new Promise((resolve) => {
-    if (typeof window === "undefined") return resolve(false);
-    if ((window as any).Razorpay) return resolve(true);
-    const script = document.createElement("script");
-    script.src = "https://checkout.razorpay.com/v1/checkout.js";
-    script.async = true;
-    script.onload = () => resolve(true);
-    script.onerror = () => resolve(false);
-    document.body.appendChild(script);
+  if (typeof window === "undefined") return Promise.resolve(false);
+
+  const win = window as WindowWithRazorpay;
+
+  // 1. If window.Razorpay is already available, return true immediately
+  if (typeof win.Razorpay !== "undefined") {
+    return Promise.resolve(true);
+  }
+
+  // 2. Return active singleton loading promise if already in-flight
+  if (razorpayScriptLoadingPromise) {
+    return razorpayScriptLoadingPromise;
+  }
+
+  razorpayScriptLoadingPromise = new Promise<boolean>((resolve) => {
+    // Check if script element already exists in DOM
+    let script = document.getElementById(RAZORPAY_SCRIPT_ID) as HTMLScriptElement | null;
+
+    let timeoutId: NodeJS.Timeout | null = null;
+    let pollIntervalId: NodeJS.Timeout | null = null;
+
+    const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      if (pollIntervalId) clearInterval(pollIntervalId);
+    };
+
+    const handleSuccess = () => {
+      cleanup();
+      // Ensure window.Razorpay constructor is definitely attached
+      let attempts = 0;
+      const verifyWindow = () => {
+        if (typeof (window as WindowWithRazorpay).Razorpay !== "undefined") {
+          resolve(true);
+        } else if (attempts < 20) {
+          attempts++;
+          setTimeout(verifyWindow, 50);
+        } else {
+          resolve(typeof (window as WindowWithRazorpay).Razorpay !== "undefined");
+        }
+      };
+      verifyWindow();
+    };
+
+    const handleFailure = () => {
+      cleanup();
+      const existing = document.getElementById(RAZORPAY_SCRIPT_ID);
+      if (existing && existing.parentNode) {
+        existing.parentNode.removeChild(existing);
+      }
+      razorpayScriptLoadingPromise = null;
+      resolve(false);
+    };
+
+    timeoutId = setTimeout(() => {
+      console.warn(`[RazorpayLoader] Checkout script loading timed out after ${SCRIPT_LOAD_TIMEOUT_MS}ms`);
+      handleFailure();
+    }, SCRIPT_LOAD_TIMEOUT_MS);
+
+    if (!script) {
+      script = document.createElement("script");
+      script.id = RAZORPAY_SCRIPT_ID;
+      script.src = RAZORPAY_SCRIPT_SRC;
+      script.async = true;
+      script.crossOrigin = "anonymous";
+      script.onload = handleSuccess;
+      script.onerror = handleFailure;
+      document.body.appendChild(script);
+    } else {
+      const scriptWithState = script as HTMLScriptElement & { readyState?: string };
+      if (scriptWithState.readyState === "complete" || scriptWithState.readyState === "loaded") {
+        handleSuccess();
+      } else {
+        script.addEventListener("load", handleSuccess, { once: true });
+        script.addEventListener("error", handleFailure, { once: true });
+        pollIntervalId = setInterval(() => {
+          if (typeof (window as WindowWithRazorpay).Razorpay !== "undefined") {
+            handleSuccess();
+          }
+        }, 100);
+      }
+    }
   });
+
+  return razorpayScriptLoadingPromise;
 }
 
 const INITIAL_ADDRESS: DeliveryAddressFormValues = {
@@ -71,6 +158,7 @@ export default function CheckoutPageClient() {
   const [storeSettings, setStoreSettings] = useState<{
     freeShippingThreshold: number;
     defaultShippingFee: number;
+    codEnabled?: boolean;
     recoverySheetEnabled?: boolean;
     alternativesEnabled?: boolean;
     feedbackEnabled?: boolean;
@@ -83,6 +171,18 @@ export default function CheckoutPageClient() {
   const [isRecoveryFailed, setIsRecoveryFailed] = useState(false);
   const [recoveryErrorCode, setRecoveryErrorCode] = useState<string | null>(null);
   const [recoveryErrorDesc, setRecoveryErrorDesc] = useState<string | null>(null);
+  const [activeAttemptId, setActiveAttemptId] = useState<string | null>(intentId || null);
+
+  // Preload Razorpay Checkout script ahead of time
+  useEffect(() => {
+    loadRazorpayScript().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (currentStep === "payment") {
+      loadRazorpayScript().catch(() => {});
+    }
+  }, [currentStep]);
 
   // Load Buy Now intent when intentId query is present
   useEffect(() => {
@@ -128,6 +228,7 @@ export default function CheckoutPageClient() {
             setStoreSettings({
               freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 999),
               defaultShippingFee: Number(data.settings.defaultShippingFee ?? 50),
+              codEnabled: Boolean(data.settings.codEnabled),
               recoverySheetEnabled: data.settings.recoverySheetEnabled !== false,
               alternativesEnabled: data.settings.alternativesEnabled !== false,
               feedbackEnabled: data.settings.feedbackEnabled !== false,
@@ -166,6 +267,7 @@ export default function CheckoutPageClient() {
         sku: it.sku || undefined,
         variantName: it.variantName || undefined,
         isActive: true,
+        codEnabled: Boolean(it.codEnabled !== undefined ? it.codEnabled : true),
       }));
     }
     return items;
@@ -181,6 +283,35 @@ export default function CheckoutPageClient() {
   const activeTotalPayable = intentData
     ? intentData.totalAmount
     : Math.max(0, activeSubtotal + activeShippingFee);
+
+  const isCodMasterEnabled = Boolean(storeSettings.codEnabled);
+  const areItemsCodEligible = useMemo(() => {
+    if (intentData) {
+      if (typeof intentData.isCodEligible === "boolean") {
+        return intentData.isCodEligible;
+      }
+      return (intentData.items || []).every((it: any) => it.codEnabled !== false);
+    }
+    return items.length > 0 && items.every((it) => it.codEnabled !== false);
+  }, [intentData, items]);
+
+  const isCodAvailable = isCodMasterEnabled && areItemsCodEligible;
+
+  const codUnavailableReason = useMemo(() => {
+    if (!isCodMasterEnabled) {
+      return "Cash on Delivery is currently disabled for this store. Please complete checkout using online payment.";
+    }
+    if (!areItemsCodEligible) {
+      return "One or more items in your cart are not eligible for Cash on Delivery. Online payment is required.";
+    }
+    return undefined;
+  }, [isCodMasterEnabled, areItemsCodEligible]);
+
+  useEffect(() => {
+    if (paymentMethod === "cod" && !isCodAvailable) {
+      setPaymentMethod("razorpay");
+    }
+  }, [paymentMethod, isCodAvailable]);
 
   // Pre-load Razorpay checkout script & fetch customer saved addresses
   useEffect(() => {
@@ -363,7 +494,9 @@ export default function CheckoutPageClient() {
 
     (async () => {
       try {
+        const currentAttempt = activeAttemptId || intentId || undefined;
         const orderPayload: any = {
+          paymentMethod,
           ...(selectedAddressId !== "new"
             ? { addressId: selectedAddressId }
             : {
@@ -377,7 +510,8 @@ export default function CheckoutPageClient() {
                 shippingCountry: address.country || "India",
                 saveAddress: saveNewAddress,
               }),
-          ...(intentId ? { intentId } : {}),
+          ...(currentAttempt ? { intentId: currentAttempt, attemptId: currentAttempt } : {}),
+          ...(intentId && intentData?.items ? { isBuyNow: true, items: intentData.items } : {}),
         };
 
         const res = await fetch("/api/orders", {
@@ -390,6 +524,10 @@ export default function CheckoutPageClient() {
 
         if (res.ok && data.ok && data.order) {
           const createdOrder = data.order;
+          const returnedAttemptId = data.attemptId || (data.isAttempt ? createdOrder.id : null);
+          if (returnedAttemptId) {
+            setActiveAttemptId(returnedAttemptId);
+          }
 
           if (paymentMethod === "razorpay") {
             try {
@@ -407,11 +545,13 @@ export default function CheckoutPageClient() {
                 return;
               }
 
-              await loadRazorpayScript();
+              const scriptLoaded = await loadRazorpayScript();
 
-              if (typeof (window as any).Razorpay === "undefined") {
+              if (!scriptLoaded || typeof (window as WindowWithRazorpay).Razorpay === "undefined") {
                 setIsProcessing(false);
-                setAlertNotice("Unable to load payment gateway. Please refresh and try again.");
+                setAlertNotice(
+                  "Unable to connect to payment gateway. Please check your internet connection and try again."
+                );
                 return;
               }
 
@@ -707,6 +847,8 @@ export default function CheckoutPageClient() {
     hasUnavailableItems,
     clearCart,
     router,
+    activeAttemptId,
+    intentId,
   ]);
 
   // Reset to delivery step
@@ -910,6 +1052,8 @@ export default function CheckoutPageClient() {
                 <PaymentMethod
                   selectedMethod={paymentMethod}
                   onSelectMethod={setPaymentMethod}
+                  codAvailable={isCodAvailable}
+                  codUnavailableReason={codUnavailableReason}
                 />
               </div>
             )}
@@ -932,7 +1076,9 @@ export default function CheckoutPageClient() {
               totalPayable={activeTotalPayable}
               actionLabel={
                 currentStep === "payment"
-                  ? "Place Order & Pay via Razorpay"
+                  ? paymentMethod === "cod"
+                    ? "Place Order (Cash on Delivery)"
+                    : "Place Order & Pay via Razorpay"
                   : "Continue to Payment"
               }
             />

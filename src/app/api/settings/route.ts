@@ -35,7 +35,7 @@ export async function GET() {
       settings: {
         freeShippingThreshold: 999,
         defaultShippingFee: 50,
-        codEnabled: true,
+        codEnabled: false,
         prepaidEnabled: true,
       },
     });

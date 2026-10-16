@@ -207,6 +207,11 @@ export function AdminProductForm({
   const [isFeatured, setIsFeatured] = useState(
     initialProduct ? initialProduct.isFeatured : false
   );
+  const [codEnabled, setCodEnabled] = useState<boolean>(
+    initialProduct && initialProduct.codEnabled !== undefined
+      ? Boolean(initialProduct.codEnabled)
+      : true
+  );
 
   // Images & Variants State
   const [images, setImages] = useState<ProductImageItem[]>(initialImages);
@@ -735,6 +740,7 @@ export function AdminProductForm({
           isActive: isActive,
           isFeatured: isFeatured,
           hasColors: hasColors,
+          codEnabled: codEnabled,
           colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
         };
@@ -761,6 +767,7 @@ export function AdminProductForm({
           isActive: isActive,
           isFeatured: isFeatured,
           hasColors: hasColors,
+          codEnabled: codEnabled,
           colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
           variants: formattedVariants,
@@ -833,6 +840,7 @@ export function AdminProductForm({
         variants: returnedProduct.variants?.length > 0 ? returnedProduct.variants : undefined,
         hasColors: Boolean(returnedProduct.hasColors ?? returnedProduct.has_colors ?? hasColors),
         colors: returnedProduct.colors || (hasColors ? finalColorsPayload : undefined),
+        codEnabled: Boolean(returnedProduct.codEnabled ?? returnedProduct.cod_enabled ?? codEnabled),
       };
 
       setSavedProduct(mappedSuccessProduct);
@@ -861,6 +869,7 @@ export function AdminProductForm({
     setVariants([]);
     setIsActive(true);
     setIsFeatured(false);
+    setCodEnabled(true);
     setErrors({});
     setTouched({});
     setSavedProduct(null);
@@ -1651,6 +1660,40 @@ export function AdminProductForm({
                   <div
                     className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform ${
                       isFeatured ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* COD Eligibility Toggle */}
+              <div className="flex items-start justify-between p-3 rounded-xl border border-neutral-200 bg-white">
+                <div className="space-y-0.5 pr-4">
+                  <label
+                    htmlFor="toggle-cod"
+                    className="text-xs font-bold text-neutral-800 cursor-pointer"
+                  >
+                    Cash on Delivery (COD) Eligibility
+                  </label>
+                  <p className="text-[11px] text-neutral-500">
+                    {codEnabled
+                      ? "Cash on Delivery is enabled for this product. Customers can choose COD if the global store setting permits it."
+                      : "Cash on Delivery is disabled for this product. Any order containing this item will require online prepaid payment."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  id="toggle-cod"
+                  role="switch"
+                  aria-label="Cash on Delivery Eligibility"
+                  aria-checked={codEnabled}
+                  onClick={() => setCodEnabled(!codEnabled)}
+                  className={`w-12 h-7 flex items-center rounded-full p-1 transition-colors cursor-pointer shrink-0 ${
+                    codEnabled ? "bg-primary" : "bg-neutral-300"
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform ${
+                      codEnabled ? "translate-x-5" : "translate-x-0"
                     }`}
                   />
                 </button>

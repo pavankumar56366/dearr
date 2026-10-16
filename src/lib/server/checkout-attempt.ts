@@ -1,5 +1,6 @@
 import "server-only";
 import crypto from "crypto";
+import type { PoolConnection } from "mysql2/promise";
 import { query, withTransaction } from "./db";
 import {
   type CreateOrderInput,
@@ -216,6 +217,7 @@ export async function createCheckoutAttemptFromCart(
          p.stock_quantity AS p_stock,
          p.is_active AS p_is_active,
          p.has_colors AS p_has_colors,
+         p.cod_enabled AS p_cod_enabled,
          p.category_id AS p_category_id,
          pv.id AS v_id,
          pv.name AS v_name,
@@ -395,6 +397,11 @@ export async function createCheckoutAttemptFromCart(
         discountAmountPerUnit,
         lineDiscount,
         lineTotal,
+        codEnabled: Boolean(
+          row.p_cod_enabled !== undefined && row.p_cod_enabled !== null
+            ? row.p_cod_enabled
+            : 1
+        ),
       });
     }
 
@@ -421,6 +428,9 @@ export async function createCheckoutAttemptFromCart(
       discountAmount: orderDiscountTotal,
       shippingAmount,
       totalAmount,
+      isCodEligible:
+        preparedItems.length > 0 &&
+        preparedItems.every((it) => it.codEnabled !== false),
     };
 
     await conn.execute(
@@ -520,7 +530,7 @@ export async function createBuyNowCheckoutAttempt(
 
       // Query product
       const [productRows]: any = await conn.execute(
-        "SELECT id, name, price, stock_quantity, is_active, has_colors FROM products WHERE id = ? LIMIT 1",
+        "SELECT id, name, price, stock_quantity, is_active, has_colors, cod_enabled FROM products WHERE id = ? LIMIT 1",
         [cleanProductId]
       );
       if (!productRows || productRows.length === 0) {
@@ -670,6 +680,11 @@ export async function createBuyNowCheckoutAttempt(
         discountAmountPerUnit,
         lineDiscount,
         lineTotal,
+        codEnabled: Boolean(
+          product.cod_enabled !== undefined && product.cod_enabled !== null
+            ? product.cod_enabled
+            : 1
+        ),
       });
     }
 
@@ -697,6 +712,9 @@ export async function createBuyNowCheckoutAttempt(
       shippingAmount,
       totalAmount,
       isBuyNow: true,
+      isCodEligible:
+        preparedItems.length > 0 &&
+        preparedItems.every((it) => it.codEnabled !== false),
     };
 
     // Note: cart_id is NULL here! Customer's active cart is completely untouched!
@@ -1308,6 +1326,24 @@ export async function markAttemptAbandoned(
       };
     }
 
+    // Guard: If already marked failed by gateway decline, preserve failed status
+    if (attempt.status === "failed") {
+      if (!attempt.abandoned_at) {
+        await conn.execute(
+          `UPDATE checkout_attempts
+           SET abandoned_at = NOW(),
+               updated_at = NOW()
+           WHERE id = ?`,
+          [cleanId]
+        );
+      }
+      return {
+        success: true,
+        status: "failed",
+        isPaid: false,
+      };
+    }
+
     const isAlreadyAbandoned = attempt.status === "abandoned";
     if (!isAlreadyAbandoned) {
       await conn.execute(
@@ -1367,7 +1403,8 @@ export async function markAttemptFailed(
     step?: string;
     reason?: string;
   },
-  userId?: string
+  userId?: string,
+  conn?: PoolConnection
 ): Promise<{
   success: boolean;
   status: CheckoutAttemptStatus;
@@ -1388,8 +1425,14 @@ export async function markAttemptFailed(
     .trim()
     .slice(0, 500);
 
-  return await withTransaction(async (conn) => {
-    const [rows]: any = await conn.execute(
+  const runWithConn = async (c: PoolConnection): Promise<{
+    success: boolean;
+    status: CheckoutAttemptStatus;
+    isPaid: boolean;
+    orderId?: string | null;
+    orderNumber?: string | null;
+  }> => {
+    const [rows]: any = await c.execute(
       "SELECT * FROM checkout_attempts WHERE id = ? FOR UPDATE",
       [cleanId]
     );
@@ -1405,7 +1448,7 @@ export async function markAttemptFailed(
 
     // Guard: If already converted, do not downgrade
     if (attempt.status === "converted" && attempt.order_id) {
-      const [ordRows]: any = await conn.execute(
+      const [ordRows]: any = await c.execute(
         "SELECT order_number FROM orders WHERE id = ? LIMIT 1",
         [attempt.order_id]
       );
@@ -1419,7 +1462,7 @@ export async function markAttemptFailed(
     }
 
     // Check payments table
-    const [payRows]: any = await conn.execute(
+    const [payRows]: any = await c.execute(
       `SELECT id, status, order_id FROM payments
        WHERE (order_id = ? OR provider_order_id = ?) AND status IN ('captured', 'verified')
        LIMIT 1`,
@@ -1434,7 +1477,7 @@ export async function markAttemptFailed(
       };
     }
 
-    await conn.execute(
+    await c.execute(
       `UPDATE checkout_attempts
        SET status = 'failed',
            gateway_error_code = ?,
@@ -1446,7 +1489,7 @@ export async function markAttemptFailed(
     );
 
     // Release reservations on failure so stock is not permanently blocked
-    await releaseCheckoutAttemptReservations(cleanId, conn);
+    await releaseCheckoutAttemptReservations(cleanId, c);
 
     await recordInternalEvent({
       eventType: "payment_failed",
@@ -1464,7 +1507,12 @@ export async function markAttemptFailed(
       status: "failed",
       isPaid: false,
     };
-  });
+  };
+
+  if (conn) {
+    return await runWithConn(conn);
+  }
+  return await withTransaction(runWithConn);
 }
 
 /**

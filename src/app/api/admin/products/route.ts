@@ -108,6 +108,7 @@ export async function POST(request: Request) {
       isFeatured: body.isFeatured ?? body.is_featured,
       isActive: body.isActive ?? body.is_active,
       hasColors: body.hasColors ?? body.has_colors,
+      codEnabled: body.codEnabled !== undefined ? body.codEnabled : body.cod_enabled,
       images: body.images,
       variants: body.variants,
       colors: body.colors,

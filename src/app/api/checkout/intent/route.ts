@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
           discountAmount: attempt.checkoutData.discountAmount,
           shippingAmount: attempt.checkoutData.shippingAmount,
           expiresAt: attempt.expiresAt,
+          isCodEligible: Boolean(attempt.checkoutData?.isCodEligible ?? true),
         },
       },
       { status: 201 }
@@ -113,6 +114,7 @@ export async function GET(request: NextRequest) {
         totalAmount: attempt.amount,
         currency: attempt.currency,
         expiresAt: attempt.expiresAt,
+        isCodEligible: Boolean(attempt.checkoutData?.isCodEligible ?? true),
       },
     });
   } catch (err) {

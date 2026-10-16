@@ -66,6 +66,7 @@ export interface Product {
   isFeatured: boolean;
   isActive: boolean;
   hasColors: boolean;
+  codEnabled: boolean;
   image?: string;
   images: ProductImage[];
   variants: ProductVariant[];
@@ -117,6 +118,7 @@ export interface CreateProductInput {
   isFeatured?: boolean;
   isActive?: boolean;
   hasColors?: boolean;
+  codEnabled?: boolean;
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
@@ -140,6 +142,7 @@ export interface UpdateProductInput {
   isFeatured?: boolean;
   isActive?: boolean;
   hasColors?: boolean;
+  codEnabled?: boolean;
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
@@ -365,6 +368,7 @@ function toProduct(
     isFeatured: Boolean(row.is_featured),
     isActive: Boolean(row.is_active),
     hasColors,
+    codEnabled: Boolean(row.cod_enabled !== undefined && row.cod_enabled !== null ? row.cod_enabled : 1),
     image: primaryImageUrl,
     images,
     variants,
@@ -827,13 +831,14 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     }
 
     const hasColors = Boolean(input.hasColors);
+    const codEnabled = input.codEnabled !== undefined ? Boolean(input.codEnabled) : true;
 
     // Insert Product row
     const insertProductSql = `
       INSERT INTO products (
         id, category_id, name, slug, description, price, compare_at_price,
-        stock_quantity, is_featured, is_active, has_colors
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        stock_quantity, is_featured, is_active, has_colors, cod_enabled
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await conn.execute(insertProductSql, [
       id,
@@ -847,6 +852,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       isFeatured ? 1 : 0,
       isActive ? 1 : 0,
       hasColors ? 1 : 0,
+      codEnabled ? 1 : 0,
     ]);
 
     // Insert Colors if provided and hasColors is enabled
@@ -1104,6 +1110,12 @@ export async function updateProduct(
     if (input.hasColors !== undefined) {
       fields.push("has_colors = ?");
       values.push(input.hasColors ? 1 : 0);
+    }
+
+    // COD Enabled toggle
+    if (input.codEnabled !== undefined) {
+      fields.push("cod_enabled = ?");
+      values.push(input.codEnabled ? 1 : 0);
     }
 
     if (fields.length > 0) {

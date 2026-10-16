@@ -52,6 +52,7 @@ function mapApiProductToSampleProduct(p: any): SampleProduct {
           }))
         : undefined,
     hasColors: Boolean(p.hasColors ?? p.has_colors),
+    codEnabled: Boolean(p.codEnabled ?? p.cod_enabled ?? true),
     colors: Array.isArray(p.colors) && p.colors.length > 0
       ? p.colors.map((c: any) => ({
           id: c.id,

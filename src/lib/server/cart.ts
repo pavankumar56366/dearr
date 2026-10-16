@@ -33,6 +33,7 @@ export interface CartProductSummary {
   category: string | null;
   categorySlug: string | null;
   isActive: boolean;
+  codEnabled?: boolean;
 }
 
 export interface CartVariantSummary {
@@ -98,6 +99,7 @@ export interface CartRecord {
   items: CartItemRecord[];
   totals: CartTotals;
   itemCount: number;
+  isCodEligible?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -254,6 +256,7 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
        p.stock_quantity AS p_stock_quantity,
        p.is_active AS p_is_active,
        p.has_colors AS p_has_colors,
+       p.cod_enabled AS p_cod_enabled,
        cat.name AS category_name,
        cat.slug AS category_slug,
        pv.id AS v_id,
@@ -382,6 +385,11 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
           category: isProductActive ? row.category_name || null : null,
           categorySlug: isProductActive ? row.category_slug || null : null,
           isActive: isProductActive,
+          codEnabled: Boolean(
+            row.p_cod_enabled !== undefined && row.p_cod_enabled !== null
+              ? row.p_cod_enabled
+              : 1
+          ),
         },
         variant: hasVariant && row.v_id
           ? {
@@ -441,6 +449,7 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
       total,
     },
     itemCount,
+    isCodEligible: items.length > 0 && items.every((it) => it.product.codEnabled !== false),
     createdAt: cart.createdAt,
     updatedAt: cart.updatedAt,
   };

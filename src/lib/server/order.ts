@@ -121,6 +121,7 @@ export interface CreateOrderInput {
   shippingState: string;
   shippingPostalCode: string;
   shippingCountry?: string;
+  paymentMethod?: string;
 }
 
 export interface OrderListFilters {
@@ -351,7 +352,8 @@ function mapOrderItemRow(row: any): OrderItemSnapshot {
  */
 export async function createOrderFromCart(
   userId: string,
-  shippingInput: CreateOrderInput
+  shippingInput: CreateOrderInput,
+  options?: { paymentMethod?: string }
 ): Promise<OrderRecord> {
   const cleanUserId = validateId(userId, "User ID");
   const validatedAddress = validateShippingAddress(shippingInput);
@@ -384,6 +386,7 @@ export async function createOrderFromCart(
          p.price AS p_price,
          p.stock_quantity AS p_stock,
          p.is_active AS p_is_active,
+         p.cod_enabled AS p_cod_enabled,
          p.category_id AS p_category_id,
          pv.id AS v_id,
          pv.name AS v_name,
@@ -401,6 +404,31 @@ export async function createOrderFromCart(
 
     if (!items || items.length === 0) {
       throw new OrderValidationError("Your cart is empty. Please add items before checking out.", 400);
+    }
+
+    const isCod =
+      options?.paymentMethod === "Cash on Delivery" ||
+      options?.paymentMethod === "cod" ||
+      shippingInput.paymentMethod === "Cash on Delivery" ||
+      shippingInput.paymentMethod === "cod";
+
+    if (isCod) {
+      const storeSettings = await getStoreSettings();
+      if (!storeSettings.codEnabled) {
+        throw new OrderValidationError(
+          "Cash on Delivery is disabled. Please complete checkout using online payment.",
+          400
+        );
+      }
+      const hasIneligibleItem = items.some(
+        (row) => row.p_cod_enabled === 0 || row.p_cod_enabled === false
+      );
+      if (hasIneligibleItem) {
+        throw new OrderValidationError(
+          "One or more items in your cart are not eligible for Cash on Delivery. Online payment is required.",
+          400
+        );
+      }
     }
 
     // 3. Validate stock and compute server-authoritative prices
@@ -592,6 +620,266 @@ export async function createOrderFromCart(
     await conn.execute("DELETE FROM cart_items WHERE cart_id = ?", [cart.id]);
 
     // 8. Return the created order ID to be fetched post-commit
+    return orderId;
+  });
+
+  return await getOrderByIdInternal(createdOrderId);
+}
+
+export interface BuyNowOrderItemInput {
+  productId: string;
+  variantId?: string | null;
+  colorId?: string | null;
+  quantity: number;
+}
+
+/**
+ * Creates an authoritative order for Buy Now items without modifying or clearing the customer's cart.
+ */
+export async function createOrderFromBuyNow(
+  userId: string,
+  shippingInput: CreateOrderInput,
+  items: BuyNowOrderItemInput[],
+  options?: { paymentMethod?: string }
+): Promise<OrderRecord> {
+  const cleanUserId = validateId(userId, "User ID");
+  const validatedAddress = validateShippingAddress(shippingInput);
+
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new OrderValidationError("At least one item is required for Buy Now", 400);
+  }
+
+  const createdOrderId = await withTransaction(async (conn) => {
+    const isCod =
+      options?.paymentMethod === "Cash on Delivery" ||
+      options?.paymentMethod === "cod" ||
+      shippingInput.paymentMethod === "Cash on Delivery" ||
+      shippingInput.paymentMethod === "cod";
+
+    const storeSettings = await getStoreSettings();
+    if (isCod && !storeSettings.codEnabled) {
+      throw new OrderValidationError(
+        "Cash on Delivery is disabled. Please complete checkout using online payment.",
+        400
+      );
+    }
+
+    const now = new Date();
+    const orderId = crypto.randomUUID();
+    const orderNumber = await generateOrderNumber();
+
+    let orderSubtotal = 0;
+    let orderDiscountTotal = 0;
+
+    const preparedItems: any[] = [];
+
+    for (const itemInput of items) {
+      const cleanProductId = validateId(itemInput.productId, "Product ID");
+      const cleanColorId = itemInput.colorId ? validateId(itemInput.colorId, "Color ID") : null;
+      const cleanVariantId = itemInput.variantId ? validateId(itemInput.variantId, "Variant ID") : null;
+      const quantity = Math.floor(Number(itemInput.quantity));
+
+      if (isNaN(quantity) || quantity < 1) {
+        throw new OrderValidationError("Quantity must be a positive integer", 400);
+      }
+      if (quantity > 10) {
+        throw new OrderValidationError("Maximum 10 units allowed per item/color", 400);
+      }
+
+      const [productRows]: any = await conn.execute(
+        "SELECT id, name, price, stock_quantity, is_active, has_colors, cod_enabled FROM products WHERE id = ? LIMIT 1",
+        [cleanProductId]
+      );
+      if (!productRows || productRows.length === 0) {
+        throw new OrderValidationError("Product not found", 404);
+      }
+      const product = productRows[0];
+      const isProductActive = Boolean(product.is_active === 1 || product.is_active === true);
+      if (!isProductActive) {
+        throw new OrderValidationError(`Product "${product.name}" is no longer available`, 400);
+      }
+
+      const codEnabled = Boolean(
+        product.cod_enabled !== undefined && product.cod_enabled !== null
+          ? product.cod_enabled
+          : 1
+      );
+      if (isCod && !codEnabled) {
+        throw new OrderValidationError(
+          "One or more items in your order are not eligible for Cash on Delivery. Online payment is required.",
+          400
+        );
+      }
+
+      const hasColors = Boolean(product.has_colors === 1 || product.has_colors === true);
+      let unitPrice = 0;
+      let effectiveStock = 0;
+      let itemName = product.name;
+      let colorRecord: any = null;
+      let variantRecord: any = null;
+
+      if (hasColors) {
+        if (!cleanColorId) {
+          throw new OrderValidationError(`Please select a color for product "${product.name}"`, 400);
+        }
+        const [colorRows]: any = await conn.execute(
+          "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, price_override, is_active FROM product_colors WHERE id = ? LIMIT 1",
+          [cleanColorId]
+        );
+        if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
+          throw new OrderValidationError(`Selected color does not belong to product "${product.name}"`, 400);
+        }
+        colorRecord = colorRows[0];
+        const isColorActive = Boolean(colorRecord.is_active === 1 || colorRecord.is_active === true);
+        if (!isColorActive) {
+          throw new OrderValidationError(`Color "${colorRecord.name}" is currently inactive`, 400);
+        }
+        unitPrice =
+          colorRecord.price_override !== null && colorRecord.price_override !== undefined
+            ? Number(colorRecord.price_override)
+            : Number(product.price || 0);
+        effectiveStock = Math.max(0, Number(colorRecord.stock ?? 0) - Number(colorRecord.reserved_stock ?? 0));
+        itemName = `${product.name} (${colorRecord.name})`;
+      } else if (cleanVariantId) {
+        const [variantRows]: any = await conn.execute(
+          "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE id = ? LIMIT 1",
+          [cleanVariantId]
+        );
+        if (!variantRows || variantRows.length === 0 || variantRows[0].product_id !== cleanProductId) {
+          throw new OrderValidationError(`Selected variant does not belong to product "${product.name}"`, 400);
+        }
+        variantRecord = variantRows[0];
+        const isVariantActive = Boolean(variantRecord.is_active === 1 || variantRecord.is_active === true);
+        if (!isVariantActive) {
+          throw new OrderValidationError(`Variant "${variantRecord.name}" is currently inactive`, 400);
+        }
+        unitPrice =
+          variantRecord.price !== null && variantRecord.price !== undefined
+            ? Number(variantRecord.price)
+            : Number(product.price || 0);
+        effectiveStock = Number(variantRecord.stock_quantity ?? 0);
+        itemName = `${product.name} (${variantRecord.name})`;
+      } else {
+        unitPrice = Number(product.price || 0);
+        effectiveStock = Number(product.stock_quantity ?? 0);
+      }
+
+      if (quantity > effectiveStock) {
+        throw new OrderValidationError(
+          `Insufficient stock for "${itemName}": requested ${quantity}, only ${effectiveStock} available`,
+          400
+        );
+      }
+
+      let discountAmountPerUnit = 0;
+      try {
+        const discountResult = await getApplicableDiscountForProduct(cleanProductId, now);
+        if (discountResult && discountResult.discount) {
+          const calc = computeDiscountAmount(discountResult.discount, unitPrice);
+          discountAmountPerUnit = calc.discountAmount;
+        }
+      } catch {
+        discountAmountPerUnit = 0;
+      }
+
+      const finalUnitPrice = Math.max(0, roundToTwo(unitPrice - discountAmountPerUnit));
+      const lineDiscount = roundToTwo(discountAmountPerUnit * quantity);
+      const lineTotal = roundToTwo(finalUnitPrice * quantity);
+
+      orderSubtotal += roundToTwo(unitPrice * quantity);
+      orderDiscountTotal += lineDiscount;
+
+      preparedItems.push({
+        id: crypto.randomUUID(),
+        productId: cleanProductId,
+        variantId: cleanVariantId || null,
+        colorId: cleanColorId || null,
+        productName: product.name,
+        variantName: variantRecord ? variantRecord.name : null,
+        colorName: colorRecord ? colorRecord.name : null,
+        colorHex: colorRecord ? colorRecord.hex : null,
+        sku: colorRecord ? colorRecord.sku : (variantRecord ? variantRecord.sku : null),
+        unitPrice,
+        quantity,
+        discountAmountPerUnit,
+        lineDiscount,
+        lineTotal,
+      });
+    }
+
+    orderSubtotal = roundToTwo(orderSubtotal);
+    orderDiscountTotal = roundToTwo(orderDiscountTotal);
+
+    const shippingAmount =
+      orderSubtotal >= storeSettings.freeShippingThreshold
+        ? 0
+        : storeSettings.defaultShippingFee;
+    const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
+
+    const addressEditDeadline = storeSettings.allowAddressChange
+      ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)
+      : null;
+
+    await conn.execute(
+      `INSERT INTO orders (
+         id, order_number, user_id, status, payment_status,
+         subtotal, discount_amount, shipping_amount, total_amount, currency,
+         shipping_full_name, shipping_phone,
+         shipping_address_line_1, shipping_address_line_2,
+         shipping_city, shipping_state, shipping_postal_code, shipping_country,
+         address_edit_deadline, address_change_count,
+         created_at, updated_at
+       ) VALUES (?, ?, ?, 'pending', 'pending',
+                 ?, ?, ?, ?, 'INR',
+                 ?, ?,
+                 ?, ?,
+                 ?, ?, ?, ?,
+                 ?, 0,
+                 NOW(), NOW())`,
+      [
+        orderId,
+        orderNumber,
+        cleanUserId,
+        orderSubtotal,
+        orderDiscountTotal,
+        shippingAmount,
+        totalAmount,
+        validatedAddress.shippingFullName,
+        validatedAddress.shippingPhone,
+        validatedAddress.shippingAddressLine1,
+        validatedAddress.shippingAddressLine2 ?? null,
+        validatedAddress.shippingCity,
+        validatedAddress.shippingState,
+        validatedAddress.shippingPostalCode,
+        validatedAddress.shippingCountry,
+        addressEditDeadline,
+      ] as any[]
+    );
+
+    for (const item of preparedItems) {
+      await conn.execute(
+        `INSERT INTO order_items (
+           id, order_id, product_id, variant_id,
+           product_name, variant_name, unit_price,
+           quantity, discount_amount, line_total,
+           created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          item.id,
+          orderId,
+          item.productId,
+          item.variantId ?? null,
+          item.productName,
+          item.variantName ?? null,
+          item.unitPrice,
+          item.quantity,
+          item.lineDiscount,
+          item.lineTotal,
+        ] as any[]
+      );
+    }
+
+    // Customer's cart is untouched!
     return orderId;
   });
 

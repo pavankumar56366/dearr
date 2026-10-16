@@ -34,6 +34,7 @@ export interface CartItem {
   colorHex?: string;
   sku?: string;
   isActive: boolean;
+  codEnabled?: boolean;
 }
 
 export interface CartTotalsState {
@@ -106,6 +107,7 @@ function mapApiCartItem(item: any): CartItem {
         (item.variant ? item.variant.isActive : true) &&
         item.stock?.available
     ),
+    codEnabled: Boolean(item.product?.codEnabled !== undefined ? item.product.codEnabled : true),
   };
 }
 
@@ -334,6 +336,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           colorHex: color?.hex,
           sku: color?.sku || (variant as any)?.sku,
           isActive: true,
+          codEnabled: sampleProd.codEnabled !== undefined ? Boolean(sampleProd.codEnabled) : true,
         };
         return [newItem, ...prev];
       });

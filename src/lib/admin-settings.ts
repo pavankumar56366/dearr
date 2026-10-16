@@ -113,7 +113,7 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   minimumOrderValue: 199,
   freeShippingThreshold: 999,
   defaultShippingFee: 50,
-  codEnabled: true,
+  codEnabled: false,
   prepaidEnabled: true,
 
   // Order Settings

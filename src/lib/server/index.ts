@@ -170,6 +170,7 @@ export {
 export {
   OrderValidationError,
   createOrderFromCart,
+  createOrderFromBuyNow,
   getOrderById,
   listCustomerOrders,
   listAllOrders,

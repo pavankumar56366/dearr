@@ -676,10 +676,17 @@ export async function verifyRazorpayPayment(
   }
 
   // 0. Check if cleanOrderId or cleanRzpOrderId belongs to a checkout_attempt
-  const attemptRows = await query<any[]>(
-    "SELECT * FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
-    [cleanOrderId, cleanRzpOrderId]
+  // Unambiguous resolution: Look up by primary attempt ID first, or strictly by provider_order_id if the caller passed it as the identifier
+  let attemptRows = await query<any[]>(
+    "SELECT * FROM checkout_attempts WHERE id = ? LIMIT 1",
+    [cleanOrderId]
   );
+  if ((!attemptRows || attemptRows.length === 0) && cleanOrderId === cleanRzpOrderId) {
+    attemptRows = await query<any[]>(
+      "SELECT * FROM checkout_attempts WHERE provider_order_id = ? LIMIT 1",
+      [cleanRzpOrderId]
+    );
+  }
 
   if (attemptRows && attemptRows.length > 0) {
     const attempt = attemptRows[0];
@@ -687,6 +694,23 @@ export async function verifyRazorpayPayment(
       throw new PaymentValidationError(
         "Forbidden: You do not have permission to verify payment for this attempt",
         403
+      );
+    }
+
+    // Invariant 1: Checkout attempt must have an initialized server-stored Razorpay order ID
+    if (!attempt.provider_order_id || typeof attempt.provider_order_id !== "string" || !attempt.provider_order_id.trim()) {
+      throw new PaymentValidationError(
+        "No payment order has been initialized for this checkout attempt",
+        400
+      );
+    }
+
+    // Invariant 2: Submitted Razorpay order ID must strictly match the stored provider_order_id
+    const trustedRzpOrderId = attempt.provider_order_id.trim();
+    if (trustedRzpOrderId !== cleanRzpOrderId) {
+      throw new PaymentValidationError(
+        "Submitted Razorpay order ID does not match the checkout attempt record",
+        400
       );
     }
 
@@ -722,7 +746,7 @@ export async function verifyRazorpayPayment(
       );
     }
 
-    const trustedRzpOrderId = attempt.provider_order_id || cleanRzpOrderId;
+    // Cryptographic signature verification using ONLY the trusted, server-stored order ID
     const isSigValid = verifyRazorpaySignature(
       trustedRzpOrderId,
       cleanRzpPaymentId,
@@ -962,10 +986,16 @@ export async function settlePaidOrder(
 
   return await withTransaction(async (conn) => {
     // 0. Check if cleanOrderId is a checkout_attempt
-    const [attemptRows]: any = await conn.execute(
-      "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
-      [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+    let [attemptRows]: any = await conn.execute(
+      "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE id = ? LIMIT 1",
+      [cleanOrderId]
     );
+    if ((!attemptRows || attemptRows.length === 0) && input.razorpayOrderId) {
+      [attemptRows] = await conn.execute(
+        "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE provider_order_id = ? LIMIT 1",
+        [input.razorpayOrderId.trim()]
+      );
+    }
 
     if (attemptRows && attemptRows.length > 0) {
       const attempt = attemptRows[0];
@@ -973,6 +1003,12 @@ export async function settlePaidOrder(
         throw new PaymentValidationError(
           "Forbidden: You do not have permission to settle payment for this attempt",
           403
+        );
+      }
+      if (input.razorpayOrderId && attempt.provider_order_id && attempt.provider_order_id.trim() !== input.razorpayOrderId.trim()) {
+        throw new PaymentValidationError(
+          "Submitted Razorpay order ID does not match checkout attempt record",
+          400
         );
       }
       if (attempt.status === "converted" && attempt.order_id) {
@@ -1319,10 +1355,16 @@ export async function handlePaymentFailure(
 
   return await withTransaction(async (conn) => {
     // 0. Check if cleanOrderId is a checkout_attempt
-    const [attemptRows]: any = await conn.execute(
-      "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1 FOR UPDATE",
-      [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+    let [attemptRows]: any = await conn.execute(
+      "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE id = ? LIMIT 1 FOR UPDATE",
+      [cleanOrderId]
     );
+    if ((!attemptRows || attemptRows.length === 0) && input.razorpayOrderId) {
+      [attemptRows] = await conn.execute(
+        "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE provider_order_id = ? LIMIT 1 FOR UPDATE",
+        [input.razorpayOrderId.trim()]
+      );
+    }
 
     if (attemptRows && attemptRows.length > 0) {
       const attempt = attemptRows[0];
@@ -1353,7 +1395,8 @@ export async function handlePaymentFailure(
           step: input.errorStep,
           reason: input.errorReason,
         },
-        cleanUserId
+        cleanUserId,
+        conn
       );
       return {
         success: true,
@@ -1598,10 +1641,16 @@ export async function handlePaymentCancellation(
   const cleanUserId = validateId(input.userId, "User ID");
 
   // 0. Check if cleanOrderId is a checkout_attempt
-  const [attemptRows]: any = await query(
-    "SELECT id, user_id, status, order_id, amount, currency FROM checkout_attempts WHERE id = ? OR provider_order_id = ? LIMIT 1",
-    [cleanOrderId, input.razorpayOrderId?.trim() || cleanOrderId]
+  let attemptRows: any = await query(
+    "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE id = ? LIMIT 1",
+    [cleanOrderId]
   );
+  if ((!attemptRows || attemptRows.length === 0) && input.razorpayOrderId) {
+    attemptRows = await query(
+      "SELECT id, user_id, status, order_id, amount, currency, provider_order_id FROM checkout_attempts WHERE provider_order_id = ? LIMIT 1",
+      [input.razorpayOrderId.trim()]
+    );
+  }
 
   if (attemptRows && attemptRows.length > 0) {
     const attempt = attemptRows[0];

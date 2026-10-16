@@ -3,6 +3,7 @@ import { requireUser, handleAuthError } from "@/lib/server/auth";
 import { query } from "@/lib/server/db";
 import {
   createOrderFromCart,
+  createOrderFromBuyNow,
   listCustomerOrders,
   OrderValidationError,
 } from "@/lib/server/order";
@@ -16,6 +17,7 @@ import {
   getCustomerAddressById,
   createCustomerAddress,
 } from "@/lib/server/address";
+import { getStoreSettings } from "@/lib/server/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -82,40 +84,164 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Direct placed order branch (only for explicit COD or direct order simulation)
-    const isDirectOrder = body.mode === "direct" || body.paymentMethod === "cod";
-    if (isDirectOrder) {
-      const order = await createOrderFromCart(user.id, shippingData);
+    // Direct placed order / COD policy enforcement:
+    // 1. Customer-supplied mode: "direct" must never bypass standard online checkout.
+    if (body.mode === "direct") {
       return NextResponse.json(
-        { ok: true, order },
-        { status: 201 }
+        { ok: false, error: "Direct order mode is not permitted. Please complete standard online checkout." },
+        { status: 400 }
       );
+    }
+
+    // 2. Cash on Delivery is strictly rejected unless explicitly enabled in trusted server-side store_settings
+    // AND all items in the order/cart are COD-eligible.
+    if (body.paymentMethod === "cod") {
+      const storeSettings = await getStoreSettings();
+      if (!storeSettings.codEnabled) {
+        return NextResponse.json(
+          { ok: false, error: "Cash on Delivery is disabled. Please complete checkout using online payment." },
+          { status: 400 }
+        );
+      }
+
+      // Check if this is Buy Now vs Cart
+      const isBuyNow = Boolean(body.isBuyNow && Array.isArray(body.items) && body.items.length > 0);
+      if (isBuyNow) {
+        // Server-authoritative check for each product in Buy Now items
+        for (const it of body.items) {
+          const pRows = await query<any[]>(
+            "SELECT id, name, cod_enabled, is_active FROM products WHERE id = ? LIMIT 1",
+            [it.productId]
+          );
+          if (!pRows || pRows.length === 0) {
+            return NextResponse.json(
+              { ok: false, error: "Product not found" },
+              { status: 404 }
+            );
+          }
+          const p = pRows[0];
+          const codEnabled = Boolean(
+            p.cod_enabled !== undefined && p.cod_enabled !== null ? p.cod_enabled : 1
+          );
+          if (!codEnabled) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "One or more items in your order are not eligible for Cash on Delivery. Online payment is required.",
+              },
+              { status: 400 }
+            );
+          }
+        }
+
+        const order = await createOrderFromBuyNow(
+          user.id,
+          { ...shippingData, paymentMethod: "Cash on Delivery" },
+          body.items,
+          { paymentMethod: "Cash on Delivery" }
+        );
+
+        // If an intent/attempt existed, mark it converted/consumed if applicable
+        const targetAttemptId = body.intentId || body.attemptId;
+        if (targetAttemptId) {
+          try {
+            await query(
+              "UPDATE checkout_attempts SET status = 'converted', order_id = ?, updated_at = NOW() WHERE id = ? AND user_id = ?",
+              [order.id, targetAttemptId, user.id]
+            );
+            await query(
+              "UPDATE stock_reservations SET status = 'consumed', updated_at = NOW() WHERE attempt_id = ? AND status = 'active'",
+              [targetAttemptId]
+            );
+          } catch {}
+        }
+
+        return NextResponse.json(
+          { ok: true, order },
+          { status: 201 }
+        );
+      } else {
+        // Cart Checkout: query user's active cart joined with products to verify COD eligibility
+        const activeItems = await query<any[]>(
+          `SELECT p.id, p.name, p.cod_enabled
+           FROM cart_items ci
+           INNER JOIN carts c ON ci.cart_id = c.id
+           INNER JOIN products p ON ci.product_id = p.id
+           WHERE c.user_id = ? AND c.status = 'active'`,
+          [user.id]
+        );
+
+        if (!activeItems || activeItems.length === 0) {
+          return NextResponse.json(
+            { ok: false, error: "Your cart is empty. Please add items before checking out." },
+            { status: 400 }
+          );
+        }
+
+        const hasIneligibleProduct = activeItems.some(
+          (p) => p.cod_enabled === 0 || p.cod_enabled === false
+        );
+        if (hasIneligibleProduct) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "One or more items in your cart are not eligible for Cash on Delivery. Online payment is required.",
+            },
+            { status: 400 }
+          );
+        }
+
+        const order = await createOrderFromCart(
+          user.id,
+          { ...shippingData, paymentMethod: "Cash on Delivery" },
+          { paymentMethod: "Cash on Delivery" }
+        );
+        return NextResponse.json(
+          { ok: true, order },
+          { status: 201 }
+        );
+      }
     }
 
     // Standard Online Prepaid Flow: Create or reuse checkout attempt.
     let attempt;
-    if (body.intentId) {
-      const existingAttempt = await getCheckoutAttemptById(body.intentId);
-      if (!existingAttempt || existingAttempt.userId !== user.id) {
-        return NextResponse.json({ ok: false, error: "Checkout session not found" }, { status: 404 });
-      }
-      if (existingAttempt.status !== "pending" || new Date(existingAttempt.expiresAt) <= new Date()) {
-        return NextResponse.json({ ok: false, error: "Checkout session has expired. Please try again." }, { status: 410 });
-      }
+    const targetAttemptId = body.intentId || body.attemptId;
+    if (targetAttemptId) {
+      const existingAttempt = await getCheckoutAttemptById(targetAttemptId);
+      if (existingAttempt && existingAttempt.userId === user.id) {
+        const isConverted = existingAttempt.status === "converted";
+        if (isConverted) {
+          return NextResponse.json({ ok: false, error: "This checkout has already been completed." }, { status: 409 });
+        }
 
-      const updatedCheckoutData = {
-        ...existingAttempt.checkoutData,
-        shippingAddress: shippingData,
-      };
-      await query(
-        "UPDATE checkout_attempts SET checkout_data = ?, updated_at = NOW() WHERE id = ?",
-        [JSON.stringify(updatedCheckoutData), existingAttempt.id]
-      );
-      existingAttempt.checkoutData = updatedCheckoutData;
-      attempt = existingAttempt;
-    } else if (body.isBuyNow && Array.isArray(body.items) && body.items.length > 0) {
+        const isExpired = new Date(existingAttempt.expiresAt) <= new Date();
+
+        // Verify stock reservations for this attempt are still actively held
+        const resRows = await query<Array<{ activeCount: number }>>(
+          "SELECT count(*) as activeCount FROM stock_reservations WHERE attempt_id = ? AND status = 'active'",
+          [existingAttempt.id]
+        );
+        const hasActiveReservations = Number(resRows?.[0]?.activeCount || 0) > 0;
+
+        if (!isExpired && hasActiveReservations) {
+          const updatedCheckoutData = {
+            ...existingAttempt.checkoutData,
+            shippingAddress: shippingData,
+          };
+          await query(
+            "UPDATE checkout_attempts SET status = 'pending', checkout_data = ?, updated_at = NOW() WHERE id = ?",
+            [JSON.stringify(updatedCheckoutData), existingAttempt.id]
+          );
+          existingAttempt.status = "pending";
+          existingAttempt.checkoutData = updatedCheckoutData;
+          attempt = existingAttempt;
+        }
+      }
+    }
+
+    if (!attempt && body.isBuyNow && Array.isArray(body.items) && body.items.length > 0) {
       attempt = await createBuyNowCheckoutAttempt(user.id, shippingData, body.items);
-    } else {
+    } else if (!attempt) {
       attempt = await createCheckoutAttemptFromCart(user.id, shippingData);
     }
 
