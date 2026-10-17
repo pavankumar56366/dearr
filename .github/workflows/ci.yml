@@ -49,7 +49,7 @@ jobs:
           NEXT_PUBLIC_RAZORPAY_KEY_ID: rzp_test_ci_mock
           RESEND_EMAILS_ENABLED: 'false'
         run: |
-          npx tsx scripts/setup-dearr-test-db.ts
+          npx tsx scripts/init-ci-test-db.ts
           npx tsx scripts/test-resend-transactional-email.ts
           npx tsx scripts/test-payment-verification-security.ts
           npx tsx scripts/test-auth-rate-limiting.ts
