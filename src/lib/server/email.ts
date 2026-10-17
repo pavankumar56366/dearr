@@ -35,16 +35,26 @@ export interface EmailDispatchResult {
   error?: string;
   skipped?: boolean;
   budgetExceeded?: boolean;
+  disabled?: boolean;
 }
 
-let cachedResendClient: Resend | null = null;
+export function isEmailSendingEnabled(): boolean {
+  return process.env.RESEND_EMAILS_ENABLED === "true";
+}
+
+let cachedResendClient: any = null;
+
+export function setResendClientForTesting(client: any): void {
+  cachedResendClient = client;
+}
 
 function getResendClient(): Resend | null {
+  if (cachedResendClient) {
+    return cachedResendClient;
+  }
   const apiKey = process.env.RESEND_API_KEY?.trim();
   if (!apiKey) return null;
-  if (!cachedResendClient) {
-    cachedResendClient = new Resend(apiKey);
-  }
+  cachedResendClient = new Resend(apiKey);
   return cachedResendClient;
 }
 
@@ -367,11 +377,14 @@ export async function sendPasswordResetOtp(
   });
 
   const fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || DEFAULT_SENDER;
-  const emailsEnabled = process.env.RESEND_EMAILS_ENABLED === "true";
-
-  if (!emailsEnabled) {
+  if (!isEmailSendingEnabled()) {
     console.log(`[EmailService:Simulated] (RESEND_EMAILS_ENABLED=false) Password reset OTP for ${cleanEmail} generated and suppressed safely.`);
-    return { ok: true, skipped: true, messageId: "simulated_otp_msg" };
+    return {
+      ok: false,
+      skipped: true,
+      disabled: true,
+      error: "Transactional email sending is disabled (RESEND_EMAILS_ENABLED !== true)",
+    };
   }
 
   const resend = getResendClient();
@@ -424,11 +437,14 @@ export async function sendPaymentConfirmation(
   const { subject, text, html } = renderPaymentConfirmationTemplate(params);
 
   const fromEmail = process.env.RESEND_FROM_EMAIL?.trim() || DEFAULT_SENDER;
-  const emailsEnabled = process.env.RESEND_EMAILS_ENABLED === "true";
-
-  if (!emailsEnabled) {
+  if (!isEmailSendingEnabled()) {
     console.log(`[EmailService:Simulated] (RESEND_EMAILS_ENABLED=false) Payment confirmation for order ${params.orderNumber} suppressed safely.`);
-    return { ok: true, skipped: true, messageId: "simulated_payment_msg" };
+    return {
+      ok: false,
+      skipped: true,
+      disabled: true,
+      error: "Transactional email sending is disabled (RESEND_EMAILS_ENABLED !== true)",
+    };
   }
 
   const resend = getResendClient();
@@ -537,6 +553,26 @@ export async function queueEmailOutboxJob(
  * Crash-recovery: automatically reclaims jobs left in 'processing' by worker crashes older than 5 minutes.
  */
 export async function dispatchEmailOutboxJob(jobId: string): Promise<EmailDispatchResult> {
+  // If email sending is disabled, never claim or mark outbox jobs as sent.
+  // The job remains safely in 'pending' status without incrementing attempts or setting backoff.
+  if (!isEmailSendingEnabled()) {
+    console.log(`[EmailService:Simulated] (RESEND_EMAILS_ENABLED=false) Outbox dispatch for job ${jobId} suppressed safely; remaining in pending status.`);
+    // If the job was somehow stuck in 'processing' (e.g. from an ungraceful crash), safely revert to 'pending'
+    await query(
+      `UPDATE email_outbox
+       SET status = 'pending', updated_at = NOW()
+       WHERE id = ? AND status = 'processing' AND updated_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)`,
+      [jobId]
+    ).catch(() => {});
+
+    return {
+      ok: false,
+      skipped: true,
+      disabled: true,
+      error: "Transactional email sending is disabled (RESEND_EMAILS_ENABLED !== true)",
+    };
+  }
+
   // 1. Atomically claim the job to prevent concurrent workers from sending duplicate emails
   const claimResult: any = await query(
     `UPDATE email_outbox
@@ -605,7 +641,20 @@ export async function dispatchEmailOutboxJob(jobId: string): Promise<EmailDispat
     return { ok: false, error: `Unsupported email event_type: ${job.event_type}` };
   }
 
-  if (result.ok) {
+  // Defense-in-depth: if sending was disabled or skipped, never mark as sent; revert to 'pending'
+  if (result.skipped || result.disabled) {
+    await query(
+      `UPDATE email_outbox
+       SET status = 'pending',
+           updated_at = NOW()
+       WHERE id = ?`,
+      [jobId]
+    );
+    return result;
+  }
+
+  // Real confirmed provider delivery
+  if (result.ok && result.messageId) {
     await query(
       `UPDATE email_outbox
        SET status = 'sent',
@@ -613,7 +662,7 @@ export async function dispatchEmailOutboxJob(jobId: string): Promise<EmailDispat
            sent_at = NOW(),
            updated_at = NOW()
        WHERE id = ?`,
-      [result.messageId || (result.skipped ? "skipped" : null), jobId]
+      [result.messageId, jobId]
     );
     return result;
   }
@@ -644,7 +693,26 @@ export async function retryPendingEmailOutboxJobs(limit = 20): Promise<{
   processed: number;
   succeeded: number;
   failed: number;
+  skipped?: number;
 }> {
+  if (!isEmailSendingEnabled()) {
+    // When sending is disabled, safely reclaim any stale crashed processing jobs back to pending
+    const reclaimRes: any = await query(
+      `UPDATE email_outbox
+       SET status = 'pending', updated_at = NOW()
+       WHERE status = 'processing' AND updated_at < DATE_SUB(NOW(), INTERVAL 5 MINUTE)`
+    ).catch(() => ({ affectedRows: 0 }));
+
+    const reclaimed = Number(reclaimRes?.affectedRows ?? 0);
+    console.log("[EmailService:Simulated] (RESEND_EMAILS_ENABLED=false) Outbox retry worker skipped; sending is disabled.");
+    return {
+      processed: reclaimed,
+      succeeded: 0,
+      failed: 0,
+      skipped: reclaimed,
+    };
+  }
+
   const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
 
   const jobs = await query<any[]>(

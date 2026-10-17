@@ -397,6 +397,8 @@ export {
   queueEmailOutboxJob,
   dispatchEmailOutboxJob,
   retryPendingEmailOutboxJobs,
+  isEmailSendingEnabled,
+  setResendClientForTesting,
   escapeHtml,
   renderPasswordResetOtpTemplate,
   renderPaymentConfirmationTemplate,

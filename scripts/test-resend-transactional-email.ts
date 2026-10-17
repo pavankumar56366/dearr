@@ -137,6 +137,8 @@ async function runSuite() {
     queueEmailOutboxJob,
     dispatchEmailOutboxJob,
     retryPendingEmailOutboxJobs,
+    isEmailSendingEnabled,
+    setResendClientForTesting,
     renderPasswordResetOtpTemplate,
     renderPaymentConfirmationTemplate,
     escapeHtml,
@@ -481,10 +483,33 @@ async function runSuite() {
       [finalized.id]
     );
     assertTest(
-      outboxRows && outboxRows.length === 1 && ["sent", "pending", "processing"].includes(outboxRows[0].status),
-      "Verified payment atomically creates payment_confirmation job in email_outbox (sent in simulated mode)"
+      outboxRows &&
+        outboxRows.length === 1 &&
+        outboxRows[0].status === "pending" &&
+        outboxRows[0].sent_at === null &&
+        outboxRows[0].provider_message_id === null &&
+        outboxRows[0].attempts === 0,
+      "Verified payment atomically creates payment_confirmation job in email_outbox (remains pending with null provider fields when sending is disabled)"
     );
     if (outboxRows.length > 0) cleanupLedger.outbox.push(outboxRows[0].id);
+
+    // Test repeated disabled-mode dispatch: does not corrupt state or increment attempts
+    const repeatDispatchRes = await dispatchEmailOutboxJob(outboxRows[0].id);
+    assertTest(
+      repeatDispatchRes.ok === false && repeatDispatchRes.disabled === true && repeatDispatchRes.skipped === true,
+      "Repeated dispatch when disabled returns explicit skipped/disabled result"
+    );
+    const [repeatRows]: any = await conn.execute(
+      "SELECT status, attempts, sent_at, provider_message_id FROM email_outbox WHERE id = ?",
+      [outboxRows[0].id]
+    );
+    assertTest(
+      repeatRows[0].status === "pending" &&
+        repeatRows[0].attempts === 0 &&
+        repeatRows[0].sent_at === null &&
+        repeatRows[0].provider_message_id === null,
+      "Repeated disabled-mode dispatch preserves pending status and 0 attempts without corrupting state"
+    );
 
     // Test 16: Duplicate conversion attempt does not create duplicate jobs
     const duplicateRes = await queueEmailOutboxJob({
@@ -506,6 +531,87 @@ async function runSuite() {
     );
     assertTest(outboxCount[0].cnt === 1, "Exactly one outbox record exists for the finalized order");
 
+    // Test: When sending is deliberately enabled later (Stage B transition), pending job is dispatched through provider
+    const origEnvEnabled = process.env.RESEND_EMAILS_ENABLED;
+    const origEnvApiKey = process.env.RESEND_API_KEY;
+    try {
+      process.env.RESEND_EMAILS_ENABLED = "true";
+      process.env.RESEND_API_KEY = "re_test_mock_for_stage_b";
+
+      let mockProviderCalled: boolean = false;
+      let recordedPayload: any = null;
+      setResendClientForTesting({
+        emails: {
+          send: async (p: any) => {
+            mockProviderCalled = true;
+            recordedPayload = p;
+            return { data: { id: "msg_resend_stage_b_success_123" }, error: null };
+          },
+        },
+      });
+
+      const retryWorkerStats = await retryPendingEmailOutboxJobs(10);
+      assertTest(
+        retryWorkerStats.processed >= 1 && retryWorkerStats.succeeded >= 1 && Boolean(mockProviderCalled),
+        "Previously pending job is selected by retry worker and delivered via provider once sending is enabled"
+      );
+
+      const [deliveredDbRow]: any = await conn.execute(
+        "SELECT status, sent_at, provider_message_id FROM email_outbox WHERE id = ?",
+        [outboxRows[0].id]
+      );
+      assertTest(
+        deliveredDbRow &&
+          deliveredDbRow[0].status === "sent" &&
+          deliveredDbRow[0].provider_message_id === "msg_resend_stage_b_success_123" &&
+          deliveredDbRow[0].sent_at !== null,
+        "Job transitions to 'sent' storing genuine provider message ID and sent_at timestamp"
+      );
+
+      // Test: Provider failure when sending is enabled increments attempts and records backoff
+      const failOrderId = crypto.randomUUID();
+      const failJobId = crypto.randomUUID();
+      await conn.execute(
+        `INSERT INTO email_outbox (id, event_type, idempotency_key, recipient_email, recipient_name, order_id, payload, status, attempts, next_retry_at, created_at, updated_at)
+         VALUES (?, 'payment_confirmation', ?, ?, 'Fail Customer', ?, ?, 'pending', 0, NOW(), NOW(), NOW())`,
+        [failJobId, `order_payment:${failOrderId}`, testEmail, failOrderId, JSON.stringify({ orderNumber: "FAIL-TEST", amount: 100 })]
+      );
+      cleanupLedger.outbox.push(failJobId);
+
+      setResendClientForTesting({
+        emails: {
+          send: async () => {
+            return { data: null, error: { message: "Resend rate limit exceeded (429)" } };
+          },
+        },
+      });
+
+      const failDispatchRes = await dispatchEmailOutboxJob(failJobId);
+      assertTest(
+        failDispatchRes.ok === false && Boolean(failDispatchRes.error && failDispatchRes.error.includes("Resend rate limit")),
+        "Provider failure when enabled returns descriptive error"
+      );
+
+      const [failedDbRow]: any = await conn.execute(
+        "SELECT status, attempts, next_retry_at, last_error FROM email_outbox WHERE id = ?",
+        [failJobId]
+      );
+      assertTest(
+        failedDbRow &&
+          failedDbRow[0].status === "failed" &&
+          failedDbRow[0].attempts === 1 &&
+          failedDbRow[0].next_retry_at !== null &&
+          Boolean(failedDbRow[0].last_error),
+        "Job transitions to 'failed' with attempts=1 and exponential backoff on provider failure"
+      );
+    } finally {
+      if (origEnvEnabled !== undefined) process.env.RESEND_EMAILS_ENABLED = origEnvEnabled;
+      else delete process.env.RESEND_EMAILS_ENABLED;
+      if (origEnvApiKey !== undefined) process.env.RESEND_API_KEY = origEnvApiKey;
+      else delete process.env.RESEND_API_KEY;
+      setResendClientForTesting(null);
+    }
+
     // Test 17: Provider failure does not reverse payment or order state
     const failedOrderId = crypto.randomUUID();
     const failedJobId = crypto.randomUUID();
@@ -516,11 +622,11 @@ async function runSuite() {
     );
     cleanupLedger.outbox.push(failedJobId);
 
-    // Retry job
+    // Suppressed dispatch does not reverse payment or throw
     const retryRes = await dispatchEmailOutboxJob(failedJobId);
     assertTest(
-      retryRes.ok === true,
-      "Failed email job can be safely retried without affecting payment state"
+      retryRes.skipped === true && retryRes.disabled === true,
+      "Disabled email dispatch safely suppresses without throwing or affecting payment state"
     );
 
     // Test 18: Template escaping prevents HTML injection
@@ -541,7 +647,7 @@ async function runSuite() {
       otp: "987654",
     });
     assertTest(
-      testSendRes.ok === true && testSendRes.skipped === true,
+      testSendRes.ok === false && testSendRes.skipped === true && testSendRes.disabled === true,
       "Emails are suppressed safely when RESEND_EMAILS_ENABLED=false"
     );
 
@@ -556,7 +662,7 @@ async function runSuite() {
       `order_payment:${finalized.id}`
     );
     assertTest(
-      paymentSendRes.ok === true && paymentSendRes.skipped === true,
+      paymentSendRes.ok === false && paymentSendRes.skipped === true && paymentSendRes.disabled === true,
       "sendPaymentConfirmation respects idempotency key and safe local development mode"
     );
 
@@ -642,12 +748,12 @@ async function runSuite() {
     );
 
     const [crashedRow]: any = await conn.execute(
-      "SELECT status FROM email_outbox WHERE id = ?",
+      "SELECT status, sent_at, provider_message_id FROM email_outbox WHERE id = ?",
       [crashedJobId]
     );
     assertTest(
-      crashedRow && (crashedRow[0].status === "sent" || crashedRow[0].status === "failed"),
-      "Stale processing job transitioned cleanly out of 'processing' status"
+      crashedRow && crashedRow[0].status === "pending" && crashedRow[0].sent_at === null && crashedRow[0].provider_message_id === null,
+      "Stale processing job transitioned cleanly out of 'processing' status to 'pending' without fake sent stamp"
     );
 
     // Test 24: Missing API key fails safely when sending is intentionally enabled
