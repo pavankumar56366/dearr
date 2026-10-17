@@ -7,6 +7,8 @@ import {
   updateProduct,
   deactivateProduct,
   ProductValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       product,
     });
@@ -63,6 +65,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     const { id } = await params;
@@ -110,8 +113,11 @@ export async function PATCH(
       stockQuantity: body.stockQuantity !== undefined ? body.stockQuantity : body.stock_quantity,
       isFeatured: body.isFeatured !== undefined ? body.isFeatured : body.is_featured,
       isActive: body.isActive !== undefined ? body.isActive : body.is_active,
+      hasColors: body.hasColors !== undefined ? body.hasColors : body.has_colors,
+      codEnabled: body.codEnabled !== undefined ? body.codEnabled : body.cod_enabled,
       images: body.images,
       variants: body.variants,
+      colors: body.colors,
     });
 
     if (!updated) {
@@ -142,10 +148,11 @@ export async function PATCH(
  * Preserves historical orders and relational references.
  */
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     const { id } = await params;

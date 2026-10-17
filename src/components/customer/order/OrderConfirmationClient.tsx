@@ -21,7 +21,7 @@ import { CheckIcon, ChevronRightIcon, ShieldCheckIcon, AlertCircleIcon, PackageI
 
 export default function OrderConfirmationClient() {
   const searchParams = useSearchParams();
-  const orderNumberParam = searchParams.get("orderNumber") || undefined;
+  const orderNumberParam = searchParams.get("orderNumber") || searchParams.get("orderId") || undefined;
 
   const [order, setOrder] = useState<DemoOrder | null>(null);
   const [hasCheckedState, setHasCheckedState] = useState(false);
@@ -62,7 +62,11 @@ export default function OrderConfirmationClient() {
                   productId: it.productId || "",
                   productName: it.productName,
                   variantName: it.variantName || undefined,
-                  image: "/product-samples/1.jpeg",
+                  colorId: it.colorId || undefined,
+                  colorName: it.colorName || undefined,
+                  colorHex: it.colorHex || undefined,
+                  sku: it.sku || undefined,
+                  image: it.imageUrl || "/product-samples/1.jpeg",
                   unitPrice: it.unitPrice,
                   quantity: it.quantity,
                   discountAmount: it.discountAmount,

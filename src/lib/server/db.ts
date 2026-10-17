@@ -5,6 +5,8 @@ declare global {
   // Allow global connection pool caching in non-production environments across Next.js HMR
   // eslint-disable-next-line no-var
   var _dearrMysqlPool: Pool | undefined;
+  // eslint-disable-next-line no-var
+  var _dearrMysqlTargetKey: string | undefined;
 }
 
 export interface DbConfig {
@@ -21,11 +23,39 @@ export interface DbConfig {
  * Never logs or exposes password values.
  */
 export function getDbConfig(): DbConfig {
-  const host = process.env.DB_HOST?.trim();
-  const port = parseInt(process.env.DB_PORT || "3306", 10);
-  const database = process.env.DB_NAME?.trim();
-  const user = process.env.DB_USER?.trim();
-  const password = process.env.DB_PASSWORD;
+  let host = process.env.DB_HOST?.trim();
+  let port = parseInt(process.env.DB_PORT || "3306", 10);
+  let database = process.env.DB_NAME?.trim();
+  let user = process.env.DB_USER?.trim();
+  let password = process.env.DB_PASSWORD;
+
+  // In development, ensure we read the active .env.local file if values were updated on disk
+  if (process.env.NODE_ENV !== "production") {
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const envPath = path.resolve(process.cwd(), ".env.local");
+      if (fs.existsSync(envPath)) {
+        const content = fs.readFileSync(envPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const eqIdx = trimmed.indexOf("=");
+          if (eqIdx > 0) {
+            const k = trimmed.slice(0, eqIdx).trim();
+            const v = trimmed.slice(eqIdx + 1).trim();
+            if (k === "DB_HOST") host = v;
+            if (k === "DB_PORT") port = parseInt(v, 10);
+            if (k === "DB_NAME") database = v;
+            if (k === "DB_USER") user = v;
+            if (k === "DB_PASSWORD") password = v;
+          }
+        }
+      }
+    } catch (_) {
+      // Fallback to existing process.env
+    }
+  }
 
   const missing: string[] = [];
   if (!host) missing.push("DB_HOST");
@@ -55,11 +85,19 @@ export function getDbConfig(): DbConfig {
  * In development, caches on globalThis to prevent pool exhaustion across Next.js hot reloads.
  */
 export function getDbPool(): Pool {
-  if (globalThis._dearrMysqlPool) {
+  const config = getDbConfig();
+  const targetKey = `${config.host}:${config.port}:${config.database}:${config.user}`;
+
+  if (globalThis._dearrMysqlPool && globalThis._dearrMysqlTargetKey === targetKey) {
     return globalThis._dearrMysqlPool;
   }
 
-  const config = getDbConfig();
+  if (globalThis._dearrMysqlPool) {
+    try {
+      globalThis._dearrMysqlPool.end();
+    } catch (_) {}
+    globalThis._dearrMysqlPool = undefined;
+  }
 
   const pool = mysql.createPool({
     host: config.host,
@@ -77,6 +115,7 @@ export function getDbPool(): Pool {
   });
 
   globalThis._dearrMysqlPool = pool;
+  globalThis._dearrMysqlTargetKey = targetKey;
   return pool;
 }
 

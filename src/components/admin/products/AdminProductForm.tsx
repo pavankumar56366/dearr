@@ -25,6 +25,10 @@ import {
 } from "./AdminProductImageUpload";
 import { AdminProductVariants } from "./AdminProductVariants";
 import { AdminProductSummary } from "./AdminProductSummary";
+import {
+  AdminProductColors,
+  type AdminProductColor,
+} from "./AdminProductColors";
 
 export interface AdminProductFormProps {
   mode?: "create" | "edit";
@@ -203,12 +207,55 @@ export function AdminProductForm({
   const [isFeatured, setIsFeatured] = useState(
     initialProduct ? initialProduct.isFeatured : false
   );
+  const [codEnabled, setCodEnabled] = useState<boolean>(
+    initialProduct && initialProduct.codEnabled !== undefined
+      ? Boolean(initialProduct.codEnabled)
+      : true
+  );
 
   // Images & Variants State
   const [images, setImages] = useState<ProductImageItem[]>(initialImages);
   const [variants, setVariants] = useState<SampleProductVariant[]>(
     initialProduct?.variants || []
   );
+
+  // Color Variants State
+  const [hasColors, setHasColors] = useState<boolean>(
+    Boolean(initialProduct?.hasColors)
+  );
+  const [colors, setColors] = useState<AdminProductColor[]>(() => {
+    if (initialProduct?.colors && initialProduct.colors.length > 0) {
+      return initialProduct.colors.map((c, cIdx) => ({
+        id: c.id,
+        name: c.name,
+        hex: c.hex,
+        sku: c.sku || "",
+        stock: Number(c.stock ?? 0),
+        priceOverride: c.priceOverride ?? null,
+        isActive: c.isActive !== false,
+        images: Array.isArray(c.images)
+          ? c.images.map((imgUrl, imgIdx) => ({
+              id: `color-img-${cIdx}-${imgIdx}`,
+              url: typeof imgUrl === "string" ? imgUrl : (imgUrl as any).url || (imgUrl as any).storagePath,
+              name: `${c.name} - ${imgIdx + 1}`,
+              isPrimary: imgIdx === 0,
+              isExisting: true,
+            }))
+          : [],
+      }));
+    }
+    return [];
+  });
+  const [sharedImages, setSharedImages] = useState<ProductImageItem[]>(() => {
+    return initialImages;
+  });
+  const [enablePriceOverrides, setEnablePriceOverrides] = useState<boolean>(() => {
+    return Boolean(
+      initialProduct?.colors?.some(
+        (c) => c.priceOverride !== null && c.priceOverride !== undefined
+      )
+    );
+  });
 
   // UI Control States
   const [errors, setErrors] = useState<FormErrors>({});
@@ -267,6 +314,8 @@ export function AdminProductForm({
         compareAtPrice.trim() !== "" ||
         images.length > 0 ||
         variants.length > 0 ||
+        hasColors ||
+        colors.length > 0 ||
         sku.trim() !== "" ||
         stockQuantity !== "10"
       );
@@ -299,6 +348,8 @@ export function AdminProductForm({
       care.trim() !== origCare ||
       isActive !== initialProduct.isActive ||
       isFeatured !== initialProduct.isFeatured ||
+      hasColors !== Boolean(initialProduct.hasColors) ||
+      colors.length !== (initialProduct.colors?.length || 0) ||
       images.length !== initialImages.length ||
       images.some(
         (img, idx) =>
@@ -325,6 +376,8 @@ export function AdminProductForm({
     care,
     isActive,
     isFeatured,
+    hasColors,
+    colors,
     images,
     initialImages,
     variants,
@@ -468,6 +521,33 @@ export function AdminProductForm({
       newErrors.category = "Please select a catalog category.";
     }
 
+    if (hasColors) {
+      if (colors.length === 0) {
+        newErrors.title = "At least one color variant is required when multiple colors are enabled.";
+      }
+      const names = new Set<string>();
+      for (const c of colors) {
+        if (!c.name.trim()) {
+          newErrors.title = "All color variants must have a name.";
+          break;
+        }
+        const lower = c.name.trim().toLowerCase();
+        if (names.has(lower)) {
+          newErrors.title = `Duplicate color name "${c.name.trim()}". Color names must be unique.`;
+          break;
+        }
+        names.add(lower);
+        if (!/^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(c.hex)) {
+          newErrors.title = `Invalid hex code "${c.hex}" for color "${c.name}".`;
+          break;
+        }
+        if (typeof c.stock !== "number" || isNaN(c.stock) || c.stock < 0) {
+          newErrors.title = `Color "${c.name}" must have stock quantity of 0 or greater.`;
+          break;
+        }
+      }
+    }
+
     setErrors(newErrors);
     setTouched({
       title: true,
@@ -504,18 +584,11 @@ export function AdminProductForm({
     }
 
     try {
-      // 1. Process and upload any new image files
-      const finalImages: Array<{
-        storagePath: string;
-        altText?: string | null;
-        sortOrder: number;
-      }> = [];
-
-      for (let i = 0; i < images.length; i++) {
-        const img = images[i];
-        let storagePath = img.url;
-
-        // If the item has a fresh File object, upload it to the server
+      // Helper to upload single ProductImageItem
+      const uploadImageItem = async (
+        img: ProductImageItem,
+        fallbackName: string
+      ): Promise<string> => {
         if (img.file instanceof File) {
           const formData = new FormData();
           formData.append("file", img.file);
@@ -527,22 +600,101 @@ export function AdminProductForm({
 
           if (!uploadRes.ok) {
             const uploadErr = await uploadRes.json().catch(() => null);
-            throw new Error(uploadErr?.error || `Failed to upload image "${img.name}"`);
+            throw new Error(
+              uploadErr?.error || `Failed to upload image "${img.name || fallbackName}"`
+            );
           }
 
           const uploadData = await uploadRes.json();
           if (uploadData.ok && uploadData.image?.url) {
-            storagePath = uploadData.image.url;
-          } else {
-            throw new Error(`Failed to upload image "${img.name}"`);
+            return uploadData.image.url;
           }
+          throw new Error(`Failed to upload image "${img.name || fallbackName}"`);
+        }
+        return img.url;
+      };
+
+      const finalImages: Array<{
+        storagePath: string;
+        altText?: string | null;
+        sortOrder: number;
+        colorId?: string | null;
+      }> = [];
+
+      let finalColorsPayload: any[] = [];
+      let parsedStock = parseInt(stockQuantity, 10) || 0;
+
+      if (hasColors) {
+        if (colors.length === 0) {
+          throw new Error("Please add at least one color variant or disable multiple colors.");
         }
 
-        finalImages.push({
-          storagePath,
-          altText: img.name || title.trim(),
-          sortOrder: img.isPrimary ? 0 : i + 1,
-        });
+        // 1a. Upload Shared Images
+        const effectiveShared = sharedImages.length > 0 ? sharedImages : images;
+        for (let i = 0; i < effectiveShared.length; i++) {
+          const img = effectiveShared[i];
+          const storagePath = await uploadImageItem(img, `${title.trim()} - Shared Photo ${i + 1}`);
+          finalImages.push({
+            storagePath,
+            altText: img.name || title.trim(),
+            sortOrder: img.isPrimary ? 0 : i + 1,
+            colorId: null,
+          });
+        }
+
+        // 1b. Upload Color-specific Images & construct colors
+        let totalVariantStock = 0;
+        for (let cIdx = 0; cIdx < colors.length; cIdx++) {
+          const col = colors[cIdx];
+          const colorId = col.id || crypto.randomUUID();
+          const colStock = Number(col.stock) || 0;
+          totalVariantStock += colStock;
+
+          for (let imgIdx = 0; imgIdx < col.images.length; imgIdx++) {
+            const img = col.images[imgIdx];
+            const storagePath = await uploadImageItem(
+              img,
+              `${title.trim()} - ${col.name} Photo ${imgIdx + 1}`
+            );
+            finalImages.push({
+              storagePath,
+              altText: img.name || `${title.trim()} - ${col.name}`,
+              sortOrder: img.isPrimary ? 0 : imgIdx + 1,
+              colorId: colorId,
+            });
+          }
+
+          finalColorsPayload.push({
+            id: colorId,
+            name: col.name.trim(),
+            hex: col.hex.trim(),
+            sku: col.sku?.trim() || null,
+            stock: colStock,
+            priceOverride:
+              enablePriceOverrides &&
+              col.priceOverride !== null &&
+              col.priceOverride !== undefined &&
+              !isNaN(Number(col.priceOverride))
+                ? Number(col.priceOverride)
+                : null,
+            isActive: col.isActive !== false,
+            sortOrder: cIdx,
+          });
+        }
+
+        parsedStock = totalVariantStock;
+      } else {
+        // Single SKU legacy flow
+        for (let i = 0; i < images.length; i++) {
+          const img = images[i];
+          const storagePath = await uploadImageItem(img, `${title.trim()} - Photo ${i + 1}`);
+          finalImages.push({
+            storagePath,
+            altText: img.name || title.trim(),
+            sortOrder: img.isPrimary ? 0 : i + 1,
+            colorId: null,
+          });
+        }
       }
 
       // Ensure proper sorting by sortOrder and re-index sequentially
@@ -572,7 +724,6 @@ export function AdminProductForm({
       // 4. Parse Pricing & Inventory
       const parsedPrice = parseFloat(price);
       const parsedCompareAt = compareAtPrice.trim() ? parseFloat(compareAtPrice) : null;
-      const parsedStock = parseInt(stockQuantity, 10) || 0;
 
       // 5. Send Real API Request
       let res: Response;
@@ -588,11 +739,11 @@ export function AdminProductForm({
           categoryId: categoryId,
           isActive: isActive,
           isFeatured: isFeatured,
+          hasColors: hasColors,
+          codEnabled: codEnabled,
+          colors: hasColors ? finalColorsPayload : [],
+          images: finalImages,
         };
-
-        if (finalImages.length > 0) {
-          patchPayload.images = finalImages;
-        }
 
         if (formattedVariants.length > 0) {
           patchPayload.variants = formattedVariants;
@@ -615,6 +766,9 @@ export function AdminProductForm({
           categoryId: categoryId,
           isActive: isActive,
           isFeatured: isFeatured,
+          hasColors: hasColors,
+          codEnabled: codEnabled,
+          colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
           variants: formattedVariants,
         };
@@ -684,6 +838,9 @@ export function AdminProductForm({
           process: "High-Resolution FDM 3D Printing",
         },
         variants: returnedProduct.variants?.length > 0 ? returnedProduct.variants : undefined,
+        hasColors: Boolean(returnedProduct.hasColors ?? returnedProduct.has_colors ?? hasColors),
+        colors: returnedProduct.colors || (hasColors ? finalColorsPayload : undefined),
+        codEnabled: Boolean(returnedProduct.codEnabled ?? returnedProduct.cod_enabled ?? codEnabled),
       };
 
       setSavedProduct(mappedSuccessProduct);
@@ -712,6 +869,7 @@ export function AdminProductForm({
     setVariants([]);
     setIsActive(true);
     setIsFeatured(false);
+    setCodEnabled(true);
     setErrors({});
     setTouched({});
     setSavedProduct(null);
@@ -726,8 +884,13 @@ export function AdminProductForm({
     }
   };
 
-  const primaryImage =
-    images.find((i) => i.isPrimary)?.url || images[0]?.url || null;
+  const primaryImage = hasColors
+    ? colors.find((c) => c.images.length > 0)?.images[0]?.url ||
+      sharedImages[0]?.url ||
+      images.find((i) => i.isPrimary)?.url ||
+      images[0]?.url ||
+      null
+    : images.find((i) => i.isPrimary)?.url || images[0]?.url || null;
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 pb-16">
@@ -998,14 +1161,45 @@ export function AdminProductForm({
                 2. Visual Gallery
               </h2>
               <span className="text-[10px] text-neutral-400 font-medium">
-                {isEdit ? "Manage Existing & New Images" : "Upload Product Gallery"}
+                {hasColors ? "Shared Photos (Shown for all colors)" : isEdit ? "Manage Existing & New Images" : "Upload Product Gallery"}
               </span>
             </div>
 
             <AdminProductImageUpload
               images={images}
-              onChange={(updated) => setImages(updated)}
+              onChange={(updated) => {
+                setImages(updated);
+                setSharedImages(updated);
+              }}
               error={errors.images}
+            />
+          </div>
+
+          {/* Section: Product Colors & Swatches */}
+          <div className="bg-surface rounded-2xl border border-neutral-200/90 shadow-xs p-5 sm:p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-100">
+              <h2 className="text-sm font-bold uppercase tracking-wider text-neutral-800">
+                Color Variants &amp; Galleries
+              </h2>
+              <span className="text-[10px] text-neutral-400 font-medium">
+                Multi-Color 3D Printing
+              </span>
+            </div>
+
+            <AdminProductColors
+              hasColors={hasColors}
+              onToggleHasColors={(enabled) => setHasColors(enabled)}
+              colors={colors}
+              onChangeColors={(updated) => setColors(updated)}
+              sharedImages={sharedImages}
+              onChangeSharedImages={(updated) => {
+                setSharedImages(updated);
+                setImages(updated);
+              }}
+              enablePriceOverrides={enablePriceOverrides}
+              onToggleEnablePriceOverrides={(enabled) => setEnablePriceOverrides(enabled)}
+              basePrice={parseFloat(price) || 0}
+              baseSku={sku.trim()}
             />
           </div>
 
@@ -1470,6 +1664,40 @@ export function AdminProductForm({
                   />
                 </button>
               </div>
+
+              {/* COD Eligibility Toggle */}
+              <div className="flex items-start justify-between p-3 rounded-xl border border-neutral-200 bg-white">
+                <div className="space-y-0.5 pr-4">
+                  <label
+                    htmlFor="toggle-cod"
+                    className="text-xs font-bold text-neutral-800 cursor-pointer"
+                  >
+                    Cash on Delivery (COD) Eligibility
+                  </label>
+                  <p className="text-[11px] text-neutral-500">
+                    {codEnabled
+                      ? "Cash on Delivery is enabled for this product. Customers can choose COD if the global store setting permits it."
+                      : "Cash on Delivery is disabled for this product. Any order containing this item will require online prepaid payment."}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  id="toggle-cod"
+                  role="switch"
+                  aria-label="Cash on Delivery Eligibility"
+                  aria-checked={codEnabled}
+                  onClick={() => setCodEnabled(!codEnabled)}
+                  className={`w-12 h-7 flex items-center rounded-full p-1 transition-colors cursor-pointer shrink-0 ${
+                    codEnabled ? "bg-primary" : "bg-neutral-300"
+                  }`}
+                >
+                  <div
+                    className={`bg-white w-5 h-5 rounded-full shadow-md transform transition-transform ${
+                      codEnabled ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1549,16 +1777,22 @@ export function AdminProductForm({
             category={category}
             price={price.trim() ? parseFloat(price) : null}
             compareAtPrice={compareAtPrice.trim() ? parseFloat(compareAtPrice) : null}
-            stockQuantity={stockQuantity.trim() ? parseInt(stockQuantity, 10) : null}
+            stockQuantity={
+              hasColors
+                ? colors.reduce((acc, c) => acc + (Number(c.stock) || 0), 0)
+                : stockQuantity.trim()
+                ? parseInt(stockQuantity, 10)
+                : null
+            }
             sku={sku}
             material={material === "Other (Custom)" ? customMaterial : material}
             finish={finish}
-            color={color}
+            color={hasColors ? `${colors.length} Color(s)` : color}
             dimensions={dimensions}
             primaryImage={primaryImage}
             isActive={isActive}
             isFeatured={isFeatured}
-            variantsCount={variants.length}
+            variantsCount={hasColors ? colors.length : variants.length}
           />
         </div>
       </form>

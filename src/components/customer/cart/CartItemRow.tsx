@@ -91,6 +91,22 @@ export default function CartItemRow({
                 </span>
               )}
 
+              {/* Selected Color */}
+              {item.colorName && (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span
+                    className="w-3.5 h-3.5 rounded-full border border-black/15 shadow-xs shrink-0"
+                    style={{ backgroundColor: item.colorHex || "#6366F1" }}
+                  />
+                  <span
+                    className="text-[11px] font-medium"
+                    style={{ color: "var(--color-neutral-600)" }}
+                  >
+                    Color: <span className="font-semibold text-neutral-900">{item.colorName}</span>
+                  </span>
+                </div>
+              )}
+
               {/* Out of Stock Warning */}
               {isOutOfStock && (
                 <span

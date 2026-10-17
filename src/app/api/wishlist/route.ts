@@ -5,6 +5,8 @@ import {
   getWishlistForUser,
   clearWishlistForUser,
   WishlistValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -24,7 +26,7 @@ export async function GET() {
     const user = await requireUser();
     const wishlist = await getWishlistForUser(user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       wishlist: {
         id: wishlist.id,
@@ -34,7 +36,7 @@ export async function GET() {
     });
   } catch (err: unknown) {
     if (err instanceof WishlistValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );
@@ -47,18 +49,19 @@ export async function GET() {
  * DELETE /api/wishlist
  * Clears all items from the currently authenticated customer's wishlist.
  */
-export async function DELETE() {
+export async function DELETE(request: Request) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
     await clearWishlistForUser(user.id);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       message: "Wishlist cleared successfully",
     });
   } catch (err: unknown) {
     if (err instanceof WishlistValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

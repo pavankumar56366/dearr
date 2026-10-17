@@ -74,11 +74,14 @@ export function AdminOrderDetails({
                 productId: it.productId || "",
                 name: it.productName,
                 slug: "",
-                image: "/product-samples/1.jpeg",
+                image: it.imageUrl || "/product-samples/1.jpeg",
                 unitPrice: it.unitPrice,
                 quantity: it.quantity,
                 lineTotal: it.lineTotal,
                 variantName: it.variantName || undefined,
+                colorName: it.colorName || undefined,
+                colorHex: it.colorHex || undefined,
+                sku: it.sku || undefined,
               })),
               subtotal: o.subtotal,
               discountAmount: o.discountAmount,
@@ -100,6 +103,9 @@ export function AdminOrderDetails({
               },
               createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
               updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
+              addressChangeCount: Number(o.addressChangeCount || 0),
+              addressEditDeadline: o.addressEditDeadline ? (typeof o.addressEditDeadline === "string" ? o.addressEditDeadline : new Date(o.addressEditDeadline).toISOString()) : null,
+              addressHistory: o.addressHistory || [],
             };
             setOrder(mappedOrder);
             setTargetStatus(mappedOrder.orderStatus);
@@ -354,6 +360,34 @@ export function AdminOrderDetails({
         </div>
       </div>
 
+      {/* Warehouse Address Change Dispatch Notice */}
+      {Boolean(
+        order.addressChangeCount &&
+        order.addressChangeCount > 0 &&
+        (order.orderStatus === "pending" ||
+          order.orderStatus === "confirmed" ||
+          order.orderStatus === "processing")
+      ) && (
+        <div className="p-4 rounded-2xl bg-amber-50/90 border-2 border-amber-400 text-amber-950 flex items-start gap-3.5 shadow-sm">
+          <AlertCircleIcon size={22} className="text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-bold text-sm text-amber-950">
+                Warehouse Dispatch Alert: Delivery Address Modified
+              </span>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-200 text-amber-900 border border-amber-300">
+                Action Required Before Dispatch
+              </span>
+            </div>
+            <p className="text-amber-900 leading-relaxed">
+              The customer modified their delivery address after this order was placed ({order.addressChangeCount ?? 0} change{(order.addressChangeCount ?? 0) > 1 ? "s" : ""}).
+              Please ensure all printed parcel labels, packing slips, and courier manifest entries
+              use the updated shipping address shown in the Shipping Address card below before marking the order as Shipped.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Fulfillment Progress Stepper */}
       {order.orderStatus === "cancelled" ? (
         <div className="p-4 rounded-2xl bg-red-50/60 border border-red-200 flex items-center gap-3 text-red-900">
@@ -461,8 +495,17 @@ export function AdminOrderDetails({
                           Variant: {item.variantName}
                         </div>
                       )}
+                      {(item as any).colorName && (
+                        <div className="flex items-center gap-1.5 text-[11px] text-neutral-600 font-medium">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full border border-black/15 shadow-xs shrink-0"
+                            style={{ backgroundColor: (item as any).colorHex || "#6366F1" }}
+                          />
+                          <span>Color: <strong className="text-neutral-800">{(item as any).colorName}</strong></span>
+                        </div>
+                      )}
                       <div className="text-[11px] text-neutral-400 font-mono">
-                        SKU: {item.productId}
+                        SKU: {(item as any).sku || item.productId}
                       </div>
                     </div>
                   </div>
@@ -584,6 +627,11 @@ export function AdminOrderDetails({
                 <MapPinIcon size={16} className="text-primary" />
                 <span>Shipping Address</span>
               </h3>
+              {Boolean(order.addressChangeCount && order.addressChangeCount > 0) && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                  Address changed ({order.addressChangeCount})
+                </span>
+              )}
             </div>
 
             <div className="text-xs leading-relaxed text-neutral-700 space-y-1">
@@ -602,6 +650,74 @@ export function AdminOrderDetails({
                 {order.shippingAddress.country}
               </div>
             </div>
+
+            {/* Address Modification Policy & Lock Info */}
+            <div className="pt-2 border-t border-neutral-100 text-[11px] text-neutral-500 space-y-1">
+              {order.orderStatus === "shipped" || order.orderStatus === "delivered" ? (
+                <div className="flex items-center gap-1.5 text-neutral-600 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-neutral-400" />
+                  <span>Address locked (Order fulfilled)</span>
+                </div>
+              ) : order.addressEditDeadline ? (
+                <div className="flex items-center gap-1.5">
+                  <ClockIcon size={12} className="text-neutral-400" />
+                  <span>
+                    Deadline:{" "}
+                    {new Date(order.addressEditDeadline).toLocaleString("en-IN", {
+                      timeZone: "Asia/Kolkata",
+                      day: "numeric",
+                      month: "short",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+              ) : null}
+            </div>
+
+            {/* Address Change Audit History */}
+            {Boolean(order.addressHistory && order.addressHistory.length > 0) && (
+              <div className="pt-2 border-t border-neutral-100 space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-500 block">
+                  Change History ({order.addressHistory?.length})
+                </span>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {order.addressHistory?.map((h: any, idx: number) => (
+                    <div
+                      key={h.id || idx}
+                      className="p-2.5 rounded-xl bg-canvas border border-neutral-200/80 text-[11px] space-y-1"
+                    >
+                      <div className="flex items-center justify-between text-neutral-500 text-[10px] font-medium">
+                        <span className="capitalize font-semibold text-neutral-800">
+                          By {h.changedBy || "Customer"}
+                        </span>
+                        <span>
+                          {new Date(h.changedAt).toLocaleString("en-IN", {
+                            timeZone: "Asia/Kolkata",
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <div className="text-neutral-600">
+                        <span className="text-neutral-400">Previous: </span>
+                        {h.oldAddress?.shippingAddressLine1 || h.oldAddress?.addressLine1},{" "}
+                        {h.oldAddress?.shippingCity || h.oldAddress?.city} —{" "}
+                        {h.oldAddress?.shippingPostalCode || h.oldAddress?.postalCode}
+                      </div>
+                      <div className="text-neutral-900 font-medium">
+                        <span className="text-primary-dark">Updated: </span>
+                        {h.newAddress?.shippingAddressLine1 || h.newAddress?.addressLine1},{" "}
+                        {h.newAddress?.shippingCity || h.newAddress?.city} —{" "}
+                        {h.newAddress?.shippingPostalCode || h.newAddress?.postalCode}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Payment & Gateway Reconciliation */}

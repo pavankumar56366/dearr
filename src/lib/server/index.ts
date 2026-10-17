@@ -15,6 +15,7 @@ export {
   updateProfile,
   updateCustomerProfile,
   updateProfilePassword,
+  incrementTokenVersion,
   type UserProfile,
   type UserProfileWithPassword,
   type CreateProfileInput,
@@ -40,6 +41,7 @@ export {
   requireUser,
   requireAdmin,
   assertOwnerOrAdmin,
+  assertSafeOrigin,
   handleAuthError,
   type SessionPayload,
 } from "./auth";
@@ -64,8 +66,11 @@ export {
   ProductValidationError,
   generateSlug,
   validateSlug,
+  validateHexColor,
+  generateColorSlug,
   toPublicUrl,
   toProductImage,
+  toProductColor,
   findProductById,
   findProductBySlug,
   getRelatedProducts,
@@ -77,10 +82,13 @@ export {
   type Product,
   type ProductImage,
   type ProductVariant,
+  type ProductColor,
   type ProductCategoryInfo,
   type ProductListFilters,
   type CreateProductInput,
   type UpdateProductInput,
+  type CreateProductColorInput,
+  type CreateProductImageInput,
 } from "./product";
 
 export {
@@ -146,11 +154,13 @@ export {
   getOrCreateActiveCartForUser,
   getCartForUser,
   addCartItem,
+  addCartItemsBatch,
   updateCartItemQuantity,
   removeCartItem,
   clearCartForUser,
   type CartProductSummary,
   type CartVariantSummary,
+  type CartColorSummary,
   type CartItemPricing,
   type CartItemStock,
   type CartItemRecord,
@@ -162,12 +172,15 @@ export {
 export {
   OrderValidationError,
   createOrderFromCart,
+  createOrderFromBuyNow,
   getOrderById,
   listCustomerOrders,
   listAllOrders,
   updateOrderStatus,
   updatePaymentStatus,
   cancelOrder,
+  validateShippingAddress,
+  generateOrderNumber,
   type OrderStatus,
   type PaymentStatus,
   type OrderItemSnapshot,
@@ -222,7 +235,6 @@ export {
   type SafeRazorpayConfig,
 } from "./razorpay";
 
-
 export {
   getGoogleOAuthConfig,
   generateOAuthState,
@@ -256,5 +268,156 @@ export {
 export {
   getStoreSettings,
   updateStoreSettings,
+  checkRateLimit,
+  clearRateLimit,
 } from "./settings";
 
+export {
+  resolveReportingPeriod,
+  getOrderSummaryMetrics,
+  mapToCanonicalBucket,
+  formatKolkataSqlDateTime,
+  formatKolkataDisplay,
+  getNowInAsiaKolkata,
+  kolkataToUtcDate,
+  PLACED_ORDER_SQL_PREDICATE,
+  REVENUE_ELIGIBLE_SQL_PREDICATE,
+  type ReportingPeriod,
+  type ResolvedReportingPeriod,
+  type OrderDashboardMetrics,
+  type CanonicalMetricBucket,
+  AnalyticsValidationError,
+} from "./order-analytics";
+
+export {
+  createCheckoutAttempt,
+  createCheckoutAttemptFromCart,
+  createBuyNowCheckoutAttempt,
+  releaseCheckoutAttemptReservations,
+  finalizeOrderFromAttempt,
+  getCheckoutAttemptById,
+  getCheckoutAttemptByProviderOrder,
+  updateCheckoutAttemptProviderOrder,
+  markAttemptConverted,
+  cleanupCheckoutAttempts,
+  reconcileLatePaymentAttempt,
+  ATTEMPT_EXPIRY_MINUTES,
+  ATTEMPT_RETENTION_DAYS,
+  type CheckoutAttemptRecord,
+  type CheckoutAttemptStatus,
+  type CreateCheckoutAttemptInput,
+  type BuyNowItemInput,
+  CheckoutAttemptError,
+  markAttemptAbandoned,
+  markAttemptFailed,
+  recordRecoveryShown,
+  getAttemptRecoveryStatus,
+  ABANDONED_ATTEMPT_RETENTION_DAYS,
+} from "./checkout-attempt";
+
+export {
+  sanitizeCsvCell,
+  getExportFilename,
+  generateSummaryCsv,
+  streamOrdersListCsv,
+  recordExportAudit,
+  resolveOrderExportAmounts,
+  type ExportType,
+} from "./order-export";
+
+export {
+  recordInternalEvent,
+  getInternalEventsForAttempt,
+  type InternalEventType,
+  type RecordInternalEventInput,
+  type InternalEventRecord,
+} from "./events";
+
+export {
+  recordProductPriceChange,
+  recordPriceChange,
+  getProductPriceHistory,
+  type RecordPriceChangeInput,
+  type ProductPriceHistoryRecord,
+} from "./price-history";
+
+export {
+  getLowerPricedAlternatives,
+  findLowerPricedAlternatives,
+  swapCartItemForAlternative,
+  AlternativesError,
+  AlternativesConflictError,
+  type AlternativeItem,
+  type SwapCartItemInput,
+} from "./alternatives";
+
+export {
+  submitCheckoutFeedback,
+  getFeedbackForAttempt,
+  getAttemptFeedback,
+  sanitizeFeedbackComment,
+  FeedbackValidationError,
+  type SubmitFeedbackInput,
+  type CheckoutFeedbackRecord,
+} from "./checkout-feedback";
+
+export {
+  recordNotificationConsent,
+  withdrawNotificationConsent,
+  subscribeNotificationConsent,
+  getNotificationConsentsForUser,
+  unsubscribeNotificationConsent,
+  getConsentsForAttempt,
+  ConsentValidationError,
+  type ConsentChannel,
+  type RecordConsentInput,
+  type SubscribeNotificationConsentInput,
+  type NotificationConsentRecord,
+} from "./notification-consent";
+
+export {
+  getAbandonmentSummaryMetrics,
+  getRecentAbandonedCheckouts,
+  listRecentAbandonedCheckouts,
+  generateAbandonmentCsv,
+  streamAbandonmentCsv,
+  type AbandonmentSummaryMetrics,
+  type AbandonedCheckoutRow,
+} from "./abandonment-analytics";
+
+export {
+  withPrivateCacheHeaders,
+  jsonPrivate,
+  PRIVATE_CACHE_CONTROL,
+} from "./response";
+
+export {
+  sendPasswordResetOtp,
+  sendPaymentConfirmation,
+  queueEmailOutboxJob,
+  dispatchEmailOutboxJob,
+  retryPendingEmailOutboxJobs,
+  isEmailSendingEnabled,
+  setResendClientForTesting,
+  escapeHtml,
+  renderPasswordResetOtpTemplate,
+  renderPaymentConfirmationTemplate,
+  DEFAULT_SENDER,
+  DEFAULT_SUPPORT_EMAIL,
+  type TransactionalEmailType,
+  type PasswordResetEmailParams,
+  type PaymentConfirmationEmailParams,
+  type EmailDispatchResult,
+} from "./email";
+
+export {
+  requestPasswordResetOtp,
+  verifyPasswordResetOtp,
+  confirmPasswordReset,
+  checkAndIncrementAccountDailyOtpLimit,
+  OtpError,
+  OTP_EXPIRY_MINUTES,
+  MAX_VERIFICATION_ATTEMPTS,
+  MAX_DAILY_OTP_REQUESTS_PER_ACCOUNT,
+  GENERIC_OTP_PUBLIC_RESPONSE,
+} from "./otp";

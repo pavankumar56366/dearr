@@ -29,7 +29,12 @@ export interface CartItem {
   stockQuantity: number;
   variantId?: string;
   variantName?: string;
+  colorId?: string;
+  colorName?: string;
+  colorHex?: string;
+  sku?: string;
   isActive: boolean;
+  codEnabled?: boolean;
 }
 
 export interface CartTotalsState {
@@ -50,7 +55,16 @@ interface CartContextType {
   addItem: (
     product: SampleProduct | { id: string; name?: string; slug?: string; price?: number },
     quantity?: number,
-    variant?: SampleProductVariant | { id: string; name?: string; price?: number | null; stockQuantity?: number }
+    variant?: SampleProductVariant | { id: string; name?: string; price?: number | null; stockQuantity?: number },
+    color?: { id: string; name: string; hex: string; sku?: string | null; image?: string | null }
+  ) => Promise<void>;
+  addBatchItems: (
+    batch: Array<{
+      product: SampleProduct | { id: string; name?: string; slug?: string; price?: number };
+      quantity: number;
+      variant?: { id: string; name?: string; price?: number | null; stockQuantity?: number };
+      color?: { id: string; name: string; hex: string; sku?: string | null; image?: string | null };
+    }>
   ) => Promise<void>;
   updateQuantity: (itemId: string, newQuantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
@@ -68,13 +82,14 @@ function mapApiCartItem(item: any): CartItem {
       : item.pricing?.unitPrice ?? 0;
 
   const originalPrice = item.pricing?.originalUnitPrice ?? finalPrice;
+  const resolvedImage = item.color?.image || getProductPrimaryImage(item.product);
 
   return {
     id: item.id,
     productId: item.productId,
     slug: item.product?.slug || `product-${item.productId}`,
     name: item.product?.name || "Product",
-    image: getProductPrimaryImage(item.product),
+    image: resolvedImage,
     category: item.product?.category || "3D Printing",
     price: finalPrice,
     compareAtPrice: originalPrice > finalPrice ? originalPrice : null,
@@ -82,11 +97,17 @@ function mapApiCartItem(item: any): CartItem {
     stockQuantity: Number(item.stock?.stockQuantity ?? 0),
     variantId: item.variantId || undefined,
     variantName: item.variant?.name || undefined,
+    colorId: item.colorId || item.color?.id || undefined,
+    colorName: item.color?.name || undefined,
+    colorHex: item.color?.hex || undefined,
+    sku: item.color?.sku || item.variant?.sku || undefined,
     isActive: Boolean(
       item.product?.isActive &&
+        (item.color ? item.color.isActive : true) &&
         (item.variant ? item.variant.isActive : true) &&
         item.stock?.available
     ),
+    codEnabled: Boolean(item.product?.codEnabled !== undefined ? item.product.codEnabled : true),
   };
 }
 
@@ -191,6 +212,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
                     body: JSON.stringify({
                       productId,
                       variantId: guestItem.variantId || null,
+                      colorId: guestItem.colorId || null,
                       quantity: guestItem.quantity || 1,
                     }),
                   });
@@ -249,7 +271,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     async (
       product: SampleProduct | { id: string; name?: string; slug?: string; price?: number },
       quantity: number = 1,
-      variant?: SampleProductVariant | { id: string; name?: string; price?: number | null; stockQuantity?: number }
+      variant?: SampleProductVariant | { id: string; name?: string; price?: number | null; stockQuantity?: number },
+      color?: { id: string; name: string; hex: string; sku?: string | null; image?: string | null }
     ) => {
       if (isLoggedIn) {
         try {
@@ -260,6 +283,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             body: JSON.stringify({
               productId: product.id,
               variantId: variant?.id || null,
+              colorId: color?.id || null,
               quantity,
             }),
           });
@@ -281,7 +305,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const sampleProd = product as SampleProduct;
       const effectiveStock = variant?.stockQuantity ?? sampleProd.stockQuantity ?? 10;
       const effectivePrice = variant?.price ?? sampleProd.price ?? 0;
-      const variantKey = variant ? variant.id : "default";
+      const variantKey = color ? `color-${color.id}` : (variant ? variant.id : "default");
       const compositeId = `${product.id}-${variantKey}`;
 
       setItems((prev) => {
@@ -299,7 +323,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           productId: product.id,
           slug: sampleProd.slug || `product-${product.id}`,
           name: sampleProd.name || "Product",
-          image: sampleProd.image || "/product-samples/1.jpeg",
+          image: color?.image || sampleProd.image || "/product-samples/1.jpeg",
           category: sampleProd.category || "3D Printing",
           price: effectivePrice,
           compareAtPrice: sampleProd.compareAtPrice ?? null,
@@ -307,12 +331,65 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           stockQuantity: effectiveStock,
           variantId: variant?.id,
           variantName: variant?.name,
+          colorId: color?.id,
+          colorName: color?.name,
+          colorHex: color?.hex,
+          sku: color?.sku || (variant as any)?.sku,
           isActive: true,
+          codEnabled: sampleProd.codEnabled !== undefined ? Boolean(sampleProd.codEnabled) : true,
         };
         return [newItem, ...prev];
       });
     },
     [isLoggedIn]
+  );
+
+  const addBatchItems = useCallback(
+    async (
+      batch: Array<{
+        product: SampleProduct | { id: string; name?: string; slug?: string; price?: number };
+        quantity: number;
+        variant?: { id: string; name?: string; price?: number | null; stockQuantity?: number };
+        color?: { id: string; name: string; hex: string; sku?: string | null; image?: string | null };
+      }>
+    ) => {
+      if (!batch || batch.length === 0) return;
+
+      if (isLoggedIn) {
+        try {
+          const res = await fetch("/api/cart/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              items: batch.map((it) => ({
+                productId: it.product.id,
+                variantId: it.variant?.id || null,
+                colorId: it.color?.id || null,
+                quantity: it.quantity,
+              })),
+            }),
+          });
+          const data = await res.json();
+          if (res.ok && data.ok && data.cart) {
+            setItems((data.cart.items || []).map(mapApiCartItem));
+            setServerTotals(data.cart.totals);
+            return;
+          }
+          if (data?.error) {
+            throw new Error(data.error);
+          }
+        } catch (err: any) {
+          throw err;
+        }
+      }
+
+      // Guest fallback: add each sequentially
+      for (const it of batch) {
+        await addItem(it.product, it.quantity, it.variant, it.color);
+      }
+    },
+    [isLoggedIn, addItem]
   );
 
   const updateQuantity = useCallback(
@@ -409,6 +486,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       hasUnavailableItems,
       isLoading,
       addItem,
+      addBatchItems,
       updateQuantity,
       removeItem,
       clearCart,
@@ -423,6 +501,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       hasUnavailableItems,
       isLoading,
       addItem,
+      addBatchItems,
       updateQuantity,
       removeItem,
       clearCart,

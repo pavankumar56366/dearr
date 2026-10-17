@@ -30,6 +30,9 @@ export interface OrderItem {
   quantity: number;
   lineTotal: number;
   variantName?: string;
+  colorName?: string;
+  colorHex?: string;
+  sku?: string;
 }
 
 export interface OrderCustomer {
@@ -67,15 +70,25 @@ export interface AdminOrder {
   updatedAt: string; // ISO string
   discountCode?: string;
   notes?: string;
+  itemCount?: number;
+  addressChangeCount?: number;
+  addressEditDeadline?: string | null;
+  addressHistory?: any[];
 }
 
 export interface OrderMetrics {
   totalOrders: number;
-  pendingOrders: number;
-  processingOrders: number;
-  deliveredOrders: number;
-  cancelledOrders: number;
-  totalRevenue: number;
+  pendingDispatch: number;
+  dispatched: number;
+  delivered: number;
+  cancelled: number;
+  revenue: number;
+  // Backward compatibility aliases
+  pendingOrders?: number;
+  processingOrders?: number;
+  deliveredOrders?: number;
+  cancelledOrders?: number;
+  totalRevenue?: number;
 }
 
 /**
@@ -657,34 +670,68 @@ export function updateAdminPaymentStatus(
 }
 
 /**
- * Calculate dynamic operational metrics across all orders.
+ * Calculate dynamic operational metrics across eligible placed orders.
+ * Mutually exclusive status buckets enforce:
+ * Total = Pending Dispatch + Dispatched + Delivered + Cancelled
+ * Unpaid online checkout attempts are excluded.
  */
 export function getOrderMetrics(orders: AdminOrder[]): OrderMetrics {
-  let pending = 0;
-  let processing = 0;
+  let pendingDispatch = 0;
+  let dispatched = 0;
   let delivered = 0;
   let cancelled = 0;
-  let totalRevenue = 0;
+  let revenue = 0;
+  let eligibleCount = 0;
 
   for (const o of orders) {
-    if (o.orderStatus === "pending") pending++;
-    else if (o.orderStatus === "processing") processing++;
-    else if (o.orderStatus === "delivered") delivered++;
-    else if (o.orderStatus === "cancelled") cancelled++;
+    // Only placed orders: online paid/refunded or legitimate COD
+    const paymentStatus = ((o.paymentStatus || (o as any).payment_status || "") as string).toLowerCase();
+    const isPaid = paymentStatus === "paid" || paymentStatus === "refunded";
+    const isCod =
+      typeof o.paymentMethod === "string" &&
+      o.paymentMethod.toLowerCase().includes("cod");
+    const isPlaced = isPaid || isCod;
 
-    // Total revenue is recognized from paid orders that are not cancelled
-    if (o.paymentStatus === "paid" && o.orderStatus !== "cancelled") {
-      totalRevenue += o.totalAmount;
+    if (!isPlaced) {
+      continue;
+    }
+
+    eligibleCount++;
+
+    const effectiveStatus = (o.orderStatus || (o as any).status || "").toLowerCase();
+
+    if (effectiveStatus === "cancelled") {
+      cancelled++;
+    } else if (effectiveStatus === "delivered") {
+      delivered++;
+    } else if (effectiveStatus === "shipped" || effectiveStatus === "dispatched") {
+      dispatched++;
+    } else {
+      // "pending", "confirmed", "processing"
+      pendingDispatch++;
+    }
+
+    // Revenue eligibility: non-cancelled, non-refunded, and paid
+    const isRefunded = paymentStatus === "refunded";
+    const isCancelled = effectiveStatus === "cancelled";
+    if (paymentStatus === "paid" && !isCancelled && !isRefunded) {
+      revenue += Number(o.totalAmount || 0);
     }
   }
 
   return {
-    totalOrders: orders.length,
-    pendingOrders: pending,
-    processingOrders: processing,
+    totalOrders: eligibleCount,
+    pendingDispatch,
+    dispatched,
+    delivered,
+    cancelled,
+    revenue,
+    // Backwards-compatible aliases
+    pendingOrders: pendingDispatch,
+    processingOrders: dispatched,
     deliveredOrders: delivered,
     cancelledOrders: cancelled,
-    totalRevenue,
+    totalRevenue: revenue,
   };
 }
 

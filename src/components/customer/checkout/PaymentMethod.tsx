@@ -8,11 +8,15 @@ export type PaymentOption = "razorpay" | "cod";
 interface PaymentMethodProps {
   selectedMethod: PaymentOption;
   onSelectMethod: (method: PaymentOption) => void;
+  codAvailable?: boolean;
+  codUnavailableReason?: string;
 }
 
 export default function PaymentMethod({
   selectedMethod,
   onSelectMethod,
+  codAvailable = false,
+  codUnavailableReason,
 }: PaymentMethodProps) {
   return (
     <section
@@ -99,34 +103,72 @@ export default function PaymentMethod({
           </div>
         </label>
 
-        {/* Option 2: Cash on Delivery (Disabled / Explanatory) */}
-        <div
-          className="relative flex flex-col p-4 sm:p-5 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 opacity-75 cursor-not-allowed select-none"
-        >
-          <div className="flex items-start gap-3">
-            <input
-              id="payment-cod"
-              name="payment-method"
-              type="radio"
-              disabled
-              checked={false}
-              className="mt-1 w-4 h-4 cursor-not-allowed"
-            />
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-neutral-500">
-                  Cash on Delivery (COD)
-                </span>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-neutral-200 text-neutral-600">
-                  Unavailable
-                </span>
+        {/* Option 2: Cash on Delivery (Enabled when eligible, otherwise Explanatory Disabled) */}
+        {codAvailable ? (
+          <label
+            htmlFor="payment-cod"
+            className={`relative flex flex-col p-4 sm:p-5 rounded-2xl border-2 transition-all cursor-pointer ${
+              selectedMethod === "cod"
+                ? "border-[#A2CB8B] bg-[#A2CB8B]/5 shadow-sm"
+                : "border-neutral-200 hover:border-neutral-300 bg-white"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <input
+                  id="payment-cod"
+                  name="payment-method"
+                  type="radio"
+                  checked={selectedMethod === "cod"}
+                  onChange={() => onSelectMethod("cod")}
+                  className="mt-1 w-4 h-4 accent-[#A2CB8B] cursor-pointer"
+                />
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-bold text-neutral-900">
+                      Cash on Delivery (COD)
+                    </span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                      Eligible
+                    </span>
+                  </div>
+                  <p className="text-xs text-neutral-600">
+                    Pay with cash upon delivery of your order.
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-neutral-500">
-                To eliminate material waste and prevent uncollected custom fabrication, all precision 3D-printed items require online prepaid confirmation.
-              </p>
+            </div>
+          </label>
+        ) : (
+          <div
+            className="relative flex flex-col p-4 sm:p-5 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/70 opacity-75 cursor-not-allowed select-none"
+          >
+            <div className="flex items-start gap-3">
+              <input
+                id="payment-cod"
+                name="payment-method"
+                type="radio"
+                disabled
+                checked={false}
+                className="mt-1 w-4 h-4 cursor-not-allowed"
+              />
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-neutral-500">
+                    Cash on Delivery (COD)
+                  </span>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-neutral-200 text-neutral-600">
+                    Unavailable
+                  </span>
+                </div>
+                <p className="text-xs text-neutral-500">
+                  {codUnavailableReason ||
+                    "One or more items in your order are not eligible for Cash on Delivery. Online payment is required."}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Trust & Guarantee Banner */}

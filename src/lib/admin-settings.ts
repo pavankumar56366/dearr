@@ -42,6 +42,9 @@ export interface AdminSettings {
   allowOrderCancellation: boolean;
   cancellationWindowHours: number;
   notifyOnNewOrder: boolean;
+  allowAddressChange: boolean;
+  addressChangeWindowHours: number;
+  maxAddressChangesPerOrder: number;
 
   // Customer Settings
   allowCustomerSignup: boolean;
@@ -60,6 +63,13 @@ export interface AdminSettings {
   // Store Appearance
   primaryColor: string;
   secondaryColor: string;
+
+  // Abandonment Recovery Settings
+  recoverySheetEnabled: boolean;
+  alternativesEnabled: boolean;
+  feedbackEnabled: boolean;
+  maxAlternatives: number;
+  feedbackReasons: string[];
 }
 
 export const ADMIN_SETTINGS_STORAGE_KEY = "dearr_admin_settings";
@@ -103,7 +113,7 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   minimumOrderValue: 199,
   freeShippingThreshold: 999,
   defaultShippingFee: 50,
-  codEnabled: true,
+  codEnabled: false,
   prepaidEnabled: true,
 
   // Order Settings
@@ -111,6 +121,9 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   allowOrderCancellation: true,
   cancellationWindowHours: 12,
   notifyOnNewOrder: true,
+  allowAddressChange: true,
+  addressChangeWindowHours: 6,
+  maxAddressChangesPerOrder: 2,
 
   // Customer Settings
   allowCustomerSignup: true,
@@ -129,6 +142,24 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   // Store Appearance
   primaryColor: APPROVED_DEARR_PALETTE.primary,
   secondaryColor: APPROVED_DEARR_PALETTE.secondary,
+
+  // Abandonment Recovery Settings
+  recoverySheetEnabled: true,
+  alternativesEnabled: true,
+  feedbackEnabled: true,
+  maxAlternatives: 4,
+  feedbackReasons: [
+    "Price is too high",
+    "Found it cheaper elsewhere",
+    "Shipping charges too high",
+    "Delivery takes too long",
+    "Payment problem",
+    "Wanted Cash on Delivery",
+    "Not sure about product quality",
+    "Just browsing",
+    "Need to compare more",
+    "Other",
+  ],
 };
 
 /**

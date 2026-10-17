@@ -40,6 +40,21 @@ export interface SampleProductSpecification {
   weight?: string;
 }
 
+export interface SampleProductColor {
+  id: string;
+  name: string;
+  slug: string;
+  hex: string;
+  sku?: string | null;
+  stock: number;
+  reservedStock?: number;
+  availableStock?: number;
+  priceOverride?: number | null;
+  sortOrder?: number;
+  isActive: boolean;
+  images?: any[];
+}
+
 export interface SampleProduct {
   id: string;
   name: string;
@@ -57,6 +72,9 @@ export interface SampleProduct {
   stockQuantity: number;
   specifications?: SampleProductSpecification;
   variants?: SampleProductVariant[];
+  hasColors?: boolean;
+  colors?: SampleProductColor[];
+  codEnabled?: boolean;
 }
 
 export interface SampleCategory {

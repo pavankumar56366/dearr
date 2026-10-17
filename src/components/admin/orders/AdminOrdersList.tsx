@@ -7,7 +7,6 @@ import {
   OrderStatus,
   PaymentStatus,
   updateAdminOrderStatus,
-  getOrderMetrics,
 } from "@/lib/admin-orders";
 import {
   SearchIcon,
@@ -24,95 +23,234 @@ import {
   XCircleIcon,
   ChevronDownIcon,
   LayersIcon,
-  CreditCardIcon,
+  CalendarIcon,
+  DownloadIcon,
+  RefreshCwIcon,
 } from "../AdminIcons";
 import { AdminOrdersSkeleton } from "./AdminOrdersSkeleton";
 
+export type ReportingPeriod = "day" | "week" | "month" | "year" | "all";
+
+interface SummaryMetrics {
+  totalOrders: number;
+  pendingDispatch: number;
+  dispatched: number;
+  delivered: number;
+  cancelled: number;
+  revenue: number;
+}
+
+interface RangeMetadata {
+  period: ReportingPeriod;
+  date?: string;
+  month?: string;
+  year?: string;
+  label: string;
+  startIst?: string;
+  endIst?: string;
+}
+
+function getTodayIstString(): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", {
+      timeZone: "Asia/Kolkata",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).format(new Date());
+  } catch {
+    return new Date().toISOString().split("T")[0];
+  }
+}
+
 export function AdminOrdersList() {
+  const initialToday = useMemo(() => getTodayIstString(), []);
+  const initialMonth = useMemo(() => initialToday.slice(0, 7), [initialToday]);
+  const initialYear = useMemo(() => initialToday.slice(0, 4), [initialToday]);
+
+  // Reporting period state
+  const [period, setPeriod] = useState<ReportingPeriod>("day");
+  const [dateVal, setDateVal] = useState<string>(initialToday);
+  const [monthVal, setMonthVal] = useState<string>(initialMonth);
+  const [yearVal, setYearVal] = useState<string>(initialYear);
+
+  // Summary and range metadata from server
+  const [summary, setSummary] = useState<SummaryMetrics>({
+    totalOrders: 0,
+    pendingDispatch: 0,
+    dispatched: 0,
+    delivered: 0,
+    cancelled: 0,
+    revenue: 0,
+  });
+  const [rangeMetadata, setRangeMetadata] = useState<RangeMetadata>({
+    period: "day",
+    date: initialToday,
+    label: "Today",
+  });
+
+  // Orders list state
   const [orders, setOrders] = useState<AdminOrder[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+
+  // Table local display filters
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedOrderStatus, setSelectedOrderStatus] = useState<"ALL" | OrderStatus>("ALL");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<"ALL" | PaymentStatus>("ALL");
-  const [selectedDateRange, setSelectedDateRange] = useState<"ALL" | "TODAY" | "7DAYS" | "30DAYS">("ALL");
 
+  // UI state
   const [openDropdownId, setOpenDropdownId] = useState<string | null>(null);
   const [showSkeletonDemo, setShowSkeletonDemo] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
 
   // Status transition modal state
   const [orderToUpdateStatus, setOrderToUpdateStatus] = useState<AdminOrder | null>(null);
   const [targetStatus, setTargetStatus] = useState<OrderStatus>("processing");
 
-
   // Customer inspection modal state
   const [inspectCustomerOrder, setInspectCustomerOrder] = useState<AdminOrder | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const exportDropdownRef = useRef<HTMLDivElement | null>(null);
+  const activeRequestIdRef = useRef<number>(0);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
-    }, 3000);
+    }, 3200);
   };
 
-  const loadOrders = useCallback(async () => {
-    try {
-      const res = await fetch("/api/admin/orders?limit=100");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.ok && Array.isArray(data.orders)) {
-          const mapped: AdminOrder[] = data.orders.map((o: any) => ({
-            id: o.id,
-            orderNumber: o.orderNumber,
-            customer: {
-              name: o.customerName || "Customer",
-              email: o.customerEmail || "customer@dearr.in",
-              phone: o.customerPhone || "+91 98765 43210",
-            },
-            items: (o.items || []).map((it: any) => ({
-              id: it.id,
-              name: it.productName,
-              variantName: it.variantName || undefined,
-              quantity: Number(it.quantity || 1),
-              unitPrice: Number(it.unitPrice || 0),
-              lineTotal: Number(it.lineTotal || 0),
-            })),
-            subtotal: Number(o.subtotal || 0),
-            discountAmount: Number(o.discountAmount || 0),
-            shippingAmount: Number(o.shippingAmount || 0),
-            totalAmount: Number(o.totalAmount || 0),
-            currency: o.currency || "INR",
-            orderStatus: o.status,
-            paymentStatus: o.paymentStatus,
-            paymentMethod: "Razorpay (Online)",
-            shippingAddress: {
-              fullName: o.customerName || "Customer",
-              phone: o.customerPhone || "",
-              addressLine1: "",
-              city: "",
-              state: "",
-              postalCode: "",
-              country: "India",
-            },
-            createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
-            updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
-          }));
-
-          setOrders(mapped);
-          return;
-        }
-      }
-    } catch (err) {
-      console.warn("Could not fetch /api/admin/orders:", err);
+  // Build current query params string for API requests
+  const buildQueryParams = useCallback(() => {
+    const params = new URLSearchParams();
+    params.set("period", period);
+    if (period === "day") {
+      params.set("date", dateVal || initialToday);
+    } else if (period === "month") {
+      params.set("month", monthVal || initialMonth);
+    } else if (period === "year") {
+      params.set("year", yearVal || initialYear);
     }
-    setOrders([]);
-  }, []);
+    return params.toString();
+  }, [period, dateVal, monthVal, yearVal, initialToday, initialMonth, initialYear]);
 
-  // Sync orders from API on mount
+  // Load summary and orders for the selected reporting period
+  const loadData = useCallback(async () => {
+    const requestId = ++activeRequestIdRef.current;
+    setIsLoading(true);
+    setFetchError(null);
+    try {
+      const q = buildQueryParams();
+      const [summaryRes, ordersRes] = await Promise.all([
+        fetch(`/api/admin/orders/summary?${q}`),
+        fetch(`/api/admin/orders?${q}&limit=100`),
+      ]);
+
+      if (requestId !== activeRequestIdRef.current) {
+        return;
+      }
+
+      if (!summaryRes.ok) {
+        const err = await summaryRes.json().catch(() => ({}));
+        throw new Error(err.error || `Summary request failed (${summaryRes.status})`);
+      }
+      if (!ordersRes.ok) {
+        const err = await ordersRes.json().catch(() => ({}));
+        throw new Error(err.error || `Orders request failed (${ordersRes.status})`);
+      }
+
+      const summaryData = await summaryRes.json();
+      const ordersData = await ordersRes.json();
+
+      if (requestId !== activeRequestIdRef.current) {
+        return;
+      }
+
+      const metricsData = summaryData.metrics || summaryData.summary;
+      if (summaryData.ok && metricsData) {
+        setSummary({
+          totalOrders: Number(metricsData.totalOrders || 0),
+          pendingDispatch: Number(metricsData.pendingDispatch || 0),
+          dispatched: Number(metricsData.dispatched || 0),
+          delivered: Number(metricsData.delivered || 0),
+          cancelled: Number(metricsData.cancelled || 0),
+          revenue: Number(metricsData.revenue || 0),
+        });
+        if (summaryData.range) {
+          setRangeMetadata(summaryData.range);
+        }
+      } else if (!summaryData.ok) {
+        throw new Error(summaryData.error || "Failed to load orders summary metrics");
+      } else {
+        throw new Error("Invalid summary metrics payload received from server");
+      }
+
+      if (ordersData.ok && Array.isArray(ordersData.orders)) {
+        const mapped: AdminOrder[] = ordersData.orders.map((o: any) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          customer: {
+            name: o.customerName || "Customer",
+            email: o.customerEmail || "customer@dearr.in",
+            phone: o.customerPhone || "+91 98765 43210",
+          },
+          itemCount: typeof o.itemCount === "number" ? o.itemCount : (Array.isArray(o.items) ? o.items.length : 0),
+          items: (o.items || []).map((it: any) => ({
+            id: it.id,
+            productId: it.productId || "item",
+            name: it.productName || it.name || "Item",
+            slug: it.productSlug || it.slug || "",
+            image: it.productImage || it.image || "/product-samples/1.jpeg",
+            variantName: it.variantName || undefined,
+            quantity: Number(it.quantity || 1),
+            unitPrice: Number(it.unitPrice || 0),
+            lineTotal: Number(it.lineTotal || 0),
+          })),
+          subtotal: Number(o.subtotal || 0),
+          discountAmount: Number(o.discountAmount || 0),
+          shippingAmount: Number(o.shippingAmount || 0),
+          totalAmount: Number(o.totalAmount || 0),
+          currency: o.currency || "INR",
+          orderStatus: o.status,
+          paymentStatus: o.paymentStatus,
+          paymentMethod: o.paymentMethod || "Razorpay (Online)",
+          shippingAddress: {
+            fullName: o.customerName || "Customer",
+            phone: o.customerPhone || "",
+            addressLine1: "",
+            city: "",
+            state: "",
+            postalCode: "",
+            country: "India",
+          },
+          addressChangeCount: Number(o.addressChangeCount || 0),
+          createdAt: typeof o.createdAt === "string" ? o.createdAt : new Date(o.createdAt).toISOString(),
+          updatedAt: typeof o.updatedAt === "string" ? o.updatedAt : new Date(o.updatedAt).toISOString(),
+        }));
+        setOrders(mapped);
+      } else {
+        setOrders([]);
+      }
+    } catch (err: any) {
+      if (requestId === activeRequestIdRef.current) {
+        console.warn("Could not fetch admin orders data:", err);
+        setFetchError(err.message || "Failed to load orders analytics. Please check your connection.");
+      }
+    } finally {
+      if (requestId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
+    }
+  }, [buildQueryParams]);
+
+  // Sync on period / date change
   useEffect(() => {
-    loadOrders();
-  }, [loadOrders]);
+    loadData();
+  }, [loadData]);
 
   // Outside click & ESC listeners
   useEffect(() => {
@@ -120,10 +258,14 @@ export function AdminOrdersList() {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpenDropdownId(null);
       }
+      if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+        setExportDropdownOpen(false);
+      }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setOpenDropdownId(null);
+        setExportDropdownOpen(false);
         setOrderToUpdateStatus(null);
         setInspectCustomerOrder(null);
       }
@@ -137,15 +279,8 @@ export function AdminOrdersList() {
     };
   }, []);
 
-  // Summary Metrics
-  const metrics = useMemo(() => {
-    return getOrderMetrics(orders);
-  }, [orders]);
-
-  // Filtered Orders
+  // Filtered Orders within the selected reporting period
   const filteredOrders = useMemo(() => {
-    const now = new Date();
-
     return orders.filter((order) => {
       // 1. Search Query
       if (searchQuery.trim()) {
@@ -178,32 +313,50 @@ export function AdminOrdersList() {
         if (order.paymentStatus !== selectedPaymentStatus) return false;
       }
 
-      // 4. Date Range Filter
-      if (selectedDateRange !== "ALL") {
-        const orderTime = new Date(order.createdAt).getTime();
-        const nowTime = now.getTime();
-        const diffHours = (nowTime - orderTime) / (1000 * 60 * 60);
+      return true;
+    });
+  }, [orders, searchQuery, selectedOrderStatus, selectedPaymentStatus]);
 
-        if (selectedDateRange === "TODAY") {
-          const orderDateLocal = new Date(order.createdAt).toLocaleDateString("en-CA");
-          const todayLocal = now.toLocaleDateString("en-CA");
-          if (orderDateLocal !== todayLocal && diffHours > 24) return false;
-        } else if (selectedDateRange === "7DAYS") {
-          if (diffHours > 7 * 24) return false;
-        } else if (selectedDateRange === "30DAYS") {
-          if (diffHours > 30 * 24) return false;
+  // Handle Export CSV
+  const handleExportCsv = async (exportType: "orders" | "summary") => {
+    setIsExporting(true);
+    setExportDropdownOpen(false);
+    try {
+      const q = buildQueryParams();
+      const exportUrl = `/api/admin/orders/export?type=${exportType}&${q}`;
+      const res = await fetch(exportUrl);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Export failed with status ${res.status}`);
+      }
+
+      const blob = await res.blob();
+      const contentDisposition = res.headers.get("content-disposition");
+      let filename = `orders_${exportType}_${period}.csv`;
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (match && match[1]) {
+          filename = match[1];
         }
       }
 
-      return true;
-    });
-  }, [
-    orders,
-    searchQuery,
-    selectedOrderStatus,
-    selectedPaymentStatus,
-    selectedDateRange,
-  ]);
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = downloadUrl;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+
+      showToast(`Exported ${filename} successfully`);
+    } catch (err: any) {
+      console.error("Export error:", err);
+      showToast(err.message || "Failed to download CSV export");
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   // Handle Copy Order Number
   const handleCopyOrderNumber = (orderNumber: string) => {
@@ -233,7 +386,7 @@ export function AdminOrdersList() {
       });
       if (res.ok) {
         showToast(`Order status updated to ${targetStatus}`);
-        await loadOrders();
+        await loadData();
       } else {
         const data = await res.json();
         showToast(data.error || "Failed to update order status");
@@ -255,19 +408,16 @@ export function AdminOrdersList() {
     setOrderToUpdateStatus(null);
   };
 
-
   const handleClearFilters = () => {
     setSearchQuery("");
     setSelectedOrderStatus("ALL");
     setSelectedPaymentStatus("ALL");
-    setSelectedDateRange("ALL");
   };
 
   const hasActiveFilters =
     Boolean(searchQuery.trim()) ||
     selectedOrderStatus !== "ALL" ||
-    selectedPaymentStatus !== "ALL" ||
-    selectedDateRange !== "ALL";
+    selectedPaymentStatus !== "ALL";
 
   // Badges
   const renderOrderStatusBadge = (status: OrderStatus) => {
@@ -297,7 +447,7 @@ export function AdminOrdersList() {
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-indigo-50 text-indigo-900 border border-indigo-200">
             <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-            <span>Shipped</span>
+            <span>Dispatched</span>
           </span>
         );
       case "delivered":
@@ -384,7 +534,7 @@ export function AdminOrdersList() {
               Orders
             </h1>
             <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 border border-neutral-200">
-              {orders.length} total
+              {summary.totalOrders} placed
             </span>
           </div>
           <p className="text-xs sm:text-sm text-neutral-500 mt-1">
@@ -410,79 +560,265 @@ export function AdminOrdersList() {
         <AdminOrdersSkeleton />
       ) : (
         <>
-          {/* Summary Metric Cards (6 Cards) */}
+          {/* Reporting Period & Export CSV Toolbar */}
+          <section
+            aria-label="Reporting Period and Export Controls"
+            className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-3"
+          >
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
+              {/* Left: Period Mode Selector Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs font-bold text-neutral-600 mr-1 flex items-center gap-1">
+                  <CalendarIcon size={14} className="text-neutral-500" />
+                  <span>Period:</span>
+                </span>
+
+                {(
+                  [
+                    { id: "day", label: "Day" },
+                    { id: "week", label: "Last Week" },
+                    { id: "month", label: "Month" },
+                    { id: "year", label: "Year" },
+                    { id: "all", label: "Overall" },
+                  ] as { id: ReportingPeriod; label: string }[]
+                ).map((p) => {
+                  const isActive = period === p.id;
+                  return (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => setPeriod(p.id)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isActive
+                          ? "bg-neutral-900 text-white shadow-2xs"
+                          : "bg-neutral-100 hover:bg-neutral-200/80 text-neutral-700 border border-neutral-200/60"
+                      }`}
+                    >
+                      {p.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Right: Sub-controls for active period & Export CSV Dropdown */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Day Mode: Calendar Date Picker */}
+                {period === "day" && (
+                  <div className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-xl px-2.5 py-1">
+                    <span className="text-[11px] font-semibold text-neutral-500">Date:</span>
+                    <input
+                      type="date"
+                      value={dateVal}
+                      max={initialToday}
+                      onChange={(e) => setDateVal(e.target.value)}
+                      className="text-xs font-semibold text-neutral-800 bg-transparent focus:outline-none cursor-pointer"
+                      aria-label="Select report date"
+                    />
+                  </div>
+                )}
+
+                {/* Month Mode: Month & Year Picker */}
+                {period === "month" && (
+                  <div className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-xl px-2.5 py-1">
+                    <span className="text-[11px] font-semibold text-neutral-500">Month:</span>
+                    <input
+                      type="month"
+                      value={monthVal}
+                      onChange={(e) => setMonthVal(e.target.value)}
+                      className="text-xs font-semibold text-neutral-800 bg-transparent focus:outline-none cursor-pointer"
+                      aria-label="Select report month"
+                    />
+                  </div>
+                )}
+
+                {/* Year Mode: Year Selector */}
+                {period === "year" && (
+                  <div className="flex items-center gap-1.5 bg-neutral-50 border border-neutral-200 rounded-xl px-2.5 py-1">
+                    <span className="text-[11px] font-semibold text-neutral-500">Year:</span>
+                    <select
+                      value={yearVal}
+                      onChange={(e) => setYearVal(e.target.value)}
+                      className="text-xs font-semibold text-neutral-800 bg-transparent focus:outline-none cursor-pointer"
+                      aria-label="Select report year"
+                    >
+                      <option value="2026">2026</option>
+                      <option value="2025">2025</option>
+                      <option value="2024">2024</option>
+                    </select>
+                  </div>
+                )}
+
+                {/* Refresh Button */}
+                <button
+                  type="button"
+                  onClick={() => loadData()}
+                  disabled={isLoading}
+                  title="Refresh order metrics"
+                  className="p-2 rounded-xl border border-neutral-200 hover:bg-neutral-100 text-neutral-600 transition-colors cursor-pointer disabled:opacity-50"
+                  aria-label="Refresh orders"
+                >
+                  <RefreshCwIcon size={14} className={isLoading ? "animate-spin" : ""} />
+                </button>
+
+                {/* Export CSV Dropdown */}
+                <div className="relative" ref={exportDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setExportDropdownOpen(!exportDropdownOpen)}
+                    disabled={isExporting}
+                    className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-bold inline-flex items-center gap-1.5 transition-all shadow-2xs cursor-pointer disabled:opacity-50"
+                    aria-label="Export CSV Options"
+                    aria-expanded={exportDropdownOpen}
+                  >
+                    <DownloadIcon size={14} />
+                    <span>{isExporting ? "Exporting..." : "Export CSV"}</span>
+                    <ChevronDownIcon size={12} className={exportDropdownOpen ? "rotate-180 transition-transform" : "transition-transform"} />
+                  </button>
+
+                  {exportDropdownOpen && (
+                    <div className="absolute right-0 top-11 z-50 w-52 rounded-xl bg-white border border-neutral-200 shadow-xl p-1.5 space-y-0.5 text-left animate-in fade-in zoom-in-95 duration-100">
+                      <button
+                        type="button"
+                        onClick={() => handleExportCsv("orders")}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 transition-colors cursor-pointer"
+                      >
+                        <div className="text-left">
+                          <div className="font-bold text-neutral-900">Orders List (.csv)</div>
+                          <div className="text-[10px] text-neutral-400">All placed orders for period</div>
+                        </div>
+                        <DownloadIcon size={14} className="text-neutral-400" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleExportCsv("summary")}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold text-neutral-700 hover:bg-neutral-100 hover:text-neutral-900 transition-colors cursor-pointer"
+                      >
+                        <div className="text-left">
+                          <div className="font-bold text-neutral-900">Summary (.csv)</div>
+                          <div className="text-[10px] text-neutral-400">Six dashboard figures</div>
+                        </div>
+                        <DownloadIcon size={14} className="text-neutral-400" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Resolved reporting interval banner */}
+            <div className="flex items-center justify-between text-xs text-neutral-500 pt-2 border-t border-neutral-100">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span>Reporting Range:</span>
+                <span className="font-bold text-neutral-900 bg-neutral-100 px-2 py-0.5 rounded-md border border-neutral-200 font-mono text-[11px]">
+                  {rangeMetadata.label}
+                </span>
+                <span className="text-[10px] text-neutral-400 font-semibold uppercase">
+                  (Asia/Kolkata IST)
+                </span>
+              </div>
+
+              {isLoading && (
+                <div className="text-[11px] font-semibold text-primary-dark flex items-center gap-1.5 animate-pulse">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+                  <span>Updating analytics...</span>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Error Banner with Retry */}
+          {fetchError && (
+            <div className="p-4 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+              <div className="flex items-center gap-2">
+                <AlertCircleIcon size={16} className="text-red-600 shrink-0" />
+                <span>{fetchError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadData()}
+                className="px-3 py-1.5 rounded-xl bg-red-600 text-white font-bold hover:bg-red-700 transition-colors cursor-pointer shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Exactly Six Summary Metric Cards */}
           <section
             aria-label="Orders Summary Metrics"
-            className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4"
+            className={`grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4 transition-opacity duration-150 ${
+              isLoading ? "opacity-60" : "opacity-100"
+            }`}
           >
-            {/* Total Orders */}
+            {/* 1. Total Orders */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400">
                 Total Orders
               </span>
               <div className="text-2xl sm:text-3xl font-display font-bold text-neutral-900">
-                {metrics.totalOrders}
+                {fetchError ? "—" : summary.totalOrders}
               </div>
-              <p className="text-[11px] text-neutral-500">All customer orders</p>
+              <p className="text-[11px] text-neutral-500">Placed customer orders</p>
             </div>
 
-            {/* Pending Orders */}
+            {/* 2. Pending Dispatch */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                Pending
+                Pending Dispatch
               </span>
               <div className="text-2xl sm:text-3xl font-display font-bold text-neutral-900">
-                {metrics.pendingOrders}
+                {fetchError ? "—" : summary.pendingDispatch}
               </div>
-              <p className="text-[11px] text-neutral-500">Awaiting confirmation</p>
+              <p className="text-[11px] text-neutral-500">Confirmed & queue</p>
             </div>
 
-            {/* Processing Orders */}
+            {/* 3. Dispatched */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
-              <span className="text-[11px] font-bold uppercase tracking-wider text-purple-700">
-                Processing
+              <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-700">
+                Dispatched
               </span>
               <div className="text-2xl sm:text-3xl font-display font-bold text-neutral-900">
-                {metrics.processingOrders}
+                {fetchError ? "—" : summary.dispatched}
               </div>
-              <p className="text-[11px] text-neutral-500">In 3D print queue</p>
+              <p className="text-[11px] text-neutral-500">In transit shipments</p>
             </div>
 
-            {/* Delivered Orders */}
+            {/* 4. Delivered */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-primary-dark">
                 Delivered
               </span>
               <div className="text-2xl sm:text-3xl font-display font-bold text-neutral-900">
-                {metrics.deliveredOrders}
+                {fetchError ? "—" : summary.delivered}
               </div>
               <p className="text-[11px] text-neutral-500">Fulfilled packages</p>
             </div>
 
-            {/* Cancelled Orders */}
+            {/* 5. Cancelled */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-red-700">
                 Cancelled
               </span>
               <div className="text-2xl sm:text-3xl font-display font-bold text-neutral-900">
-                {metrics.cancelledOrders}
+                {fetchError ? "—" : summary.cancelled}
               </div>
               <p className="text-[11px] text-neutral-500">Void / refunded</p>
             </div>
 
-            {/* Total Revenue */}
+            {/* 6. Revenue */}
             <div className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-1">
               <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">
-                Total Revenue
+                Revenue
               </span>
               <div className="text-xl sm:text-2xl font-display font-bold text-neutral-900 truncate">
-                ₹{metrics.totalRevenue.toLocaleString("en-IN")}
+                {fetchError ? "—" : `₹${summary.revenue.toLocaleString("en-IN")}`}
               </div>
-              <p className="text-[11px] text-neutral-500">From paid orders</p>
+              <p className="text-[11px] text-neutral-500">Net collected revenue</p>
             </div>
           </section>
 
-          {/* Search & Composable Filter Bar */}
+          {/* Search & Status Filters for Table */}
           <section
             aria-label="Search and Filter Orders"
             className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-3"
@@ -527,7 +863,7 @@ export function AdminOrdersList() {
                 <option value="pending">Pending</option>
                 <option value="confirmed">Confirmed</option>
                 <option value="processing">Processing</option>
-                <option value="shipped">Shipped</option>
+                <option value="shipped">Dispatched</option>
                 <option value="delivered">Delivered</option>
                 <option value="cancelled">Cancelled</option>
               </select>
@@ -547,23 +883,6 @@ export function AdminOrdersList() {
                 <option value="failed">Failed</option>
                 <option value="refunded">Refunded</option>
               </select>
-
-              {/* Date Filter Dropdown */}
-              <select
-                value={selectedDateRange}
-                onChange={(e) =>
-                  setSelectedDateRange(
-                    e.target.value as "ALL" | "TODAY" | "7DAYS" | "30DAYS"
-                  )
-                }
-                aria-label="Filter orders by date"
-                className="px-3.5 py-2.5 rounded-xl border border-neutral-200 bg-white text-xs font-semibold text-neutral-700 focus:outline-none focus:ring-2 focus:ring-primary/40 cursor-pointer"
-              >
-                <option value="ALL">All Dates</option>
-                <option value="TODAY">Today</option>
-                <option value="7DAYS">Last 7 Days</option>
-                <option value="30DAYS">Last 30 Days</option>
-              </select>
             </div>
 
             {/* Results count & reset filters banner */}
@@ -577,7 +896,7 @@ export function AdminOrdersList() {
                 <span className="font-bold text-neutral-800">
                   {orders.length}
                 </span>{" "}
-                orders
+                orders in selected period
               </div>
 
               {hasActiveFilters && (
@@ -587,7 +906,7 @@ export function AdminOrdersList() {
                   className="font-bold text-primary-dark hover:underline flex items-center gap-1 cursor-pointer"
                 >
                   <XIcon size={12} />
-                  <span>Clear all filters</span>
+                  <span>Clear display filters</span>
                 </button>
               )}
             </div>
@@ -601,12 +920,12 @@ export function AdminOrdersList() {
               </div>
               <div className="space-y-1">
                 <h3 className="text-base font-bold text-neutral-900">
-                  {orders.length === 0 ? "No orders yet" : "No orders found"}
+                  {orders.length === 0 ? "No placed orders in this period" : "No matching orders found"}
                 </h3>
                 <p className="text-xs text-neutral-500 max-w-sm mx-auto">
                   {orders.length === 0
-                    ? "Orders will appear here when customers place purchases."
-                    : "Try adjusting your search or filters."}
+                    ? `No placed orders received in ${rangeMetadata.label}. Abandoned checkout attempts are excluded.`
+                    : "Try adjusting your search query or table status filter."}
                 </p>
               </div>
               {hasActiveFilters && (
@@ -616,7 +935,7 @@ export function AdminOrdersList() {
                     onClick={handleClearFilters}
                     className="px-4 py-2 rounded-xl border border-neutral-200 text-xs font-semibold text-neutral-700 hover:bg-neutral-100 transition-colors cursor-pointer"
                   >
-                    Clear all filters
+                    Clear display filters
                   </button>
                 </div>
               )}
@@ -641,9 +960,12 @@ export function AdminOrdersList() {
                   <tbody className="divide-y divide-neutral-100 text-xs text-neutral-700">
                     {filteredOrders.map((order) => {
                       const isDropdownOpen = openDropdownId === order.id;
-                      const productNamesList = order.items
-                        .map((i) => `${i.quantity}x ${i.name}`)
-                        .join(", ");
+                      const itemCount = typeof order.itemCount === "number" && order.itemCount > 0
+                        ? order.itemCount
+                        : order.items.length;
+                      const productNamesList = order.items.length > 0
+                        ? order.items.map((i) => `${i.quantity}x ${i.name}${(i as any).colorName ? ` (${(i as any).colorName})` : ""}`).join(", ")
+                        : (itemCount > 0 ? `${itemCount} items` : "No items");
 
                       return (
                         <tr
@@ -652,12 +974,22 @@ export function AdminOrdersList() {
                         >
                           {/* Order Number */}
                           <td className="py-3.5 px-4 font-mono font-bold text-neutral-900">
-                            <Link
-                              href={`/admin/orders/${order.id}`}
-                              className="bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md tracking-wider hover:bg-primary/20 hover:border-primary/40 transition-colors"
-                            >
-                              {order.orderNumber}
-                            </Link>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Link
+                                href={`/admin/orders/${order.id}`}
+                                className="bg-neutral-100 border border-neutral-200 px-2 py-1 rounded-md tracking-wider hover:bg-primary/20 hover:border-primary/40 transition-colors"
+                              >
+                                {order.orderNumber}
+                              </Link>
+                              {Boolean(order.addressChangeCount && order.addressChangeCount > 0) && (
+                                <span
+                                  title={`Delivery address was modified ${order.addressChangeCount} time(s)`}
+                                  className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap"
+                                >
+                                  Address updated
+                                </span>
+                              )}
+                            </div>
                           </td>
 
                           {/* Customer */}
@@ -676,11 +1008,11 @@ export function AdminOrdersList() {
                               title={productNamesList}
                               className="font-medium text-neutral-700 cursor-help underline decoration-dotted decoration-neutral-300"
                             >
-                              {order.items.length}{" "}
-                              {order.items.length === 1 ? "item" : "items"}
+                              {itemCount}{" "}
+                              {itemCount === 1 ? "item" : "items"}
                             </span>
                             <div className="text-[11px] text-neutral-400 truncate max-w-[200px]">
-                              {order.items[0]?.name}
+                              {order.items[0]?.name || (itemCount > 0 ? `${itemCount} item${itemCount === 1 ? "" : "s"} in order` : "No items")}
                               {order.items.length > 1 && ` +${order.items.length - 1} more`}
                             </div>
                           </td>
@@ -745,7 +1077,6 @@ export function AdminOrdersList() {
                                   <span>Update Status</span>
                                 </button>
 
-
                                 <button
                                   type="button"
                                   onClick={() => {
@@ -780,9 +1111,12 @@ export function AdminOrdersList() {
               <div className="lg:hidden space-y-3">
                 {filteredOrders.map((order) => {
                   const isDropdownOpen = openDropdownId === order.id;
-                  const productNamesList = order.items
-                    .map((i) => `${i.quantity}x ${i.name}`)
-                    .join(", ");
+                  const itemCount = typeof order.itemCount === "number" && order.itemCount > 0
+                    ? order.itemCount
+                    : order.items.length;
+                  const productNamesList = order.items.length > 0
+                    ? order.items.map((i) => `${i.quantity}x ${i.name}${(i as any).colorName ? ` (${(i as any).colorName})` : ""}`).join(", ")
+                    : (itemCount > 0 ? `${itemCount} items` : "No items");
 
                   return (
                     <div
@@ -790,12 +1124,22 @@ export function AdminOrdersList() {
                       className="p-4 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-3"
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <Link
-                          href={`/admin/orders/${order.id}`}
-                          className="font-mono font-bold text-xs bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded text-neutral-900 hover:bg-primary/20 transition-colors"
-                        >
-                          {order.orderNumber}
-                        </Link>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <Link
+                            href={`/admin/orders/${order.id}`}
+                            className="font-mono font-bold text-xs bg-neutral-100 border border-neutral-200 px-2 py-0.5 rounded text-neutral-900 hover:bg-primary/20 transition-colors"
+                          >
+                            {order.orderNumber}
+                          </Link>
+                          {Boolean(order.addressChangeCount && order.addressChangeCount > 0) && (
+                            <span
+                              title={`Delivery address was modified ${order.addressChangeCount} time(s)`}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 whitespace-nowrap"
+                            >
+                              Address updated
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-2">
                           {renderOrderStatusBadge(order.orderStatus)}
 
@@ -836,7 +1180,6 @@ export function AdminOrdersList() {
                                   <LayersIcon size={14} />
                                   <span>Update Status</span>
                                 </button>
-
 
                                 <button
                                   type="button"
@@ -884,8 +1227,8 @@ export function AdminOrdersList() {
                             title={productNamesList}
                             className="font-medium text-neutral-700 truncate block"
                           >
-                            {order.items.length}{" "}
-                            {order.items.length === 1 ? "item" : "items"}
+                            {itemCount}{" "}
+                            {itemCount === 1 ? "item" : "items"}
                           </span>
                         </div>
 
@@ -1005,7 +1348,7 @@ export function AdminOrdersList() {
                       onChange={() => setTargetStatus(st)}
                       className="accent-primary"
                     />
-                    <span className="capitalize">{st}</span>
+                    <span className="capitalize">{st === "shipped" ? "Dispatched (shipped)" : st}</span>
                   </div>
                   {renderOrderStatusBadge(st)}
                 </label>
@@ -1032,7 +1375,6 @@ export function AdminOrdersList() {
           </div>
         </div>
       )}
-
 
       {/* Customer Inspection Modal */}
       {inspectCustomerOrder && (

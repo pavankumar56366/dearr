@@ -35,6 +35,7 @@ export { AdminReviewDetails } from "./reviews/AdminReviewDetails";
 export { AdminReviewNotFound } from "./reviews/AdminReviewNotFound";
 export { AdminSettingsPage } from "./settings/AdminSettingsPage";
 export { AdminSettingsSkeleton } from "./settings/AdminSettingsSkeleton";
+export { AdminAbandonmentDashboard } from "./abandonment/AdminAbandonmentDashboard";
 export { AdminDashboardSkeleton } from "./AdminDashboardSkeleton";
 export * from "./AdminIcons";
 

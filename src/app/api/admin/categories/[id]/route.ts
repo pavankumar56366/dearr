@@ -5,6 +5,8 @@ import {
   findCategoryById,
   updateCategory,
   CategoryValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +42,7 @@ export async function GET(
       );
     }
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       category,
     });
@@ -60,6 +62,7 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     const { id } = await params;

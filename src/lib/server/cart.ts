@@ -1,6 +1,7 @@
 import "server-only";
 import crypto from "crypto";
-import { query } from "./db";
+import { query, withTransaction } from "./db";
+import { PoolConnection } from "mysql2/promise";
 import {
   getApplicableDiscountForProduct,
   computeDiscountAmount,
@@ -32,12 +33,23 @@ export interface CartProductSummary {
   category: string | null;
   categorySlug: string | null;
   isActive: boolean;
+  codEnabled?: boolean;
 }
 
 export interface CartVariantSummary {
   id: string;
   name: string;
   sku: string;
+  isActive: boolean;
+}
+
+export interface CartColorSummary {
+  id: string;
+  name: string;
+  slug: string;
+  hex: string;
+  sku: string | null;
+  image: string;
   isActive: boolean;
 }
 
@@ -62,9 +74,11 @@ export interface CartItemRecord {
   cartId: string;
   productId: string;
   variantId: string | null;
+  colorId: string | null;
   quantity: number;
   product: CartProductSummary;
   variant: CartVariantSummary | null;
+  color: CartColorSummary | null;
   pricing: CartItemPricing;
   stock: CartItemStock;
   createdAt: Date;
@@ -85,6 +99,7 @@ export interface CartRecord {
   items: CartItemRecord[];
   totals: CartTotals;
   itemCount: number;
+  isCodEligible?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -92,6 +107,7 @@ export interface CartRecord {
 export interface AddCartItemInput {
   productId: string;
   variantId?: string | null;
+  colorId?: string | null;
   quantity: number;
 }
 
@@ -223,11 +239,12 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
 
   // Load cart items belonging exclusively to this active cart
   const itemRows = await query<any[]>(
-    `SELECT 
+    `SELECT
        ci.id AS item_id,
        ci.cart_id,
        ci.product_id,
        ci.variant_id,
+       ci.color_id,
        ci.quantity,
        ci.created_at AS item_created_at,
        ci.updated_at AS item_updated_at,
@@ -238,6 +255,8 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
        p.compare_at_price AS p_compare_at_price,
        p.stock_quantity AS p_stock_quantity,
        p.is_active AS p_is_active,
+       p.has_colors AS p_has_colors,
+       p.cod_enabled AS p_cod_enabled,
        cat.name AS category_name,
        cat.slug AS category_slug,
        pv.id AS v_id,
@@ -246,18 +265,35 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
        pv.price AS v_price,
        pv.stock_quantity AS v_stock_quantity,
        pv.is_active AS v_is_active,
+       pc.id AS c_id,
+       pc.name AS c_name,
+       pc.slug AS c_slug,
+       pc.hex AS c_hex,
+       pc.sku AS c_sku,
+       pc.stock AS c_stock,
+       pc.reserved_stock AS c_reserved_stock,
+       pc.price_override AS c_price_override,
+       pc.is_active AS c_is_active,
        (
-         SELECT pi.storage_path 
-         FROM product_images pi 
-         WHERE pi.product_id = p.id 
-         ORDER BY pi.sort_order ASC, pi.created_at ASC 
+         SELECT pi.storage_path
+         FROM product_images pi
+         WHERE pi.product_id = p.id AND (pi.color_id = ci.color_id OR (ci.color_id IS NULL AND pi.color_id IS NULL))
+         ORDER BY pi.sort_order ASC, pi.created_at ASC
          LIMIT 1
-       ) AS primary_image
+       ) AS color_image,
+       (
+         SELECT pi.storage_path
+         FROM product_images pi
+         WHERE pi.product_id = p.id
+         ORDER BY pi.sort_order ASC, pi.created_at ASC
+         LIMIT 1
+       ) AS fallback_image
      FROM cart_items ci
      INNER JOIN carts crt ON ci.cart_id = crt.id
      LEFT JOIN products p ON ci.product_id = p.id
      LEFT JOIN categories cat ON p.category_id = cat.id
      LEFT JOIN product_variants pv ON ci.variant_id = pv.id
+     LEFT JOIN product_colors pc ON ci.color_id = pc.id
      WHERE crt.id = ? AND crt.user_id = ? AND crt.status = 'active'
      ORDER BY ci.created_at DESC`,
     [cart.id, cart.userId]
@@ -267,64 +303,75 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
   const items: CartItemRecord[] = await Promise.all(
     (itemRows || []).map(async (row) => {
       const isProductActive = Boolean(row.p_is_active === 1 || row.p_is_active === true);
-    const hasVariant = Boolean(row.variant_id);
-    const isVariantActive = hasVariant
-      ? Boolean(row.v_is_active === 1 || row.v_is_active === true)
-      : true;
+      const hasColor = Boolean(row.color_id);
+      const hasVariant = Boolean(row.variant_id);
 
-    // V1 Variant Pricing & Stock Rules:
-    // - If variant: price = variant.price !== null ? variant.price : product.price
-    // - If variant: stock = variant.stock_quantity (DO NOT fall back to parent stock)
-    // - If non-variant: price = product.price, stock = product.stock_quantity
-    let unitPrice = 0;
-    let availableStock = 0;
+      const isColorActive = hasColor
+        ? Boolean(row.c_is_active === 1 || row.c_is_active === true)
+        : true;
+      const isVariantActive = hasVariant
+        ? Boolean(row.v_is_active === 1 || row.v_is_active === true)
+        : true;
 
-    if (hasVariant) {
-      unitPrice =
-        row.v_price !== null && row.v_price !== undefined
-          ? Number(row.v_price)
-          : Number(row.p_price || 0);
-      availableStock = Number(row.v_stock_quantity ?? 0);
-    } else {
-      unitPrice = Number(row.p_price || 0);
-      availableStock = Number(row.p_stock_quantity ?? 0);
-    }
+      let unitPrice = 0;
+      let availableStock = 0;
 
-    const originalUnitPrice =
-      row.p_compare_at_price !== null &&
-      row.p_compare_at_price !== undefined &&
-      Number(row.p_compare_at_price) > unitPrice
-        ? Number(row.p_compare_at_price)
-        : unitPrice;
-
-    // Stock & Availability flags
-    const isAvailable = isProductActive && isVariantActive && availableStock > 0;
-    const requestedQuantityAvailable = isAvailable && row.quantity <= availableStock;
-
-    // Resolve B-14 applicable discount for this product context
-    let discountAmountPerUnit = 0;
-    if (isProductActive && row.p_id) {
-      try {
-        const discountResult = await getApplicableDiscountForProduct(row.p_id, now);
-        if (discountResult && discountResult.discount) {
-          const calc = computeDiscountAmount(discountResult.discount, unitPrice);
-          discountAmountPerUnit = calc.discountAmount;
-        }
-      } catch {
-        discountAmountPerUnit = 0;
+      if (hasColor) {
+        unitPrice =
+          row.c_price_override !== null && row.c_price_override !== undefined
+            ? Number(row.c_price_override)
+            : Number(row.p_price || 0);
+        availableStock = Math.max(0, Number(row.c_stock ?? 0) - Number(row.c_reserved_stock ?? 0));
+      } else if (hasVariant) {
+        unitPrice =
+          row.v_price !== null && row.v_price !== undefined
+            ? Number(row.v_price)
+            : Number(row.p_price || 0);
+        availableStock = Number(row.v_stock_quantity ?? 0);
+      } else {
+        unitPrice = Number(row.p_price || 0);
+        availableStock = Number(row.p_stock_quantity ?? 0);
       }
-    }
 
-    const finalUnitPrice = Math.max(0, roundToTwo(unitPrice - discountAmountPerUnit));
-    const lineSubtotal = roundToTwo(unitPrice * row.quantity);
-    const lineDiscount = roundToTwo(discountAmountPerUnit * row.quantity);
-    const lineTotal = roundToTwo(finalUnitPrice * row.quantity);
+      const originalUnitPrice =
+        row.p_compare_at_price !== null &&
+        row.p_compare_at_price !== undefined &&
+        Number(row.p_compare_at_price) > unitPrice
+          ? Number(row.p_compare_at_price)
+          : unitPrice;
+
+      // Stock & Availability flags
+      const isAvailable = isProductActive && isColorActive && isVariantActive && availableStock > 0;
+      const requestedQuantityAvailable =
+        isAvailable && row.quantity <= availableStock && row.quantity <= 10;
+
+      // Resolve B-14 applicable discount for this product context
+      let discountAmountPerUnit = 0;
+      if (isProductActive && row.p_id) {
+        try {
+          const discountResult = await getApplicableDiscountForProduct(row.p_id, now);
+          if (discountResult && discountResult.discount) {
+            const calc = computeDiscountAmount(discountResult.discount, unitPrice);
+            discountAmountPerUnit = calc.discountAmount;
+          }
+        } catch {
+          discountAmountPerUnit = 0;
+        }
+      }
+
+      const finalUnitPrice = Math.max(0, roundToTwo(unitPrice - discountAmountPerUnit));
+      const lineSubtotal = roundToTwo(unitPrice * row.quantity);
+      const lineDiscount = roundToTwo(discountAmountPerUnit * row.quantity);
+      const lineTotal = roundToTwo(finalUnitPrice * row.quantity);
+
+      const resolvedImage = toPublicUrl(row.color_image || row.fallback_image);
 
       return {
         id: row.item_id,
         cartId: row.cart_id,
         productId: row.product_id,
         variantId: row.variant_id ?? null,
+        colorId: row.color_id ?? null,
         quantity: Number(row.quantity),
         product: {
           id: row.p_id || row.product_id,
@@ -334,10 +381,15 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
             ? `${row.p_name} (Unavailable)`
             : "Unavailable Product",
           slug: row.p_slug || `product-${row.product_id}`,
-          image: toPublicUrl(row.primary_image),
+          image: resolvedImage,
           category: isProductActive ? row.category_name || null : null,
           categorySlug: isProductActive ? row.category_slug || null : null,
           isActive: isProductActive,
+          codEnabled: Boolean(
+            row.p_cod_enabled !== undefined && row.p_cod_enabled !== null
+              ? row.p_cod_enabled
+              : 1
+          ),
         },
         variant: hasVariant && row.v_id
           ? {
@@ -345,6 +397,17 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
               name: row.v_name || "Variant",
               sku: row.v_sku || "",
               isActive: isVariantActive,
+            }
+          : null,
+        color: hasColor && row.c_id
+          ? {
+              id: row.c_id,
+              name: row.c_name || "Color",
+              slug: row.c_slug || "",
+              hex: row.c_hex || "#000000",
+              sku: row.c_sku || null,
+              image: resolvedImage,
+              isActive: isColorActive,
             }
           : null,
         pricing: {
@@ -386,33 +449,31 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
       total,
     },
     itemCount,
+    isCodEligible: items.length > 0 && items.every((it) => it.product.codEnabled !== false),
     createdAt: cart.createdAt,
     updatedAt: cart.updatedAt,
   };
 }
 
 /**
- * Adds an item to the customer's active cart.
- *
- * Rules:
- * - Product must exist and be active.
- * - If product has variants, customer must supply an active variant belonging to that product.
- * - If product has no variants, variantId must be null or omitted.
- * - Stock validation: (existing quantity in cart + requested quantity) <= trusted available stock.
- * - Idempotent line addition: if the product/variant already exists, updates existing quantity.
+ * Validates and atomically inserts or increments a single cart line inside a database connection.
  */
-export async function addCartItem(
-  userId: string,
+async function addSingleCartItemInternal(
+  conn: PoolConnection,
+  cartId: string,
   input: AddCartItemInput
-): Promise<CartRecord> {
-  const cleanUserId = validateId(userId, "User ID");
+): Promise<void> {
   const cleanProductId = validateId(input.productId, "Product ID");
   const quantityToAdd = validateQuantity(input.quantity);
+  if (quantityToAdd > 10) {
+    throw new CartValidationError("Maximum 10 units allowed per item/color", 400);
+  }
+  const cleanColorId = input.colorId ? validateId(input.colorId, "Color ID") : null;
   const cleanVariantId = input.variantId ? validateId(input.variantId, "Variant ID") : null;
 
   // 1. Verify referenced product exists and is active
-  const productRows = await query<any[]>(
-    "SELECT id, name, price, stock_quantity, is_active FROM products WHERE id = ? LIMIT 1",
+  const [productRows]: any = await conn.execute(
+    "SELECT id, name, price, stock_quantity, is_active, has_colors FROM products WHERE id = ? LIMIT 1",
     [cleanProductId]
   );
 
@@ -424,72 +485,110 @@ export async function addCartItem(
   const isProductActive = Boolean(product.is_active === 1 || product.is_active === true);
   if (!isProductActive) {
     throw new CartValidationError(
-      "This product is currently inactive and cannot be added to the cart",
+      `Product "${product.name}" is currently inactive and cannot be added to the cart`,
       400
     );
   }
 
-  // 2. Check product variants in database
-  const variantRows = await query<any[]>(
-    "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE product_id = ?",
-    [cleanProductId]
-  );
-
-  const hasVariants = Boolean(variantRows && variantRows.length > 0);
+  const productHasColors = Boolean(product.has_colors === 1 || product.has_colors === true);
   let effectiveStock = 0;
 
-  if (hasVariants) {
-    if (!cleanVariantId) {
-      throw new CartValidationError("Please select a valid variant for this product", 400);
+  if (productHasColors) {
+    if (!cleanColorId) {
+      throw new CartValidationError("Please select a color for this product", 400);
     }
 
-    const matchedVariant = variantRows.find((v) => v.id === cleanVariantId);
-    if (!matchedVariant) {
-      throw new CartValidationError("The selected variant does not belong to this product", 400);
-    }
-
-    const isVariantActive = Boolean(
-      matchedVariant.is_active === 1 || matchedVariant.is_active === true
+    const [colorRows]: any = await conn.execute(
+      "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, is_active FROM product_colors WHERE id = ? LIMIT 1",
+      [cleanColorId]
     );
-    if (!isVariantActive) {
-      throw new CartValidationError("The selected variant is currently inactive", 400);
+
+    if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
+      throw new CartValidationError("The selected color does not belong to this product", 400);
     }
 
-    // V1 Variant Stock Rule: Variant products use variant stock; DO NOT fall back to parent
-    effectiveStock = Number(matchedVariant.stock_quantity ?? 0);
-  } else {
-    if (cleanVariantId) {
-      throw new CartValidationError("This product does not have variants", 400);
+    const color = colorRows[0];
+    const isColorActive = Boolean(color.is_active === 1 || color.is_active === true);
+    if (!isColorActive) {
+      throw new CartValidationError(`The selected color "${color.name}" is currently inactive`, 400);
     }
-    effectiveStock = Number(product.stock_quantity ?? 0);
+
+    effectiveStock = Math.max(0, Number(color.stock ?? 0) - Number(color.reserved_stock ?? 0));
+  } else {
+    // Check product variants in database
+    const [variantRows]: any = await conn.execute(
+      "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE product_id = ?",
+      [cleanProductId]
+    );
+
+    const hasVariants = Boolean(variantRows && variantRows.length > 0);
+
+    if (hasVariants) {
+      if (!cleanVariantId) {
+        throw new CartValidationError("Please select a valid variant for this product", 400);
+      }
+
+      const matchedVariant = variantRows.find((v: any) => v.id === cleanVariantId);
+      if (!matchedVariant) {
+        throw new CartValidationError("The selected variant does not belong to this product", 400);
+      }
+
+      const isVariantActive = Boolean(
+        matchedVariant.is_active === 1 || matchedVariant.is_active === true
+      );
+      if (!isVariantActive) {
+        throw new CartValidationError("The selected variant is currently inactive", 400);
+      }
+
+      effectiveStock = Number(matchedVariant.stock_quantity ?? 0);
+    } else {
+      if (cleanColorId) {
+        throw new CartValidationError("This product does not have color options", 400);
+      }
+      if (cleanVariantId) {
+        throw new CartValidationError("This product does not have variants", 400);
+      }
+      effectiveStock = Number(product.stock_quantity ?? 0);
+    }
   }
 
   if (effectiveStock <= 0) {
     throw new CartValidationError("This item is currently out of stock", 400);
   }
 
-  // 3. Resolve user's active cart
-  const cart = await getOrCreateActiveCartForUser(cleanUserId);
-
-  // 4. Check for existing cart item for same product + variant (handling MySQL NULL variant)
+  // Check for existing cart item for same product + color / variant
   let existingItemRows: any[];
-  if (cleanVariantId) {
-    existingItemRows = await query<any[]>(
+  if (cleanColorId) {
+    const [rows]: any = await conn.execute(
+      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND color_id = ? LIMIT 1",
+      [cartId, cleanProductId, cleanColorId]
+    );
+    existingItemRows = rows;
+  } else if (cleanVariantId) {
+    const [rows]: any = await conn.execute(
       "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
-      [cart.id, cleanProductId, cleanVariantId]
+      [cartId, cleanProductId, cleanVariantId]
     );
+    existingItemRows = rows;
   } else {
-    existingItemRows = await query<any[]>(
-      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant_id IS NULL LIMIT 1",
-      [cart.id, cleanProductId]
+    const [rows]: any = await conn.execute(
+      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant_id IS NULL AND color_id IS NULL LIMIT 1",
+      [cartId, cleanProductId]
     );
+    existingItemRows = rows;
   }
 
   const existingItem = existingItemRows && existingItemRows.length > 0 ? existingItemRows[0] : null;
   const existingQuantity = existingItem ? Number(existingItem.quantity) : 0;
   const targetQuantity = existingQuantity + quantityToAdd;
 
-  // 5. Stock validation: current + new <= available stock
+  if (targetQuantity > 10) {
+    throw new CartValidationError(
+      `Cannot exceed 10 units per color/item (already ${existingQuantity} in cart, requested +${quantityToAdd})`,
+      400
+    );
+  }
+
   if (targetQuantity > effectiveStock) {
     throw new CartValidationError(
       `Insufficient stock available. You already have ${existingQuantity} in your cart, and only ${effectiveStock} are in stock.`,
@@ -497,36 +596,57 @@ export async function addCartItem(
     );
   }
 
-  // 6. Insert new item or update existing row
   if (existingItem) {
-    await query(
+    await conn.execute(
       "UPDATE cart_items SET quantity = ?, updated_at = NOW() WHERE id = ?",
       [targetQuantity, existingItem.id]
     );
   } else {
     const newItemId = crypto.randomUUID();
-    await query(
-      `INSERT INTO cart_items (id, cart_id, product_id, variant_id, quantity, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, NOW(), NOW())`,
-      [newItemId, cart.id, cleanProductId, cleanVariantId, targetQuantity]
+    await conn.execute(
+      `INSERT INTO cart_items (id, cart_id, product_id, variant_id, color_id, quantity, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [newItemId, cartId, cleanProductId, cleanVariantId || null, cleanColorId || null, targetQuantity]
     );
   }
+}
 
-  // Touch cart updated_at
-  await query("UPDATE carts SET updated_at = NOW() WHERE id = ?", [cart.id]);
+/**
+ * Adds multiple items to the customer's active cart atomically inside a single transaction.
+ */
+export async function addCartItemsBatch(
+  userId: string,
+  items: AddCartItemInput[]
+): Promise<CartRecord> {
+  const cleanUserId = validateId(userId, "User ID");
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new CartValidationError("At least one item must be provided", 400);
+  }
 
-  // 7. Return refreshed cart
+  const cart = await getOrCreateActiveCartForUser(cleanUserId);
+
+  await withTransaction(async (conn) => {
+    for (const it of items) {
+      await addSingleCartItemInternal(conn, cart.id, it);
+    }
+    await conn.execute("UPDATE carts SET updated_at = NOW() WHERE id = ?", [cart.id]);
+  });
+
   return await getCartForUser(cleanUserId);
 }
 
 /**
+ * Adds an item to the customer's active cart.
+ */
+export async function addCartItem(
+  userId: string,
+  input: AddCartItemInput
+): Promise<CartRecord> {
+  return await addCartItemsBatch(userId, [input]);
+}
+
+/**
  * Updates an existing cart item's final quantity.
- *
- * Rules:
- * - Scoped strictly to the authenticated user's active cart.
- * - Prevents IDOR: Customer A cannot update Customer B's cart item.
- * - Requested final quantity must be an integer > 0.
- * - Requested final quantity <= current available stock.
  */
 export async function updateCartItemQuantity(
   userId: string,
@@ -537,24 +657,34 @@ export async function updateCartItemQuantity(
   const cleanItemId = validateId(rawItemId, "Cart Item ID");
   const desiredQuantity = validateQuantity(rawQuantity);
 
-  // 1. Locate item with cart ownership and current product/variant stock
+  if (desiredQuantity > 10) {
+    throw new CartValidationError("Maximum quantity allowed per item is 10", 400);
+  }
+
+  // 1. Locate item with cart ownership and current product/variant/color stock
   const rows = await query<any[]>(
-    `SELECT 
+    `SELECT
        ci.id AS item_id,
        ci.cart_id,
        ci.product_id,
        ci.variant_id,
+       ci.color_id,
        ci.quantity,
        p.name AS product_name,
        p.is_active AS product_is_active,
        p.stock_quantity AS product_stock_quantity,
        pv.name AS variant_name,
        pv.is_active AS variant_is_active,
-       pv.stock_quantity AS variant_stock_quantity
+       pv.stock_quantity AS variant_stock_quantity,
+       pc.name AS color_name,
+       pc.stock AS color_stock,
+       pc.reserved_stock AS color_reserved_stock,
+       pc.is_active AS color_is_active
      FROM cart_items ci
      INNER JOIN carts c ON ci.cart_id = c.id
      INNER JOIN products p ON ci.product_id = p.id
      LEFT JOIN product_variants pv ON ci.variant_id = pv.id
+     LEFT JOIN product_colors pc ON ci.color_id = pc.id
      WHERE ci.id = ? AND c.user_id = ? AND c.status = 'active'
      LIMIT 1`,
     [cleanItemId, cleanUserId]
@@ -571,7 +701,13 @@ export async function updateCartItemQuantity(
   }
 
   let effectiveStock = 0;
-  if (row.variant_id) {
+  if (row.color_id) {
+    const isColorActive = Boolean(row.color_is_active === 1 || row.color_is_active === true);
+    if (!isColorActive) {
+      throw new CartValidationError("The selected color is no longer active", 400);
+    }
+    effectiveStock = Math.max(0, Number(row.color_stock ?? 0) - Number(row.color_reserved_stock ?? 0));
+  } else if (row.variant_id) {
     const isVariantActive = Boolean(row.variant_is_active === 1 || row.variant_is_active === true);
     if (!isVariantActive) {
       throw new CartValidationError("The selected variant is no longer active", 400);
@@ -581,7 +717,6 @@ export async function updateCartItemQuantity(
     effectiveStock = Number(row.product_stock_quantity ?? 0);
   }
 
-  // 2. Validate requested quantity against trusted stock
   if (desiredQuantity > effectiveStock) {
     throw new CartValidationError(
       `Requested quantity (${desiredQuantity}) exceeds available stock (${effectiveStock} available)`,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAdmin, handleAuthError } from "@/lib/server/auth";
+import { requireAdmin, handleAuthError, assertSafeOrigin, jsonPrivate } from "@/lib/server";
 import { getAdminReviewById, updateAdminReview } from "@/lib/server/review";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +20,10 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const review = await getAdminReviewById(decodedId);
     if (!review) {
-      return NextResponse.json({ ok: false, error: "Review not found" }, { status: 404 });
+      return jsonPrivate({ ok: false, error: "Review not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, review });
+    return jsonPrivate({ ok: true, review });
   } catch (err: unknown) {
     return handleAuthError(err, "Failed to retrieve review details");
   }
@@ -34,6 +34,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
  */
 export async function PATCH(request: NextRequest, context: RouteContext) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
     const { id } = await context.params;
     const decodedId = decodeURIComponent(id);
@@ -45,10 +46,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     });
 
     if (!updated) {
-      return NextResponse.json({ ok: false, error: "Review not found or update failed" }, { status: 404 });
+      return jsonPrivate({ ok: false, error: "Review not found or update failed" }, { status: 404 });
     }
 
-    return NextResponse.json({ ok: true, review: updated });
+    return jsonPrivate({ ok: true, review: updated });
   } catch (err: unknown) {
     return handleAuthError(err, "Failed to moderate review");
   }

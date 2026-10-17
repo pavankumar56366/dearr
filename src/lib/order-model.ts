@@ -18,6 +18,10 @@ export interface DemoOrderItem {
   slug: string;
   variantId?: string;
   variantName?: string;
+  colorId?: string | null;
+  colorName?: string | null;
+  colorHex?: string | null;
+  sku?: string | null;
   image: string;
   unitPrice: number;
   quantity: number;

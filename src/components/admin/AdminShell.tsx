@@ -62,6 +62,12 @@ const NAV_ITEMS: NavItem[] = [
     isImplemented: true,
   },
   {
+    name: "Abandonment",
+    href: "/admin/abandonment",
+    icon: ShoppingCartIcon,
+    isImplemented: true,
+  },
+  {
     name: "Customers",
     href: "/admin/customers",
     icon: UsersIcon,
@@ -643,6 +649,8 @@ export function AdminShell({ children }: AdminShellProps) {
                   ? "Discounts"
                   : pathname.startsWith("/admin/orders")
                   ? "Orders"
+                  : pathname.startsWith("/admin/abandonment")
+                  ? "Cart Abandonment"
                   : pathname.startsWith("/admin/customers")
                   ? "Customers"
                   : pathname.startsWith("/admin/reviews")

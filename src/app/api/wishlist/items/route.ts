@@ -4,6 +4,8 @@ import {
   handleAuthError,
   addProductToWishlist,
   WishlistValidationError,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -14,6 +16,7 @@ export const runtime = "nodejs";
  * Adds a product to the authenticated customer's wishlist.
  *
  * Strict Ownership & Validation:
+ * - Requires verified same-origin request via assertSafeOrigin().
  * - Requires authenticated session via requireUser() (401 if unauthenticated).
  * - Only accepts productId from body; client-supplied userId or wishlistId are ignored.
  * - Enforces storefront product visibility (active products only).
@@ -21,27 +24,28 @@ export const runtime = "nodejs";
  */
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
     const user = await requireUser();
 
     let body: any;
     try {
       body = await request.json();
     } catch {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Invalid JSON request body" },
         { status: 400 }
       );
     }
 
     if (!body || typeof body !== "object") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Request body must be a valid JSON object" },
         { status: 400 }
       );
     }
 
     if (!body.productId || typeof body.productId !== "string") {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: "Product ID is required and must be a string" },
         { status: 400 }
       );
@@ -49,7 +53,7 @@ export async function POST(request: Request) {
 
     const result = await addProductToWishlist(user.id, body.productId);
 
-    return NextResponse.json(
+    return jsonPrivate(
       {
         ok: true,
         message: result.alreadyInWishlist
@@ -58,11 +62,11 @@ export async function POST(request: Request) {
         item: result.item,
         alreadyInWishlist: result.alreadyInWishlist,
       },
-      { status: result.alreadyInWishlist ? 200 : 201 }
+      { status: 201 }
     );
   } catch (err: unknown) {
     if (err instanceof WishlistValidationError) {
-      return NextResponse.json(
+      return jsonPrivate(
         { ok: false, error: err.message },
         { status: err.statusCode }
       );

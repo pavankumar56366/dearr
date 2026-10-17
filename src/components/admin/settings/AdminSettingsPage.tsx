@@ -31,6 +31,8 @@ interface FormErrors {
   freeShippingThreshold?: string;
   defaultShippingFee?: string;
   cancellationWindowHours?: string;
+  addressChangeWindowHours?: string;
+  maxAddressChangesPerOrder?: string;
 }
 
 export function AdminSettingsPage() {
@@ -212,6 +214,16 @@ export function AdminSettingsPage() {
     if (formData.cancellationWindowHours < 1) {
       newErrors.cancellationWindowHours = "Cancellation window must be at least 1 hour";
     }
+    if (formData.allowAddressChange) {
+      const windowHours = Number(formData.addressChangeWindowHours);
+      if (!Number.isInteger(windowHours) || windowHours < 1 || windowHours > 72) {
+        newErrors.addressChangeWindowHours = "Address change window must be an integer between 1 and 72 hours";
+      }
+      const maxChanges = Number(formData.maxAddressChangesPerOrder);
+      if (!Number.isInteger(maxChanges) || maxChanges < 1 || maxChanges > 10) {
+        newErrors.maxAddressChangesPerOrder = "Maximum address changes must be an integer between 1 and 10";
+      }
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -235,6 +247,8 @@ export function AdminSettingsPage() {
       freeShippingThreshold: true,
       defaultShippingFee: true,
       cancellationWindowHours: true,
+      addressChangeWindowHours: true,
+      maxAddressChangesPerOrder: true,
     });
 
     if (!validateForm()) {
@@ -833,6 +847,79 @@ export function AdminSettingsPage() {
               (v) => updateField("notifyOnNewOrder", v),
               "toggle-notifyOnNewOrder"
             )}
+
+            {/* Customer Delivery Address Change Policies */}
+            {renderToggle(
+              "Allow customers to change delivery address",
+              "Permit buyers to update their delivery address from their account dashboard within an admin-controlled time window prior to dispatch.",
+              formData.allowAddressChange,
+              (v) => updateField("allowAddressChange", v),
+              "toggle-allowAddressChange"
+            )}
+
+            {formData.allowAddressChange && (
+              <>
+                <div className="py-3 flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <label
+                      htmlFor="addressChangeWindowHours"
+                      className="text-xs font-bold text-neutral-800"
+                    >
+                      Address change window (Hours)
+                    </label>
+                    <p className="text-[11px] text-neutral-500">
+                      Elapsed hours after order placement during which address changes are permitted (1–72 hours).
+                    </p>
+                  </div>
+                  <div className="w-28 shrink-0">
+                    <input
+                      id="addressChangeWindowHours"
+                      type="number"
+                      min={1}
+                      max={72}
+                      value={formData.addressChangeWindowHours ?? 6}
+                      onChange={(e) =>
+                        updateField(
+                          "addressChangeWindowHours",
+                          parseInt(e.target.value, 10) || 1
+                        )
+                      }
+                      className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="py-3 flex items-center justify-between gap-4">
+                  <div className="space-y-0.5">
+                    <label
+                      htmlFor="maxAddressChangesPerOrder"
+                      className="text-xs font-bold text-neutral-800"
+                    >
+                      Maximum address changes per order
+                    </label>
+                    <p className="text-[11px] text-neutral-500">
+                      Maximum number of successful delivery address updates permitted per order (1–10).
+                    </p>
+                  </div>
+                  <div className="w-28 shrink-0">
+                    <input
+                      id="maxAddressChangesPerOrder"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={formData.maxAddressChangesPerOrder ?? 2}
+                      onChange={(e) =>
+                        updateField(
+                          "maxAddressChangesPerOrder",
+                          parseInt(e.target.value, 10) || 1
+                        )
+                      }
+                      className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -962,12 +1049,124 @@ export function AdminSettingsPage() {
         </div>
 
         {/* ====================================================================
-            SECTION G — STORE APPEARANCE & BRAND PALETTE
+            SECTION G — CART ABANDONMENT & RECOVERY GROUNDWORK
+            ==================================================================== */}
+        <div className="p-6 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-4">
+          <div className="border-b border-neutral-100 pb-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-sm font-bold text-neutral-900">
+                  Section G — Cart Abandonment & Recovery
+                </h2>
+                <p className="text-xs text-neutral-500 mt-0.5">
+                  Customer recovery sheets, lower-priced recommendations, and feedback collection
+                </p>
+              </div>
+              <ShoppingCartIcon size={18} className="text-neutral-400" />
+            </div>
+
+            {/* Informational notification banner */}
+            <div className="mt-3 p-3 rounded-xl bg-amber-50/70 border border-amber-200 text-amber-900 text-xs flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+              <span>
+                <strong>Groundwork Mode:</strong> Customer recovery sheets and alternative swaps operate live on storefront checkout. Future notification consent is data-only (zero external SMS/emails sent).
+              </span>
+            </div>
+          </div>
+
+          <div className="divide-y divide-neutral-100">
+            {renderToggle(
+              "Enable Recovery Sheet",
+              "Presents the customer recovery sheet upon checkout modal dismissal or payment gateway failure.",
+              formData.recoverySheetEnabled ?? true,
+              (v) => updateField("recoverySheetEnabled", v),
+              "toggle-recoverySheetEnabled"
+            )}
+
+            {renderToggle(
+              "Offer Lower-Priced Alternatives",
+              "Queries and presents in-stock, lower-priced items in the same product category with one-click cart swapping.",
+              formData.alternativesEnabled ?? true,
+              (v) => updateField("alternativesEnabled", v),
+              "toggle-alternativesEnabled"
+            )}
+
+            {formData.alternativesEnabled !== false && (
+              <div className="py-3 flex items-center justify-between gap-4">
+                <div className="space-y-0.5">
+                  <label
+                    htmlFor="maxAlternatives"
+                    className="text-xs font-bold text-neutral-800"
+                  >
+                    Maximum Recommended Alternatives
+                  </label>
+                  <p className="text-[11px] text-neutral-500">
+                    Maximum number of alternative products displayed in the customer recovery drawer (1–4 items).
+                  </p>
+                </div>
+                <div className="w-28 shrink-0">
+                  <input
+                    id="maxAlternatives"
+                    type="number"
+                    min={1}
+                    max={4}
+                    value={formData.maxAlternatives ?? 4}
+                    onChange={(e) =>
+                      updateField(
+                        "maxAlternatives",
+                        Math.max(1, Math.min(4, parseInt(e.target.value, 10) || 1))
+                      )
+                    }
+                    className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+              </div>
+            )}
+
+            {renderToggle(
+              "Collect Abandonment Feedback",
+              "Allows shoppers to optionally share reasons for leaving directly from the recovery sheet.",
+              formData.feedbackEnabled ?? true,
+              (v) => updateField("feedbackEnabled", v),
+              "toggle-feedbackEnabled"
+            )}
+
+            {formData.feedbackEnabled !== false && (
+              <div className="py-3 space-y-1.5">
+                <label
+                  htmlFor="feedbackReasons"
+                  className="block text-xs font-semibold text-neutral-700"
+                >
+                  Configurable Feedback Reasons (One per line)
+                </label>
+                <textarea
+                  id="feedbackReasons"
+                  rows={4}
+                  value={Array.isArray(formData.feedbackReasons) ? formData.feedbackReasons.join("\n") : ""}
+                  onChange={(e) =>
+                    updateField(
+                      "feedbackReasons",
+                      e.target.value
+                        .split("\n")
+                        .map((s) => s.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  className="w-full p-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-800 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary resize-none font-mono"
+                  placeholder="Price is too high&#10;Shipping charges too high&#10;Found it cheaper elsewhere&#10;Other"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ====================================================================
+            SECTION H — STORE APPEARANCE & BRAND PALETTE
             ==================================================================== */}
         <div className="p-6 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-4">
           <div className="border-b border-neutral-100 pb-3">
             <h2 className="text-sm font-bold text-neutral-900">
-              Section G — Brand Palette & Appearance
+              Section H — Brand Palette & Appearance
             </h2>
             <p className="text-xs text-neutral-500 mt-0.5">
               Dearr design token palette (Constrained to approved design tokens to protect system integrity)

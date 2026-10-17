@@ -13,6 +13,7 @@ export interface SessionPayload {
   email: string;
   fullName: string;
   role: "customer" | "admin";
+  tokenVersion?: number;
   iat?: number;
   exp?: number;
 }
@@ -77,6 +78,7 @@ export async function createSessionToken(
     email: string;
     fullName: string;
     role: "customer" | "admin";
+    tokenVersion?: number;
   },
   expiresIn: string = "7d"
 ): Promise<string> {
@@ -87,6 +89,7 @@ export async function createSessionToken(
     email: user.email,
     fullName: user.fullName,
     role: user.role,
+    tokenVersion: user.tokenVersion ?? 1,
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -112,6 +115,7 @@ export async function verifySessionToken(token: string): Promise<SessionPayload 
       email: payload.email as string,
       fullName: payload.fullName as string,
       role: payload.role as "customer" | "admin",
+      tokenVersion: typeof payload.tokenVersion === "number" ? payload.tokenVersion : undefined,
       iat: payload.iat,
       exp: payload.exp,
     };
@@ -235,6 +239,13 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
     return null;
   }
 
+  // Token version verification: session tokenVersion must match the database tokenVersion
+  const currentTokenVersion = profile.tokenVersion ?? 1;
+  const tokenVersionInSession = session.tokenVersion ?? 1;
+  if (tokenVersionInSession !== currentTokenVersion) {
+    return null;
+  }
+
   // Suspended customers are blocked from normal customer session access (admins never blocked)
   if (profile.role !== "admin" && profile.status === "suspended") {
     return null;
@@ -256,6 +267,13 @@ export async function requireUser(): Promise<UserProfile> {
   const user = await findProfileById(session.sub);
   if (!user) {
     throw new AuthError("Authentication required to access this resource", 401);
+  }
+
+  // Token version verification: session tokenVersion must match current database tokenVersion
+  const currentTokenVersion = user.tokenVersion ?? 1;
+  const tokenVersionInSession = session.tokenVersion ?? 1;
+  if (tokenVersionInSession !== currentTokenVersion) {
+    throw new AuthError("Session has expired or been revoked. Please sign in again.", 401);
   }
 
   if (user.role !== "admin" && user.status === "suspended") {
@@ -314,4 +332,103 @@ export function handleAuthError(
     { ok: false, error: fallbackMessage },
     { status: 500 }
   );
+}
+
+/**
+ * Asserts that a state-changing mutation originates from a trusted origin.
+ * Prevents Cross-Site Request Forgery (CSRF) for cookie-authenticated requests.
+ * Validates Origin and Referer against configured application origin and local test origin.
+ * Strictly blocks hostile origins, 'null' origins, and malformed origin headers.
+ */
+export function assertSafeOrigin(request: Request): void {
+  const origin = request.headers.get("origin");
+  const host = request.headers.get("host");
+
+  // Determine trusted origins and hosts from environment configuration
+  const envAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+  const trustedOrigins = new Set<string>([
+    "https://dearr.in",
+    "https://www.dearr.in",
+  ]);
+  const allowedHosts = new Set<string>([
+    "dearr.in",
+    "www.dearr.in",
+  ]);
+
+  if (envAppUrl) {
+    try {
+      const u = new URL(envAppUrl);
+      trustedOrigins.add(u.origin.toLowerCase());
+      allowedHosts.add(u.host.toLowerCase());
+    } catch {
+      // Ignore invalid URL in env
+    }
+  }
+
+  // In non-production environments (test/development), allow localhost and 127.0.0.1
+  if (process.env.NODE_ENV !== "production") {
+    trustedOrigins.add("http://localhost:3000");
+    trustedOrigins.add("http://127.0.0.1:3000");
+    trustedOrigins.add("http://localhost");
+    trustedOrigins.add("http://127.0.0.1");
+    allowedHosts.add("localhost:3000");
+    allowedHosts.add("127.0.0.1:3000");
+    allowedHosts.add("localhost");
+    allowedHosts.add("127.0.0.1");
+  }
+
+  // Validate Host header if present
+  if (host) {
+    const cleanHost = host.trim().toLowerCase();
+    if (!allowedHosts.has(cleanHost)) {
+      throw new AuthError("Cross-origin request blocked: untrusted host header", 403);
+    }
+  }
+
+  if (origin !== null && origin !== undefined) {
+    const trimmedOrigin = origin.trim();
+    if (trimmedOrigin.toLowerCase() === "null") {
+      throw new AuthError("Cross-origin request blocked: null origin", 403);
+    }
+
+    let originUrl: URL;
+    try {
+      originUrl = new URL(trimmedOrigin);
+    } catch {
+      throw new AuthError("Invalid origin header", 403);
+    }
+
+    if (originUrl.protocol !== "http:" && originUrl.protocol !== "https:") {
+      throw new AuthError("Invalid origin protocol", 403);
+    }
+
+    const normOrigin = originUrl.origin.toLowerCase();
+    const isDirectlyTrusted = trustedOrigins.has(normOrigin);
+    const matchesHost = host && originUrl.host.toLowerCase() === host.toLowerCase() && allowedHosts.has(host.toLowerCase());
+
+    if (!isDirectlyTrusted && !matchesHost) {
+      throw new AuthError("Cross-origin request blocked", 403);
+    }
+    return;
+  }
+
+  // Fallback to Referer header if Origin is omitted
+  const referer = request.headers.get("referer");
+  if (referer) {
+    let refererUrl: URL;
+    try {
+      refererUrl = new URL(referer);
+    } catch {
+      throw new AuthError("Invalid referer header", 403);
+    }
+
+    const normRefererOrigin = refererUrl.origin.toLowerCase();
+    const isDirectlyTrusted = trustedOrigins.has(normRefererOrigin);
+    const matchesHost = host && refererUrl.host.toLowerCase() === host.toLowerCase() && allowedHosts.has(host.toLowerCase());
+
+    if (!isDirectlyTrusted && !matchesHost) {
+      throw new AuthError("Cross-origin request blocked", 403);
+    }
+    return;
+  }
 }

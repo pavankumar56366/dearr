@@ -8,6 +8,8 @@ import {
   DiscountScope,
   DiscountType,
   DiscountDerivedStatus,
+  assertSafeOrigin,
+  jsonPrivate,
 } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +71,7 @@ export async function GET(request: Request) {
 
     const discounts = await listDiscounts(filters);
 
-    return NextResponse.json({
+    return jsonPrivate({
       ok: true,
       discounts,
     });
@@ -85,6 +87,7 @@ export async function GET(request: Request) {
  */
 export async function POST(request: Request) {
   try {
+    assertSafeOrigin(request);
     await requireAdmin();
 
     let body: any;

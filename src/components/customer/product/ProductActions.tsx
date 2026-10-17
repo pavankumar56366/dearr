@@ -139,6 +139,7 @@ export default function ProductActions({
           {/* Add to Cart Button */}
           <button
             type="button"
+            id="btn-add-to-cart"
             disabled={isOutOfStock}
             onClick={handleAddToCart}
             className="flex-1 flex items-center justify-center gap-2 h-12 px-6 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-md active:scale-[0.98]"
@@ -194,6 +195,7 @@ export default function ProductActions({
         {!isOutOfStock && (
           <button
             type="button"
+            id="btn-buy-now"
             onClick={handleBuyNow}
             className="w-full flex items-center justify-center h-12 px-6 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary hover:bg-neutral-100 active:scale-[0.98]"
             style={{
