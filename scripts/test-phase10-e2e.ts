@@ -145,7 +145,7 @@ async function runTests() {
   assertTest(!ordersForUser.some((o: any) => o.id === abandonedAttempt.id), "A.4: Customer order history excludes the abandoned attempt");
 
   const analyticsA = await getOrderSummaryMetrics(resolveReportingPeriod({ period: "all" }));
-  const [allOrdersCount]: any = await conn.query("SELECT count(*) as count FROM orders");
+  const [allOrdersCount]: any = await conn.query("SELECT count(*) as count FROM orders WHERE payment_status IN ('paid', 'refunded', 'cod')");
   assertTest(analyticsA.totalOrders === Number(allOrdersCount[0].count), "A.5: Admin analytics total orders excludes abandoned attempt");
 
   // ---------------------------------------------------------------------------

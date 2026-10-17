@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: dearr_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: TypeScript Check
+        run: npx tsc --noEmit
+
+      - name: Run Core Security & Regression Suites
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_NAME: dearr_test
+          DB_USER: root
+          DB_PASSWORD: rootpassword
+          AUTH_SECRET: test_auth_secret_key_32_bytes_len_12345
+          SESSION_SECRET: test_session_secret_32_bytes_len_12345
+          RAZORPAY_KEY_ID: rzp_test_ci_mock
+          RAZORPAY_KEY_SECRET: mock_secret_ci
+          NEXT_PUBLIC_RAZORPAY_KEY_ID: rzp_test_ci_mock
+          RESEND_EMAILS_ENABLED: 'false'
+        run: |
+          npx tsx scripts/init-ci-test-db.ts
+          npx tsx scripts/test-resend-transactional-email.ts
+          npx tsx scripts/test-payment-verification-security.ts
+          npx tsx scripts/test-auth-rate-limiting.ts
+          npx tsx scripts/test-product-cod-eligibility.ts
+          node scripts/verify-11-features.mjs
+
+      - name: Production Build Verification
+        run: npm run build
