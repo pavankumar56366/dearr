@@ -13,6 +13,7 @@ import { getApplicableDiscountForProduct, computeDiscountAmount } from "./discou
 import { getStoreSettings } from "./settings";
 
 import { recordInternalEvent } from "./events";
+import { dispatchEmailOutboxJob, queueEmailOutboxJob } from "./email";
 
 export const ATTEMPT_EXPIRY_MINUTES = 30;
 export const ATTEMPT_RETENTION_DAYS = 90;
@@ -1102,8 +1103,51 @@ export async function finalizeOrderFromAttempt(
       [orderId, cleanPaymentId, attemptRow.id]
     );
 
-    // Return the created order id
-    return { orderId };
+    // 13. Atomically enqueue durable payment confirmation email in email_outbox
+    let customerEmail = (checkoutData.email || "").trim().toLowerCase();
+    let customerName = (shipping.shippingFullName || "").trim();
+    if (attemptRow.user_id) {
+      const [userRows]: any = await conn.execute(
+        "SELECT email, full_name FROM profiles WHERE id = ? LIMIT 1",
+        [attemptRow.user_id]
+      );
+      if (userRows && userRows.length > 0) {
+        if (!customerEmail) customerEmail = (userRows[0].email || "").trim().toLowerCase();
+        if (!customerName) customerName = (userRows[0].full_name || "").trim();
+      }
+    }
+
+    let outboxJobId: string | null = null;
+    let isDuplicateJob = false;
+    if (customerEmail) {
+      const itemsSummary = items.map((it: any) => ({
+        title: it.productName || it.title || "Product",
+        quantity: Number(it.quantity || 1),
+        price: Number(it.unitPrice || 0),
+      }));
+
+      const queueRes = await queueEmailOutboxJob(
+        {
+          eventType: "payment_confirmation",
+          idempotencyKey: `order_payment:${orderId}`,
+          recipientEmail: customerEmail,
+          recipientName: customerName || "Customer",
+          orderId,
+          payload: {
+            orderNumber,
+            amount: totalAmount,
+            currency,
+            itemsSummary,
+          },
+        },
+        conn
+      );
+      outboxJobId = queueRes.id;
+      isDuplicateJob = queueRes.isDuplicate;
+    }
+
+    // Return the created order id and outbox job identifier (suppress dispatch if already queued)
+    return { orderId, outboxJobId: isDuplicateJob ? null : outboxJobId };
   });
 
   const finalOrder = await getOrderById(txnResult.orderId);
@@ -1124,6 +1168,13 @@ export async function finalizeOrderFromAttempt(
         providerPaymentId: cleanPaymentId,
       },
     });
+
+    // Decoupled, asynchronous dispatch of the committed payment confirmation email
+    if (txnResult.outboxJobId) {
+      dispatchEmailOutboxJob(txnResult.outboxJobId).catch((err) => {
+        console.warn("[EmailOutbox] Async dispatch notice:", err?.message || err);
+      });
+    }
   }
 
   return finalOrder;

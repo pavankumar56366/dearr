@@ -390,3 +390,32 @@ export {
   jsonPrivate,
   PRIVATE_CACHE_CONTROL,
 } from "./response";
+
+export {
+  sendPasswordResetOtp,
+  sendPaymentConfirmation,
+  queueEmailOutboxJob,
+  dispatchEmailOutboxJob,
+  retryPendingEmailOutboxJobs,
+  escapeHtml,
+  renderPasswordResetOtpTemplate,
+  renderPaymentConfirmationTemplate,
+  DEFAULT_SENDER,
+  DEFAULT_SUPPORT_EMAIL,
+  type TransactionalEmailType,
+  type PasswordResetEmailParams,
+  type PaymentConfirmationEmailParams,
+  type EmailDispatchResult,
+} from "./email";
+
+export {
+  requestPasswordResetOtp,
+  verifyPasswordResetOtp,
+  confirmPasswordReset,
+  checkAndIncrementAccountDailyOtpLimit,
+  OtpError,
+  OTP_EXPIRY_MINUTES,
+  MAX_VERIFICATION_ATTEMPTS,
+  MAX_DAILY_OTP_REQUESTS_PER_ACCOUNT,
+  GENERIC_OTP_PUBLIC_RESPONSE,
+} from "./otp";

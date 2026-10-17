@@ -34,7 +34,7 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validate()) {
@@ -43,10 +43,29 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
 
     setIsLoading(true);
 
-    setTimeout(() => {
-      setIsLoading(false);
+    try {
+      const res = await fetch("/api/auth/password-reset/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resetToken: token,
+          password,
+          confirmPassword,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to update password");
+      }
+
       setIsSuccess(true);
-    }, 900);
+    } catch (err: any) {
+      setErrors({ password: err?.message || "Failed to update password. Token may have expired." });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (isSuccess) {
@@ -61,10 +80,7 @@ export function ResetPasswordForm({ token }: ResetPasswordFormProps) {
             <span>✓ Password Successfully Updated</span>
           </div>
           <p>
-            Your new password has been validated for your Dearr account.
-          </p>
-          <p className="text-[11px] text-emerald-700 font-medium">
-            (Demo Mode: In Phase 2, this will update the password_hash with bcrypt in the Hostinger MySQL database).
+            Your account credentials have been securely updated in MySQL with bcrypt encryption.
           </p>
         </div>
 

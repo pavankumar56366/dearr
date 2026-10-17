@@ -5,6 +5,7 @@ import {
   finalizeOrderFromAttempt,
 } from "@/lib/server/checkout-attempt";
 import { query } from "@/lib/server/db";
+import { dispatchEmailOutboxJob, queueEmailOutboxJob } from "@/lib/server/email";
 
 export const dynamic = "force-dynamic";
 
@@ -152,6 +153,32 @@ export async function POST(request: NextRequest) {
             "UPDATE orders SET payment_status = 'paid', status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END, updated_at = NOW() WHERE id = ?",
             [paymentRow.order_id]
           );
+
+          // Queue outbox job for legacy order payment confirmation
+          const orderRows = await query<any[]>(
+            "SELECT o.id, o.order_number, o.total_amount, o.currency, o.shipping_full_name, p.email FROM orders o LEFT JOIN profiles p ON o.user_id = p.id WHERE o.id = ? LIMIT 1",
+            [paymentRow.order_id]
+          );
+          if (orderRows && orderRows.length > 0 && orderRows[0].email) {
+            const ord = orderRows[0];
+            const queueRes = await queueEmailOutboxJob({
+              eventType: "payment_confirmation",
+              idempotencyKey: `order_payment:${ord.id}`,
+              recipientEmail: ord.email.trim().toLowerCase(),
+              recipientName: ord.shipping_full_name || "Customer",
+              orderId: ord.id,
+              payload: {
+                orderNumber: ord.order_number,
+                amount: Number(ord.total_amount),
+                currency: ord.currency || "INR",
+              },
+            });
+            if (!queueRes.isDuplicate) {
+              dispatchEmailOutboxJob(queueRes.id).catch((err) => {
+                console.warn("[EmailOutbox] Legacy dispatch notice:", err?.message || err);
+              });
+            }
+          }
         }
 
         return NextResponse.json(
