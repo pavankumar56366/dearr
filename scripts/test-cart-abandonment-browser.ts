@@ -224,8 +224,8 @@ async function runBrowserAcceptance() {
       quantity: 2,
     });
 
-    await pageA.goto("http://localhost:3000/checkout", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await pageA.waitForSelector("h1, h2", { timeout: 15000 });
+    await pageA.goto("http://localhost:3000/checkout", { waitUntil: "networkidle", timeout: 60000 });
+    await pageA.waitForSelector("h1:has-text('Secure Customer Checkout')", { timeout: 30000 });
 
     // Click "Continue to Payment" or "Proceed to Review & Payment"
     const continueBtn = pageA.locator("button:has-text('Continue to Payment'), button:has-text('Proceed to Review & Payment')").first();
@@ -269,6 +269,12 @@ async function runBrowserAcceptance() {
     // SCENARIO 2: Closing Razorpay modal notifies server and shows recovery sheet
     // -------------------------------------------------------------------------
     console.log("\n--- Executing Scenario 2: Razorpay Dismissal & Recovery Sheet ---");
+    // Listen for the recovery-shown POST response that CartRecoverySheet initiates upon mounting
+    const recoveryShownPromise = pageA.waitForResponse(
+      (res) => res.url().includes("/recovery-shown") && res.status() === 200,
+      { timeout: 30000 }
+    ).catch(() => null);
+
     await pageA.evaluate(async () => {
       if ((window as any).__lastRazorpayOptions?.modal?.ondismiss) {
         await (window as any).__lastRazorpayOptions.modal.ondismiss();
@@ -279,9 +285,12 @@ async function runBrowserAcceptance() {
     await pageA.waitForSelector('div[role="dialog"]', { timeout: 15000 });
     const sheetTitle = await pageA.textContent('div[role="dialog"] h2');
 
+    // Await the recovery-shown POST response to complete
+    await recoveryShownPromise;
+
     // Poll for recovery_shown_at to be recorded by CartRecoverySheet
     let attemptAfterDismiss: any = null;
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 20; i++) {
       const attemptAfterDismissRows: any = await query(
         "SELECT status, abandoned_at, recovery_shown_at FROM checkout_attempts WHERE id = ?",
         [currentAttemptId]
@@ -692,7 +701,8 @@ async function runBrowserAcceptance() {
 
     await clearCartForUser(customerAId);
     await addCartItem(customerAId, { productId: prod1Id, quantity: 1 });
-    await mobilePage.goto("http://localhost:3000/checkout", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await mobilePage.goto("http://localhost:3000/checkout", { waitUntil: "networkidle", timeout: 60000 });
+    await mobilePage.waitForSelector("h1:has-text('Secure Customer Checkout')", { timeout: 30000 });
 
     const mobContinueBtn = mobilePage.locator("button:has-text('Continue to Payment'), button:has-text('Proceed to Review & Payment')").first();
     await mobContinueBtn.waitFor({ state: "visible", timeout: 15000 });
