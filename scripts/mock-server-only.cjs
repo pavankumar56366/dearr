@@ -1,24 +1,21 @@
-const fs = require('fs');
-const path = require('path');
+const { loadTestEnvironment, assertTestDatabaseSafety } = require('./test-db-safety.cjs');
 
-// 1. Mock 'server-only'
-const p = require.resolve('server-only');
-require.cache[p] = { id: p, filename: p, loaded: true, exports: {} };
+// 1. Mock 'server-only' so test runners and standalone Node processes can import server components
+try {
+  const p = require.resolve('server-only');
+  require.cache[p] = { id: p, filename: p, loaded: true, exports: {} };
+} catch (_) {
+  // If resolution fails before module install, fallback gracefully
+}
 
-// 2. Load .env.local
-const envPath = path.resolve(process.cwd(), '.env.local');
-if (fs.existsSync(envPath)) {
-  const lines = fs.readFileSync(envPath, 'utf-8').split('\n');
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith('#')) continue;
-    const idx = trimmed.indexOf('=');
-    if (idx !== -1) {
-      const k = trimmed.slice(0, idx).trim();
-      const v = trimmed.slice(idx + 1).trim();
-      if (!process.env[k]) {
-        process.env[k] = v;
-      }
-    }
-  }
+// 2. Safe Test Environment Loader & Hardened Pre-Flight Safeguard
+// Prefers .env.test.local, fails closed against remote hosts, production database names,
+// missing test mode, and invalid configuration before database connections or mutations can occur.
+try {
+  loadTestEnvironment();
+  assertTestDatabaseSafety();
+} catch (err) {
+  // Fail closed immediately: abort execution before any tests run
+  console.error('[DATABASE SAFETY ABORT]', err.message);
+  process.exit(1);
 }

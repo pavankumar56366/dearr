@@ -11,33 +11,14 @@ Module.prototype.require = function (id: string) {
   return originalRequire.apply(this, arguments as any);
 };
 
-// 2. Load .env.local
-const envPath = path.resolve(process.cwd(), ".env.local");
-if (fs.existsSync(envPath)) {
-  const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx !== -1) {
-      const k = trimmed.slice(0, idx).trim();
-      const v = trimmed.slice(idx + 1).trim();
-      if (!process.env[k]) {
-        process.env[k] = v;
-      }
-    }
-  }
-}
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
 
-// 3. Strict Safety Safeguards
+// 2. Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
+
 const host = process.env.DB_HOST || "127.0.0.1";
 const database = process.env.DB_NAME || "dearr_test";
-if (host !== "127.0.0.1" && host !== "localhost") {
-  throw new Error("ABSOLUTE SAFEGUARD: Host must strictly be loopback (127.0.0.1)!");
-}
-if (database !== "dearr_test") {
-  throw new Error("ABSOLUTE SAFEGUARD: Database name must strictly be 'dearr_test'!");
-}
 
 async function runBrowserAcceptance() {
   console.log("================================================================================");

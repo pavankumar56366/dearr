@@ -21,26 +21,11 @@ Module.prototype.require = function (id: string) {
   return originalRequire.apply(this, arguments as any);
 };
 
-// Load .env.local
-function loadEnv() {
-  const envPath = path.resolve(process.cwd(), ".env.local");
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const idx = trimmed.indexOf("=");
-      if (idx !== -1) {
-        const k = trimmed.slice(0, idx).trim();
-        const v = trimmed.slice(idx + 1).trim();
-        if (!process.env[k]) {
-          process.env[k] = v;
-        }
-      }
-    }
-  }
-}
-loadEnv();
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
+
+// Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
 
 let totalTests = 0;
 let passedTests = 0;

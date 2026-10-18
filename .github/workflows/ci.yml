@@ -48,8 +48,10 @@ jobs:
           RAZORPAY_KEY_SECRET: mock_secret_ci
           NEXT_PUBLIC_RAZORPAY_KEY_ID: rzp_test_ci_mock
           RESEND_EMAILS_ENABLED: 'false'
+          DEARR_TEST_MODE: 'true'
         run: |
           npx tsx scripts/init-ci-test-db.ts
+          npx tsx scripts/test-db-safety-regression.ts
           npx tsx scripts/test-resend-transactional-email.ts
           npx tsx scripts/test-payment-verification-security.ts
           npx tsx scripts/test-auth-rate-limiting.ts

@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import mysql from "mysql2/promise";
+import { assertTestDatabaseSafety } from "./test-db-safety";
 
 async function main() {
   console.log("================================================================================");
@@ -13,17 +14,15 @@ async function main() {
   const user = process.env.DB_USER || "root";
   const password = process.env.DB_PASSWORD || "rootpassword";
 
-  // Strict Fail-Closed Loopback Safeguard: Only loopback and dearr_test allowed
-  const ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"];
-  if (!ALLOWED_HOSTS.includes(host.toLowerCase())) {
-    console.error(`[SAFETY REFUSAL] Target host "${host}" is not local loopback! Refusing execution.`);
-    process.exit(1);
-  }
-
-  if (database !== "dearr_test") {
-    console.error(`[SAFETY REFUSAL] Target database "${database}" is not "dearr_test"! Refusing execution.`);
-    process.exit(1);
-  }
+  // Strict Fail-Closed Safeguard using centralized database safety validator
+  assertTestDatabaseSafety({
+    host,
+    port,
+    database,
+    user,
+    password,
+    isTestMode: true,
+  });
 
   console.log(`Connecting to local MySQL at ${host}:${port} as ${user}...`);
 

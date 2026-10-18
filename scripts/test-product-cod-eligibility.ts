@@ -31,23 +31,11 @@ require.cache[require.resolve("next/headers")] = {
   },
 } as any;
 
-// Load .env.local
-const envPath = path.resolve(process.cwd(), ".env.local");
-if (fs.existsSync(envPath)) {
-  const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx !== -1) {
-      const key = trimmed.slice(0, idx).trim();
-      const val = trimmed.slice(idx + 1).trim();
-      if (!process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  }
-}
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
+
+// Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
 
 async function runTests() {
   console.log("=================================================================");
@@ -55,12 +43,17 @@ async function runTests() {
   console.log("Database: Hostinger MySQL (dearr_test)");
   console.log("=================================================================\n");
 
-  const pool = mysql.createPool({
-    host: process.env.DB_HOST || "127.0.0.1",
+  const safeConfig = assertTestDatabaseSafety({
+    host: process.env.DB_HOST,
     port: parseInt(process.env.DB_PORT || "3306", 10),
-    database: process.env.DB_NAME,
+    database: "dearr_test",
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
+    isTestMode: true,
+  });
+
+  const pool = mysql.createPool({
+    ...safeConfig,
     connectionLimit: 4,
     waitForConnections: true,
   });
