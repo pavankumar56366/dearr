@@ -1,19 +1,11 @@
 import fs from "fs";
 import path from "path";
 
-// 1. Load local environment configuration
-const envPath = path.resolve(process.cwd(), ".env.local");
-if (fs.existsSync(envPath)) {
-  const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx !== -1) {
-      process.env[trimmed.slice(0, idx).trim()] = trimmed.slice(idx + 1).trim();
-    }
-  }
-}
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
+
+// 1. Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
 
 // 2. Strict Safety Safeguards
 console.log("=================================================");
@@ -22,13 +14,6 @@ console.log("=================================================");
 console.log("Target Host:", process.env.DB_HOST);
 console.log("Target Port:", process.env.DB_PORT);
 console.log("Target Database:", process.env.DB_NAME);
-
-if (process.env.DB_HOST !== "127.0.0.1" && process.env.DB_HOST !== "localhost") {
-  throw new Error("ABSOLUTE SAFEGUARD: Host is not loopback (127.0.0.1)!");
-}
-if (process.env.DB_NAME !== "dearr_test") {
-  throw new Error("ABSOLUTE SAFEGUARD: Database name must strictly be 'dearr_test'!");
-}
 
 import {
   createProduct,

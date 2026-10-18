@@ -1,11 +1,11 @@
 import "server-only";
+import fs from "fs";
+import path from "path";
 import mysql, { Pool, PoolConnection } from "mysql2/promise";
 
 declare global {
   // Allow global connection pool caching in non-production environments across Next.js HMR
-  // eslint-disable-next-line no-var
   var _dearrMysqlPool: Pool | undefined;
-  // eslint-disable-next-line no-var
   var _dearrMysqlTargetKey: string | undefined;
 }
 
@@ -29,12 +29,20 @@ export function getDbConfig(): DbConfig {
   let user = process.env.DB_USER?.trim();
   let password = process.env.DB_PASSWORD;
 
-  // In development, ensure we read the active .env.local file if values were updated on disk
+  const isTestMode =
+    process.env.NODE_ENV === "test" ||
+    process.env.DEARR_TEST_MODE === "true";
+
+  // In development and testing, load environment configuration safely from disk
   if (process.env.NODE_ENV !== "production") {
     try {
-      const fs = require("fs");
-      const path = require("path");
-      const envPath = path.resolve(process.cwd(), ".env.local");
+      const testEnvPath = path.resolve(process.cwd(), ".env.test.local");
+      const localEnvPath = path.resolve(process.cwd(), ".env.local");
+
+      // Prefer dedicated test environment file (.env.test.local) when in test mode
+      const envPath =
+        isTestMode && fs.existsSync(testEnvPath) ? testEnvPath : localEnvPath;
+
       if (fs.existsSync(envPath)) {
         const content = fs.readFileSync(envPath, "utf-8");
         for (const line of content.split("\n")) {
@@ -44,16 +52,36 @@ export function getDbConfig(): DbConfig {
           if (eqIdx > 0) {
             const k = trimmed.slice(0, eqIdx).trim();
             const v = trimmed.slice(eqIdx + 1).trim();
-            if (k === "DB_HOST") host = v;
-            if (k === "DB_PORT") port = parseInt(v, 10);
-            if (k === "DB_NAME") database = v;
-            if (k === "DB_USER") user = v;
-            if (k === "DB_PASSWORD") password = v;
+            if (k === "DB_HOST" && !host) host = v;
+            if (k === "DB_PORT" && isNaN(port)) port = parseInt(v, 10);
+            if (k === "DB_NAME" && !database) database = v;
+            if (k === "DB_USER" && !user) user = v;
+            if (k === "DB_PASSWORD" && password === undefined) password = v;
           }
         }
       }
-    } catch (_) {
+    } catch {
       // Fallback to existing process.env
+    }
+  }
+
+  // Strict Fail-Closed Safeguard: Enforce loopback and dearr_test during test execution
+  if (isTestMode) {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error(
+        "Database safety error: Contradictory environment configuration (NODE_ENV cannot be 'production' in test mode)."
+      );
+    }
+    const ALLOWED_TEST_HOSTS = ["127.0.0.1", "localhost", "::1"];
+    if (!host || !ALLOWED_TEST_HOSTS.includes(host.toLowerCase())) {
+      throw new Error(
+        `Database safety refusal: Test execution is blocked against non-loopback host "${host}". Tests must strictly target local loopback (127.0.0.1, localhost, or ::1).`
+      );
+    }
+    if (database !== "dearr_test") {
+      throw new Error(
+        `Database safety refusal: Test execution is blocked against database "${database}". Tests must strictly target "dearr_test".`
+      );
     }
   }
 
@@ -95,7 +123,9 @@ export function getDbPool(): Pool {
   if (globalThis._dearrMysqlPool) {
     try {
       globalThis._dearrMysqlPool.end();
-    } catch (_) {}
+    } catch {
+      // Ignore cleanup error
+    }
     globalThis._dearrMysqlPool = undefined;
   }
 
@@ -122,20 +152,23 @@ export function getDbPool(): Pool {
 /**
  * Executes a parameterized SQL query using the connection pool.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function query<T = any>(
   sql: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   params?: any
 ): Promise<T> {
   const pool = getDbPool();
   try {
     const [results] = await pool.execute(sql, params);
     return results as T;
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const error = err as { code?: string };
     if (
-      err &&
-      (err.code === "ECONNRESET" ||
-        err.code === "PROTOCOL_CONNECTION_LOST" ||
-        err.code === "ETIMEDOUT")
+      error &&
+      (error.code === "ECONNRESET" ||
+        error.code === "PROTOCOL_CONNECTION_LOST" ||
+        error.code === "ETIMEDOUT")
     ) {
       const [results] = await pool.execute(sql, params);
       return results as T;

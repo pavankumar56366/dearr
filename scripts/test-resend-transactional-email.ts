@@ -51,26 +51,11 @@ Module.prototype.require = function (id: string) {
   return originalRequire.apply(this, arguments as any);
 };
 
-// Load .env.local
-function loadEnv() {
-  const envPath = path.resolve(process.cwd(), ".env.local");
-  if (fs.existsSync(envPath)) {
-    const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) continue;
-      const idx = trimmed.indexOf("=");
-      if (idx !== -1) {
-        const k = trimmed.slice(0, idx).trim();
-        const v = trimmed.slice(idx + 1).trim();
-        if (!process.env[k]) {
-          process.env[k] = v;
-        }
-      }
-    }
-  }
-}
-loadEnv();
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
+
+// Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
 
 let totalTests = 0;
 let passedTests = 0;
@@ -100,18 +85,16 @@ async function runSuite() {
   const password = process.env.DB_PASSWORD || "";
 
   // 1. Safety Pre-Flight: Fail closed if not 127.0.0.1 and dearr_test
-  if ((host !== "127.0.0.1" && host !== "localhost") || database !== "dearr_test") {
-    console.error(`[SAFETY REFUSAL] Must run strictly against 127.0.0.1:3306/dearr_test! Got: ${database}@${host}`);
-    process.exit(1);
-  }
-
-  const conn = await mysql.createConnection({
+  const safeConfig = assertTestDatabaseSafety({
     host,
     port,
     database,
     user,
     password,
+    isTestMode: true,
   });
+
+  const conn = await mysql.createConnection(safeConfig);
 
   const [dbCheck]: any = await conn.query("SELECT DATABASE() as db, @@port as port");
   if (dbCheck[0].db !== "dearr_test") {

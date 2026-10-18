@@ -4,28 +4,16 @@ import crypto from "crypto";
 import mysql from "mysql2/promise";
 import { SignJWT, decodeJwt } from "jose";
 
-// Load .env.local
-const envPath = path.resolve(process.cwd(), ".env.local");
-if (fs.existsSync(envPath)) {
-  const lines = fs.readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const idx = trimmed.indexOf("=");
-    if (idx !== -1) {
-      const key = trimmed.slice(0, idx).trim();
-      const val = trimmed.slice(idx + 1).trim();
-      if (!process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  }
-}
+import { loadTestEnvironment, assertTestDatabaseSafety } from "./test-db-safety";
+
+// Load test environment safely (.env.test.local preferred, fail closed against non-test DB)
+loadTestEnvironment();
+assertTestDatabaseSafety();
 
 const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 const dbHost = process.env.DB_HOST || "127.0.0.1";
 const dbPort = parseInt(process.env.DB_PORT || "3306", 10);
-const dbName = process.env.DB_NAME || "dearr_test";
+const dbName = "dearr_test";
 const dbUser = process.env.DB_USER || "dearr_local_user";
 const dbPassword = process.env.DB_PASSWORD || "";
 const authSecretString = (process.env.AUTH_SECRET || process.env.SESSION_SECRET || "").trim();
@@ -34,14 +22,14 @@ const razorpayKeySecret = (process.env.RAZORPAY_KEY_SECRET || "").trim();
 const razorpayWebhookSecret = (process.env.RAZORPAY_WEBHOOK_SECRET || "").trim();
 
 // Absolute safety preflight
-if (dbHost !== "127.0.0.1" && dbHost !== "localhost") {
-  console.error(`[SAFETY VIOLATION] DB_HOST must be local (127.0.0.1). Found: ${dbHost}`);
-  process.exit(1);
-}
-if (dbName !== "dearr_test" && dbName !== "dearr_local") {
-  console.error(`[SAFETY VIOLATION] DB_NAME must be test database (dearr_test). Found: ${dbName}`);
-  process.exit(1);
-}
+assertTestDatabaseSafety({
+  host: dbHost,
+  port: dbPort,
+  database: dbName,
+  user: dbUser,
+  password: dbPassword,
+  isTestMode: true,
+});
 
 export type TestStatus = "PASS" | "FAIL" | "BLOCKED" | "NOT TESTED";
 
