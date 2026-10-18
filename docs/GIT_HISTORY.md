@@ -208,3 +208,112 @@ The local feature and security remediation commits form a single, unbroken linea
 | Untracked Test Fixtures | `public/uploads/products/*.jpg` (5 files) | Local product image fixtures (`buddha-1.jpg`, `dragon-blue-1.jpg`, `dragon-pink-1.jpg`, `dragon-shared-1.jpg`, `dragon-shared-2.jpg`). |
 | Untracked Test / Utility Scripts | 15 files in `scripts/` | Local database maintenance, testing, and alignment utilities (`align-checkout-attempts-schema.ts`, `apply-local-schemas-001-to-004.ts`, `backup-local-db.ts`, `browser-test-razorpay-e2e.ts`, `debug-checkout-page.ts`, `inspect-cart.ts`, `inspect-orders.ts`, `rotate-local-db-credential.ts`, `secure-mysql-root.ts`, `setup-browser-test.ts`, `setup-dearr-test-db.ts`, `setup-local-db.mjs`, `start-server.js`, `test-session-cart.ts`, `verify-env-config.ts`). |
 | Git-Ignored Configuration | `.env.local` | Local database credentials (rotated) and test-mode keys; excluded from Git. |
+
+---
+
+## Dearr V1.5.1 Release & Deployment History
+
+### Release Overview
+
+Dearr **v1.5.1** is a critical security, testing infrastructure, and CI hardening release that introduces fail-closed database safety controls on test runners, isolates CI test environments with dedicated MySQL services, and enforces explicit test-mode validation across the codebase.
+
+- **Release Version**: `v1.5.1`
+- **Release Tag**: [`v1.5.1`](https://github.com/pavankumar56366/dearr/releases/tag/v1.5.1)
+- **Tag Annotation Message**: `Dearr v1.5.1`
+- **Tag Object SHA**: `42a8376a2e844dc28a1518d4a0057fd56cc0ef46`
+- **Tag Target (Peeled Commit)**: [`16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad`](https://github.com/pavankumar56366/dearr/commit/16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad)
+- **Pull Request**: [PR #4: Dearr v1.5.1: test database safety controls, fail-closed contradictory test mode loader, and isolated CI workflow](https://github.com/pavankumar56366/dearr/pull/4)
+- **Feature / Source Branch**: `audit/security-and-hardening-v1.4.1`
+- **Target Branch**: `main`
+- **Merge Commit**: [`16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad`](https://github.com/pavankumar56366/dearr/commit/16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad)
+- **Merge Strategy**: Standard merge commit (retaining full 5-commit PR history)
+- **Base Commit**: `5d0cb3f682910cff64f7bf096934ff208a08688f` (v1.4.1 release tag)
+
+---
+
+### PR #4 Commits (Chronological Order)
+
+The 5 commits comprising Pull Request #4 on branch `audit/security-and-hardening-v1.4.1` merged into `main`:
+
+| Commit | Date & Time (IST) | Author | Message | Key Changes |
+|---|---|---|---|---|
+| [`01dae82`](https://github.com/pavankumar56366/dearr/commit/01dae82335b1e0f12dac8edf3de9133db7a3b792) | 2026-10-17 21:11:29 +0530 | pavankumar56366 | `test(ci): add minimal PR CI workflow and align phase10 test query` | Added `.github/workflows/ci.yml` running on pull requests targeting `main`; added `scripts/mock-server-only.cjs` stub for headless Node test runners; aligned Phase 10 test query structure. |
+| [`1520508`](https://github.com/pavankumar56366/dearr/commit/1520508669ff2bd28c0d71104ae0635a66799654) | 2026-10-17 23:09:41 +0530 | pavankumar56366 | `fix(ci): add tracked test database initializer for isolated CI runs` | Introduced `scripts/init-ci-test-db.ts` to provision isolated test database tables and seeds in CI container without relying on untracked local scripts. |
+| [`134e40a`](https://github.com/pavankumar56366/dearr/commit/134e40adb8083d9a8294ecc5fa4f702f4f5394ea) | 2026-10-18 08:07:09 +0530 | pavankumar56366 | `fix(security): enforce fail-closed database safety controls on test runners` | Enforced fail-closed safety controls in `src/lib/server/db.ts` and test scripts via `scripts/test-db-safety.cjs` and `scripts/test-db-safety.ts`; introduced 38 initial database-safety regression tests protecting production credentials from test execution. |
+| [`f6f6fc6`](https://github.com/pavankumar56366/dearr/commit/f6f6fc6e186f4a06a45505b563d72c8668f51660) | 2026-10-18 08:49:49 +0530 | pavankumar56366 | `fix(security): reject contradictory test-mode configuration` | Hardened environment loader to immediately reject contradictory settings (`DEARR_TEST_MODE=false`, `NODE_ENV=production`) before applying test defaults; expanded regression suite from 38 to 48 cases. |
+| [`83ad036`](https://github.com/pavankumar56366/dearr/commit/83ad036e1879f368a34a18231144a597fca443ec) | 2026-10-18 09:06:14 +0530 | pavankumar56366 | `fix(security): require explicit test mode in CI` | Separated `CI=true` from test-mode detection in `src/lib/server/db.ts` and `scripts/test-db-safety.cjs`; ensured production builds in CI do not default to test database targets; completed regression suite at 52 passed test cases. |
+
+---
+
+### Security Hardening & Architecture Improvements
+
+1. **Isolated Test Database Enforcement**:
+   - `src/lib/server/db.ts` enforces fail-closed connection guards when running in test mode (`DEARR_TEST_MODE=true` or `NODE_ENV=test`).
+   - Rejects any connection targeting known production database names, remote hostnames, or unverified ports.
+   - Enforces fallback to dedicated local/CI test databases (`dearr_test`).
+2. **Explicit Test-Mode Configuration Validation**:
+   - `scripts/test-db-safety.cjs` intercepts environment loading before test runners execute.
+   - Rejects contradictory configurations: if `DEARR_TEST_MODE=false` or `NODE_ENV=production` is detected in the process environment or `.env.test.local`, execution aborts immediately before any database connection attempt.
+3. **CI Pipeline Separation**:
+   - `CI=true` is decoupled from test mode so standard production compilation (`npm run build`) in CI environments does not trigger test-mode assertions.
+   - GitHub Actions CI workflow (`.github/workflows/ci.yml`) runs an isolated MySQL 8.0 service container with dedicated test credentials.
+4. **Database-Safety Regression Suite**:
+   - `scripts/test-db-safety-regression.ts` validates 52 distinct safety scenarios (environment validation, credential protection, contradictory flag handling, host boundary checks, and pool disconnection).
+   - **Reported Result**: 52 of 52 test cases passed (`0` failures).
+
+---
+
+### Local and CI Verification Outcomes
+
+| Verification Step | Command / Reference | Result |
+|---|---|---|
+| **Database Safety Regression** | `npx tsx scripts/test-db-safety-regression.ts` | **PASSED** (52/52 test cases passed) |
+| **TypeScript Typecheck** | `npx tsc --noEmit` | **PASSED** (0 errors) |
+| **Targeted ESLint** | `node ./node_modules/eslint/bin/eslint.js src/lib/server/db.ts` | **PASSED** (0 warnings or errors) |
+| **Production Build** | `npm run build` | **PASSED** (Standalone output, 73 SSG pages compiled) |
+| **Git Diff Cleanliness** | `git diff --check` | **PASSED** (No whitespace or formatting errors) |
+| **GitHub Actions CI** | Workflow Run `#39094244416` (commit `83ad036`) | **PASSED** (All checks succeeded) |
+
+---
+
+### Hostinger Production Deployment & Verification
+
+- **Hosting Platform**: Hostinger Cloud / Node.js Application Hosting
+- **Domain**: `https://dearr.in` (User `u209580425`)
+- **Deployed Source**: `origin/main` at merge commit [`16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad`](https://github.com/pavankumar56366/dearr/commit/16d9bc54879d635ef8c020ce1e2ebf2d1c98f4ad)
+- **Deployment Trigger**: Automatic deployment on push/merge to `main`
+- **Hostinger Build UUID**: `01a14d2f-984c-73d5-a74e-641794188c8f`
+- **Deployment Status**: `completed` (Finished at `2026-10-18T04:06:44Z`, Duration: 1m 10s)
+- **Application Startup**: Standalone Next.js server published to `public_html`; Node.js application restarted cleanly in 1.6s
+
+#### Production Smoke-Test Results (Safe Read-Only GET Checks)
+
+All 11 verified production storefront and API routes returned **HTTP 200 OK**:
+
+| # | Endpoint | HTTP Status | Response Time | Description / Observed Output |
+|---|---|:---:|:---:|---|
+| 1 | `https://dearr.in/` | **200 OK** | 559 ms | Storefront home page HTML rendered |
+| 2 | `https://dearr.in/shop` | **200 OK** | 196 ms | Product catalog collection rendered |
+| 3 | `https://dearr.in/cart` | **200 OK** | 130 ms | Cart page rendered |
+| 4 | `https://dearr.in/checkout` | **200 OK** | 105 ms | Checkout UI rendered |
+| 5 | `https://dearr.in/login` | **200 OK** | 86 ms | Customer login interface rendered |
+| 6 | `https://dearr.in/signup` | **200 OK** | 95 ms | Customer registration interface rendered |
+| 7 | `https://dearr.in/api/categories` | **200 OK** | 92 ms | `{"ok":true,"categories":[...]}` |
+| 8 | `https://dearr.in/api/products` | **200 OK** | 94 ms | `{"ok":true,"products":[...]}` |
+| 9 | `https://dearr.in/api/settings` | **200 OK** | 84 ms | `{"ok":true,"settings":{"freeShippingThreshold":499,...}}` |
+| 10 | `https://dearr.in/api/discounts/active` | **200 OK** | 98 ms | `{"ok":true,"discounts":[]}` |
+| 11 | `https://dearr.in/api/health/db` | **200 OK** | 90 ms | `{"ok":true,"database":"mysql"}` (Production database healthy) |
+
+---
+
+### Production Safety Guarantees
+
+1. **Database Schema & Data Intact**:
+   - Test database initialization (`scripts/init-ci-test-db.ts`, `scripts/setup-dearr-test-db.ts`) was executed exclusively in isolated local and CI container environments.
+   - No test scripts, seeders, or test cleanup queries were run against the Hostinger production database (`u209580425_Dearr`).
+   - Production database tables, customer accounts, and order records were completely unmodified.
+2. **Transactional Email Inactive**:
+   - `RESEND_EMAILS_ENABLED=false` was strictly maintained in production configuration; live transactional emails remained disabled.
+3. **Secrets & Credentials Safeguarded**:
+   - No passwords, API keys, tokens, session secrets, or `.env.test.local` contents were committed or exposed.
+   - `database/preflight_inspection.sql` was preserved locally as an untracked diagnostic file.
