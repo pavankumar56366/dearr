@@ -47,7 +47,12 @@ export function assertTestDatabaseSafety(
   return safety.assertTestDatabaseSafety(config, env);
 }
 
-export function loadTestEnvironment(options?: { skipAssert?: boolean }): void {
+export function loadTestEnvironment(options?: {
+  skipAssert?: boolean;
+  env?: NodeJS.ProcessEnv;
+  testEnvPath?: string;
+  localEnvPath?: string;
+}): void {
   return safety.loadTestEnvironment(options);
 }
 

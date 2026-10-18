@@ -11,8 +11,12 @@
  * 7. Normal isolated CI initialization and test execution: passes and functions correctly.
  * 8. Live connection safety: runtime DATABASE() check strictly validates dearr_test.
  * 9. Application db.ts getDbConfig(): enforces test safety fail-closed guards.
+ * 10. Runtime database target verification.
+ * 11. Test-mode loader hardening: rejects contradictory configurations before changing environment or applying defaults.
  */
 
+import fs from "fs";
+import path from "path";
 import mysql from "mysql2/promise";
 import {
   validateTestDatabaseTarget,
@@ -546,6 +550,201 @@ async function main() {
         }
       } finally {
         await conn.end();
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // CATEGORY 11: Test-Mode Loader Hardening & Contradictory Configuration Refusal
+    // -------------------------------------------------------------------------
+    console.log("\n--- 11. Test-Mode Loader Hardening & Contradictory Config Rejection ---");
+
+    runTestCase("loadTestEnvironment() rejects existing DEARR_TEST_MODE=false before changing environment", () => {
+      const mockEnv: NodeJS.ProcessEnv = {
+        DEARR_TEST_MODE: "false",
+        DB_HOST: "127.0.0.1",
+        DB_PORT: "3306",
+        DB_NAME: "dearr_test",
+        DB_USER: "test_user",
+        DB_PASSWORD: "test_password",
+      };
+      let threw = false;
+      try {
+        loadTestEnvironment({ env: mockEnv, skipAssert: true });
+      } catch (err: any) {
+        threw = true;
+        if (!err.message.includes("DEARR_TEST_MODE is explicitly disabled")) {
+          throw new Error(`Unexpected error message: ${err.message}`);
+        }
+      }
+      if (!threw) {
+        throw new Error("loadTestEnvironment() did not reject existing DEARR_TEST_MODE=false");
+      }
+      if (mockEnv.DEARR_TEST_MODE !== "false") {
+        throw new Error(`mockEnv.DEARR_TEST_MODE was mutated to: ${mockEnv.DEARR_TEST_MODE}`);
+      }
+    });
+
+    runTestCase("loadTestEnvironment() rejects existing NODE_ENV=production during test-runner initialization", () => {
+      const mockEnv: NodeJS.ProcessEnv = {
+        NODE_ENV: "production",
+        DB_HOST: "127.0.0.1",
+        DB_PORT: "3306",
+        DB_NAME: "dearr_test",
+        DB_USER: "test_user",
+        DB_PASSWORD: "test_password",
+      };
+      let threw = false;
+      try {
+        loadTestEnvironment({ env: mockEnv, skipAssert: true });
+      } catch (err: any) {
+        threw = true;
+        if (!err.message.includes("NODE_ENV cannot be \"production\"")) {
+          throw new Error(`Unexpected error message: ${err.message}`);
+        }
+      }
+      if (!threw) {
+        throw new Error("loadTestEnvironment() did not reject existing NODE_ENV=production");
+      }
+      if (mockEnv.NODE_ENV !== "production") {
+        throw new Error(`mockEnv.NODE_ENV was mutated to: ${mockEnv.NODE_ENV}`);
+      }
+    });
+
+    runTestCase("loadTestEnvironment() rejects test environment file explicitly disabling test mode", () => {
+      const scratchDir = path.resolve(process.cwd(), "scratch");
+      const tempFile = path.resolve(scratchDir, "test-contradictory-disabled.env");
+      fs.mkdirSync(scratchDir, { recursive: true });
+      fs.writeFileSync(tempFile, "DEARR_TEST_MODE=false\nDB_NAME=dearr_test\nDB_HOST=127.0.0.1\nDB_USER=test\nDB_PASSWORD=test\n");
+      try {
+        const mockEnv: NodeJS.ProcessEnv = {};
+        let threw = false;
+        try {
+          loadTestEnvironment({ env: mockEnv, testEnvPath: tempFile, skipAssert: true });
+        } catch (err: any) {
+          threw = true;
+          if (!err.message.includes("explicitly disables test mode")) {
+            throw new Error(`Unexpected error message: ${err.message}`);
+          }
+        }
+        if (!threw) {
+          throw new Error("loadTestEnvironment() did not reject test environment file with DEARR_TEST_MODE=false");
+        }
+        if (mockEnv.DEARR_TEST_MODE === "true") {
+          throw new Error("Defaults were incorrectly applied after contradictory test env file");
+        }
+      } finally {
+        try { fs.unlinkSync(tempFile); } catch (_) {}
+      }
+    });
+
+    runTestCase("loadTestEnvironment() rejects test environment file specifying NODE_ENV=production", () => {
+      const scratchDir = path.resolve(process.cwd(), "scratch");
+      const tempFile = path.resolve(scratchDir, "test-contradictory-production.env");
+      fs.mkdirSync(scratchDir, { recursive: true });
+      fs.writeFileSync(tempFile, "NODE_ENV=production\nDB_NAME=dearr_test\nDB_HOST=127.0.0.1\nDB_USER=test\nDB_PASSWORD=test\n");
+      try {
+        const mockEnv: NodeJS.ProcessEnv = {};
+        let threw = false;
+        try {
+          loadTestEnvironment({ env: mockEnv, testEnvPath: tempFile, skipAssert: true });
+        } catch (err: any) {
+          threw = true;
+          if (!err.message.includes("NODE_ENV=\"production\"")) {
+            throw new Error(`Unexpected error message: ${err.message}`);
+          }
+        }
+        if (!threw) {
+          throw new Error("loadTestEnvironment() did not reject test environment file with NODE_ENV=production");
+        }
+        if (mockEnv.NODE_ENV === "test") {
+          throw new Error("Defaults were incorrectly applied after contradictory test env file");
+        }
+      } finally {
+        try { fs.unlinkSync(tempFile); } catch (_) {}
+      }
+    });
+
+    runTestCase("loadTestEnvironment() applies test-mode defaults when no contradictory config exists", () => {
+      const mockEnv: NodeJS.ProcessEnv = {
+        DB_HOST: "127.0.0.1",
+        DB_PORT: "3306",
+        DB_NAME: "dearr_test",
+        DB_USER: "dearr_user",
+        DB_PASSWORD: "safe_password",
+      };
+      const nonExistentFile = path.resolve(process.cwd(), "scratch", "nonexistent.env");
+      loadTestEnvironment({
+        env: mockEnv,
+        testEnvPath: nonExistentFile,
+        localEnvPath: nonExistentFile,
+      });
+      if (mockEnv.DEARR_TEST_MODE !== "true") {
+        throw new Error(`Expected DEARR_TEST_MODE="true", got "${mockEnv.DEARR_TEST_MODE}"`);
+      }
+      if (mockEnv.NODE_ENV !== "test") {
+        throw new Error(`Expected NODE_ENV="test", got "${mockEnv.NODE_ENV}"`);
+      }
+    });
+
+    runTestCase("validateTestDatabaseTarget() and assertTestDatabaseSafety() reject NODE_ENV=production before database connection", () => {
+      const targetConfig = {
+        host: "127.0.0.1",
+        port: 3306,
+        database: "dearr_test",
+        user: "test_user",
+        password: "safe_password",
+        nodeEnv: "production",
+        isTestMode: true,
+      };
+      const res = validateTestDatabaseTarget(targetConfig, {} as any);
+      if (res.valid) {
+        throw new Error("validateTestDatabaseTarget() unexpectedly allowed NODE_ENV=production");
+      }
+      if (!res.error?.includes("NODE_ENV cannot be \"production\"")) {
+        throw new Error(`Unexpected validation error: ${res.error}`);
+      }
+
+      let threw = false;
+      try {
+        assertTestDatabaseSafety(targetConfig, {} as any);
+      } catch (err: any) {
+        threw = true;
+        if (!err.message.includes("NODE_ENV cannot be \"production\"")) {
+          throw new Error(`Unexpected assertion error: ${err.message}`);
+        }
+      }
+      if (!threw) {
+        throw new Error("assertTestDatabaseSafety() did not throw on NODE_ENV=production");
+      }
+    });
+
+    runTestCase("loadTestEnvironment() rejects local environment fallback file if it specifies contradictory settings", () => {
+      const scratchDir = path.resolve(process.cwd(), "scratch");
+      const tempLocalFile = path.resolve(scratchDir, "test-contradictory-local.env");
+      const nonExistentFile = path.resolve(scratchDir, "nonexistent.env");
+      fs.mkdirSync(scratchDir, { recursive: true });
+      fs.writeFileSync(tempLocalFile, "DEARR_TEST_MODE=false\nDB_NAME=dearr_test\nDB_HOST=127.0.0.1\nDB_USER=test\nDB_PASSWORD=test\n");
+      try {
+        const mockEnv: NodeJS.ProcessEnv = {};
+        let threw = false;
+        try {
+          loadTestEnvironment({
+            env: mockEnv,
+            testEnvPath: nonExistentFile,
+            localEnvPath: tempLocalFile,
+            skipAssert: true,
+          });
+        } catch (err: any) {
+          threw = true;
+          if (!err.message.includes("Contradictory environment configuration")) {
+            throw new Error(`Unexpected error message: ${err.message}`);
+          }
+        }
+        if (!threw) {
+          throw new Error("loadTestEnvironment() did not reject contradictory localEnvPath file");
+        }
+      } finally {
+        try { fs.unlinkSync(tempLocalFile); } catch (_) {}
       }
     });
 

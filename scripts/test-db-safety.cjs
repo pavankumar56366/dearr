@@ -144,7 +144,10 @@ function parseEnvFile(filePath) {
     const idx = trimmed.indexOf('=');
     if (idx !== -1) {
       const k = trimmed.slice(0, idx).trim();
-      const v = trimmed.slice(idx + 1).trim();
+      let v = trimmed.slice(idx + 1).trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+        v = v.slice(1, -1);
+      }
       result[k] = v;
     }
   }
@@ -159,52 +162,108 @@ function parseEnvFile(filePath) {
  *   3. Safe fallback to .env.local ONLY if target is explicitly verified loopback + dearr_test
  *
  * Never injects remote or production database credentials from .env.local into test processes.
+ * Fail closed: rejects explicit DEARR_TEST_MODE=false or NODE_ENV=production before changing environment variables.
  *
  * @param {Object} [options]
  * @param {boolean} [options.skipAssert=false]
+ * @param {NodeJS.ProcessEnv} [options.env]
+ * @param {string} [options.testEnvPath]
+ * @param {string} [options.localEnvPath]
  */
 function loadTestEnvironment(options = {}) {
-  // Ensure explicit test mode flag
-  process.env.DEARR_TEST_MODE = 'true';
-  if (!process.env.NODE_ENV) {
-    process.env.NODE_ENV = 'test';
+  const env = options.env || process.env;
+  const cwd = process.cwd();
+  const testEnvPath = options.testEnvPath || path.resolve(cwd, '.env.test.local');
+  const localEnvPath = options.localEnvPath || path.resolve(cwd, '.env.local');
+
+  // 1. Contradictory check on existing environment BEFORE changing any environment variables
+  const existingDearrTestMode = (env.DEARR_TEST_MODE || '').trim().toLowerCase();
+  if (existingDearrTestMode === 'false') {
+    const err = new Error(
+      '[DATABASE SAFETY REFUSAL] Contradictory environment configuration: DEARR_TEST_MODE is explicitly disabled ("false").'
+    );
+    err.name = 'DatabaseSafetyError';
+    throw err;
   }
 
-  const cwd = process.cwd();
-  const testEnvPath = path.resolve(cwd, '.env.test.local');
-  const localEnvPath = path.resolve(cwd, '.env.local');
+  const existingNodeEnv = (env.NODE_ENV || '').trim().toLowerCase();
+  if (existingNodeEnv === 'production') {
+    const err = new Error(
+      '[DATABASE SAFETY REFUSAL] Contradictory environment configuration: NODE_ENV cannot be "production" during test execution.'
+    );
+    err.name = 'DatabaseSafetyError';
+    throw err;
+  }
 
+  // 2. Inspect testEnvPath before applying variables or defaults
+  let testVars = {};
   if (fs.existsSync(testEnvPath)) {
-    // 1. Prefer dedicated test environment file
-    const testVars = parseEnvFile(testEnvPath);
+    testVars = parseEnvFile(testEnvPath);
+    const fileDearrTestMode = (testVars.DEARR_TEST_MODE || '').trim().toLowerCase();
+    if (fileDearrTestMode === 'false') {
+      const err = new Error(
+        `[DATABASE SAFETY REFUSAL] Contradictory environment configuration: "${path.basename(testEnvPath)}" explicitly disables test mode (DEARR_TEST_MODE="false").`
+      );
+      err.name = 'DatabaseSafetyError';
+      throw err;
+    }
+    const fileNodeEnv = (testVars.NODE_ENV || '').trim().toLowerCase();
+    if (fileNodeEnv === 'production') {
+      const err = new Error(
+        `[DATABASE SAFETY REFUSAL] Contradictory environment configuration: "${path.basename(testEnvPath)}" specifies NODE_ENV="production".`
+      );
+      err.name = 'DatabaseSafetyError';
+      throw err;
+    }
+  }
+
+  // 3. Apply variables from .env.test.local (or safe fallback to .env.local)
+  if (fs.existsSync(testEnvPath)) {
     for (const [k, v] of Object.entries(testVars)) {
-      if (!process.env[k]) {
-        process.env[k] = v;
+      if (!env[k]) {
+        env[k] = v;
       }
     }
   } else if (fs.existsSync(localEnvPath)) {
-    // 2. Fallback to .env.local: load non-database configs safely
     const localVars = parseEnvFile(localEnvPath);
     for (const [k, v] of Object.entries(localVars)) {
+      if (k === 'DEARR_TEST_MODE' || k === 'NODE_ENV') {
+        const val = (v || '').trim().toLowerCase();
+        if (val === 'false' || val === 'production') {
+          const err = new Error(
+            `[DATABASE SAFETY REFUSAL] Contradictory environment configuration: "${path.basename(localEnvPath)}" specifies ${k}="${v}".`
+          );
+          err.name = 'DatabaseSafetyError';
+          throw err;
+        }
+      }
       if (k.startsWith('DB_')) {
-        // Only load DB settings from .env.local if they strictly target loopback + dearr_test
         const localHost = (localVars.DB_HOST || '').trim().toLowerCase();
         const localDb = (localVars.DB_NAME || '').trim();
         if (ALLOWED_LOOPBACK_HOSTS.includes(localHost) && localDb === ALLOWED_TEST_DB_NAME) {
-          if (!process.env[k]) {
-            process.env[k] = v;
+          if (!env[k]) {
+            env[k] = v;
           }
         }
       } else {
-        if (!process.env[k]) {
-          process.env[k] = v;
+        if (!env[k]) {
+          env[k] = v;
         }
       }
     }
   }
 
+  // 4. Apply test-mode defaults ONLY when no contradictory configuration exists
+  if (!env.DEARR_TEST_MODE) {
+    env.DEARR_TEST_MODE = 'true';
+  }
+  if (!env.NODE_ENV) {
+    env.NODE_ENV = 'test';
+  }
+
+  // 5. Final safety assertion
   if (!options.skipAssert) {
-    assertTestDatabaseSafety(undefined, process.env);
+    assertTestDatabaseSafety(undefined, env);
   }
 }
 
