@@ -22,7 +22,6 @@ function validateTestDatabaseTarget(config, env = process.env) {
   const effectiveNodeEnv = ((config && config.nodeEnv) || env.NODE_ENV || '').trim().toLowerCase();
   const explicitTestMode = config && typeof config.isTestMode === 'boolean' ? config.isTestMode : undefined;
   const dearrTestMode = (env.DEARR_TEST_MODE || '').trim().toLowerCase();
-  const ciEnv = (env.CI || '').trim().toLowerCase();
 
   // 1. Contradictory Environment Check
   if (effectiveNodeEnv === 'production') {
@@ -43,8 +42,7 @@ function validateTestDatabaseTarget(config, env = process.env) {
   const isConfirmed = Boolean(
     explicitTestMode === true ||
     dearrTestMode === 'true' ||
-    effectiveNodeEnv === 'test' ||
-    ciEnv === 'true'
+    effectiveNodeEnv === 'test'
   );
 
   if (!isConfirmed) {

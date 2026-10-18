@@ -31,8 +31,7 @@ export function getDbConfig(): DbConfig {
 
   const isTestMode =
     process.env.NODE_ENV === "test" ||
-    process.env.DEARR_TEST_MODE === "true" ||
-    process.env.CI === "true";
+    process.env.DEARR_TEST_MODE === "true";
 
   // In development and testing, load environment configuration safely from disk
   if (process.env.NODE_ENV !== "production") {

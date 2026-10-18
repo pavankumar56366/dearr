@@ -8,7 +8,7 @@
  * 4. Missing test-mode confirmation: rejected before connection or mutation.
  * 5. Missing required database configuration: rejected before connection or mutation.
  * 6. Invalid or contradictory environment configuration: rejected before connection or mutation.
- * 7. Normal isolated CI initialization and test execution: passes and functions correctly.
+ * 7. CI environment & test mode separation: CI=true alone does not authorize test mode without explicit test confirmation.
  * 8. Live connection safety: runtime DATABASE() check strictly validates dearr_test.
  * 9. Application db.ts getDbConfig(): enforces test safety fail-closed guards.
  * 10. Runtime database target verification.
@@ -349,11 +349,11 @@ async function main() {
     });
 
     // -------------------------------------------------------------------------
-    // CATEGORY 7: Simulated CI Environment (Passes Cleanly)
+    // CATEGORY 7: Simulated CI Environment (Separation of CI from Test Mode)
     // -------------------------------------------------------------------------
-    console.log("\n--- 7. CI Environment Simulation ---");
+    console.log("\n--- 7. CI Environment & Test Mode Separation ---");
 
-    runTestCase("Isolated CI environment passes test safety validation", () => {
+    runTestCase("Isolated CI environment with explicit DEARR_TEST_MODE passes test safety validation", () => {
       const ciEnv = {
         CI: "true",
         DB_HOST: "127.0.0.1",
@@ -370,6 +370,43 @@ async function main() {
       }
       if (res.safeConfig?.host !== "127.0.0.1" || res.safeConfig?.database !== "dearr_test") {
         throw new Error("Safe config mismatch for CI env");
+      }
+    });
+
+    runTestCase("CI=true alone does not authorize test mode without explicit test confirmation", () => {
+      const ciOnlyEnv = {
+        CI: "true",
+        DB_HOST: "127.0.0.1",
+        DB_PORT: "3306",
+        DB_NAME: "dearr_test",
+        DB_USER: "root",
+        DB_PASSWORD: "rootpassword",
+      };
+      const res = validateTestDatabaseTarget(undefined, ciOnlyEnv as any);
+      if (res.valid) {
+        throw new Error("Expected validation failure when CI=true has no explicit DEARR_TEST_MODE=true or NODE_ENV=test");
+      }
+      if (!res.error?.includes("Missing required test-mode confirmation")) {
+        throw new Error(`Unexpected error message: ${res.error}`);
+      }
+    });
+
+    runTestCase("CI=true with explicit DEARR_TEST_MODE=true and valid isolated test database settings is accepted", () => {
+      const ciTestEnv = {
+        CI: "true",
+        DEARR_TEST_MODE: "true",
+        DB_HOST: "127.0.0.1",
+        DB_PORT: "3306",
+        DB_NAME: "dearr_test",
+        DB_USER: "root",
+        DB_PASSWORD: "rootpassword",
+      };
+      const res = validateTestDatabaseTarget(undefined, ciTestEnv as any);
+      if (!res.valid) {
+        throw new Error(`Expected valid test configuration in CI with DEARR_TEST_MODE=true, got error: ${res.error}`);
+      }
+      if (res.safeConfig?.database !== ALLOWED_TEST_DB_NAME) {
+        throw new Error("Safe config mismatch for CI test env");
       }
     });
 
@@ -529,6 +566,68 @@ async function main() {
       }
       if (!threw) {
         throw new Error("getDbConfig() did not enforce test safety with DEARR_TEST_MODE=true");
+      }
+    });
+
+    runTestCase("Production mode with CI=true does not activate test-only restrictions solely because CI is set", () => {
+      delete process.env.DEARR_TEST_MODE;
+      process.env.CI = "true";
+      process.env.NODE_ENV = "production";
+      process.env.DB_HOST = "srv1741.hstgr.io";
+      process.env.DB_PORT = "3306";
+      process.env.DB_NAME = "u209580425_Dearr";
+      process.env.DB_USER = "u209580425_dearr_admin";
+      process.env.DB_PASSWORD = "prod_password_mock";
+
+      const config = getDbConfig();
+      if (config.host !== "srv1741.hstgr.io" || config.database !== "u209580425_Dearr") {
+        throw new Error(`Production getDbConfig in CI did not return expected target. Got host: ${config.host}, db: ${config.database}`);
+      }
+    });
+
+    runTestCase("Production mode combined with explicit DEARR_TEST_MODE=true is rejected (even in CI)", () => {
+      process.env.CI = "true";
+      process.env.DEARR_TEST_MODE = "true";
+      process.env.NODE_ENV = "production";
+      process.env.DB_HOST = "127.0.0.1";
+      process.env.DB_PORT = "3306";
+      process.env.DB_NAME = "dearr_test";
+      process.env.DB_USER = "test_user";
+      process.env.DB_PASSWORD = "test_password";
+
+      let threw = false;
+      try {
+        getDbConfig();
+      } catch (err: any) {
+        threw = true;
+        if (!err.message.includes("Contradictory environment configuration")) {
+          throw new Error(`Unexpected error message: ${err.message}`);
+        }
+      }
+      if (!threw) {
+        throw new Error("getDbConfig() did not reject contradictory NODE_ENV=production with DEARR_TEST_MODE=true");
+      }
+    });
+
+    runTestCase("Normal production configuration can be inspected using mocked environment variables without opening a database connection", () => {
+      delete process.env.DEARR_TEST_MODE;
+      delete process.env.CI;
+      process.env.NODE_ENV = "production";
+      process.env.DB_HOST = "srv1741.hstgr.io";
+      process.env.DB_PORT = "3306";
+      process.env.DB_NAME = "u209580425_Dearr";
+      process.env.DB_USER = "u209580425_dearr_admin";
+      process.env.DB_PASSWORD = "prod_password_mock";
+
+      const config = getDbConfig();
+      if (
+        config.host !== "srv1741.hstgr.io" ||
+        config.port !== 3306 ||
+        config.database !== "u209580425_Dearr" ||
+        config.user !== "u209580425_dearr_admin" ||
+        config.password !== "prod_password_mock"
+      ) {
+        throw new Error("Production config did not match expected mocked environment values");
       }
     });
 
