@@ -618,10 +618,13 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
     queryParams.push(filters.categoryId.trim());
   }
 
-  // Category Slug filter
+  // Category Slug filter (supports both kebab-case and SCREAMING_SNAKE_CASE from Hostinger URLs)
   if (filters.categorySlug) {
-    whereConditions.push("c.slug = ?");
-    queryParams.push(filters.categorySlug.trim().toLowerCase());
+    const raw = filters.categorySlug.trim().toLowerCase();
+    const withHyphen = raw.replace(/_/g, "-");
+    const withUnderscore = raw.replace(/-/g, "_");
+    whereConditions.push("(c.slug = ? OR c.slug = ? OR LOWER(c.slug) = ?)");
+    queryParams.push(withHyphen, withUnderscore, raw);
   }
 
   // Search keyword (matches in name or description)

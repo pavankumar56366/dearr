@@ -33,8 +33,20 @@ import MobileFilterSheet from "./MobileFilterSheet";
 import ShopEmptyState from "./ShopEmptyState";
 
 const CATEGORY_ICON_MAP: Record<string, string> = {
-  "spiritual-idols": "🕉️",
-  "articulated-toys": "🦎",
+  "teddy-bear": "🧸",
+  "night-lamp": "💡",
+  "wall-art": "🖼️",
+  "name-plate": "🏷️",
+  "keychain": "🔑",
+  "lithophane-panel": "✨",
+  "litho-keychain": "🔦",
+  "photo-figurine": "👤",
+  "devotional": "🪔",
+  "curio": "🐱",
+  "desktop-accessory": "✏️",
+  "other": "🎁",
+  "spiritual-idols": "🪔",
+  "articulated-toys": "🧩",
   "custom-keychains": "🔑",
   "desk-organizers": "📂",
   "lithophane-lamps": "💡",
