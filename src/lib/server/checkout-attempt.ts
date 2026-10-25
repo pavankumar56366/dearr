@@ -11,6 +11,10 @@ import {
 } from "./order";
 import { getApplicableDiscountForProduct, computeDiscountAmount } from "./discount";
 import { getStoreSettings } from "./settings";
+import {
+  resolveAuthoritativeUnitPrice,
+  resolveAuthoritativeEffectiveStock,
+} from "./variant-resolver";
 
 import { recordInternalEvent } from "./events";
 import { dispatchEmailOutboxJob, queueEmailOutboxJob } from "./email";
@@ -222,6 +226,9 @@ export async function createCheckoutAttemptFromCart(
          p.category_id AS p_category_id,
          pv.id AS v_id,
          pv.name AS v_name,
+         pv.sku AS v_sku,
+         pv.color_id AS v_color_id,
+         pv.size_name AS v_size_name,
          pv.price AS v_price,
          pv.stock_quantity AS v_stock,
          pv.is_active AS v_is_active,
@@ -271,7 +278,12 @@ export async function createCheckoutAttemptFromCart(
     let orderSubtotal = 0;
     let orderDiscountTotal = 0;
     const preparedItems: any[] = [];
-    const pendingReservations: Array<{ productId: string; colorId: string; quantity: number }> = [];
+    const pendingReservations: Array<{
+      productId: string;
+      colorId: string | null;
+      variantId: string | null;
+      quantity: number;
+    }> = [];
 
     for (const row of itemRows) {
       const isProductActive = Boolean(row.p_is_active === 1 || row.p_is_active === true);
@@ -289,7 +301,56 @@ export async function createCheckoutAttemptFromCart(
       let itemName = row.p_name;
       const imageUrl = row.primary_image || row.fallback_image || "/product-samples/1.jpeg";
 
-      if (hasColors && row.color_id) {
+      if (hasVariant) {
+        if (!row.v_id) {
+          throw new CheckoutAttemptError(
+            `Variant for product "${row.p_name}" was not found`,
+            400
+          );
+        }
+        const isVariantActive = Boolean(row.v_is_active === 1 || row.v_is_active === true);
+        if (!isVariantActive) {
+          throw new CheckoutAttemptError(
+            `Variant "${row.v_name}" for product "${row.p_name}" is no longer available`,
+            400
+          );
+        }
+        if (row.color_id) {
+          if (!row.c_id) {
+            throw new CheckoutAttemptError(
+              `Color variant for product "${row.p_name}" was not found`,
+              400
+            );
+          }
+          const isColorActive = Boolean(row.c_is_active === 1 || row.c_is_active === true);
+          if (!isColorActive) {
+            throw new CheckoutAttemptError(
+              `Color "${row.c_name}" for product "${row.p_name}" is currently inactive`,
+              400
+            );
+          }
+        }
+
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: row.p_price,
+          colorPriceOverride: row.color_id ? row.c_price_override : null,
+          variantPrice: row.v_price,
+        });
+
+        // Query active variant reservations
+        const [varResRows]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [row.variant_id]
+        );
+        const variantReservedStock = Number(varResRows?.[0]?.reserved_qty || 0);
+        effectiveStock = Math.max(0, Number(row.v_stock ?? 0) - variantReservedStock);
+
+        itemName = row.color_id && row.c_name
+          ? `${row.p_name} (${row.c_name} / ${row.v_size_name || row.v_name})`
+          : `${row.p_name} (${row.v_name})`;
+      } else if (hasColors && row.color_id) {
         if (!row.c_id) {
           throw new CheckoutAttemptError(
             `Color variant for product "${row.p_name}" was not found`,
@@ -303,26 +364,12 @@ export async function createCheckoutAttemptFromCart(
             400
           );
         }
-        unitPrice =
-          row.c_price_override !== null && row.c_price_override !== undefined
-            ? Number(row.c_price_override)
-            : Number(row.p_price || 0);
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: row.p_price,
+          colorPriceOverride: row.c_price_override,
+        });
         effectiveStock = Math.max(0, Number(row.c_stock ?? 0) - Number(row.c_reserved_stock ?? 0));
         itemName = `${row.p_name} (${row.c_name})`;
-      } else if (hasVariant) {
-        const isVariantActive = Boolean(row.v_is_active === 1 || row.v_is_active === true);
-        if (!isVariantActive) {
-          throw new CheckoutAttemptError(
-            `Variant "${row.v_name}" for product "${row.p_name}" is no longer available`,
-            400
-          );
-        }
-        unitPrice =
-          row.v_price !== null && row.v_price !== undefined
-            ? Number(row.v_price)
-            : Number(row.p_price || 0);
-        effectiveStock = Number(row.v_stock ?? 0);
-        itemName = `${row.p_name} (${row.v_name})`;
       } else {
         unitPrice = Number(row.p_price || 0);
         effectiveStock = Number(row.p_stock ?? 0);
@@ -343,8 +390,33 @@ export async function createCheckoutAttemptFromCart(
         );
       }
 
-      // If color variant, create atomic stock reservation
-      if (hasColors && row.color_id) {
+      // Create atomic stock reservation
+      if (hasVariant) {
+        const [vLock]: any = await conn.execute(
+          "SELECT stock_quantity FROM product_variants WHERE id = ? FOR UPDATE",
+          [row.variant_id]
+        );
+        const [resLock]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [row.variant_id]
+        );
+        const lockedStock = Number(vLock?.[0]?.stock_quantity ?? 0);
+        const reservedStock = Number(resLock?.[0]?.reserved_qty ?? 0);
+        if (quantity > (lockedStock - reservedStock)) {
+          throw new CheckoutAttemptError(
+            `Insufficient available stock for "${itemName}". Another customer just reserved the last units.`,
+            409
+          );
+        }
+        pendingReservations.push({
+          productId: row.product_id,
+          colorId: row.color_id || null,
+          variantId: row.variant_id,
+          quantity,
+        });
+      } else if (hasColors && row.color_id) {
         const [resResult]: any = await conn.execute(
           `UPDATE product_colors
            SET reserved_stock = reserved_stock + ?, updated_at = NOW()
@@ -360,6 +432,7 @@ export async function createCheckoutAttemptFromCart(
         pendingReservations.push({
           productId: row.product_id,
           colorId: row.color_id,
+          variantId: null,
           quantity,
         });
       }
@@ -388,10 +461,10 @@ export async function createCheckoutAttemptFromCart(
         variantId: row.variant_id || null,
         colorId: (hasColors && row.color_id) ? row.color_id : null,
         productName: row.p_name,
-        variantName: hasVariant && row.v_name ? row.v_name : null,
+        variantName: hasVariant && (row.v_size_name || row.v_name) ? (row.v_size_name || row.v_name) : null,
         colorName: (hasColors && row.c_name) ? row.c_name : null,
         colorHex: (hasColors && row.c_hex) ? row.c_hex : null,
-        sku: (hasColors && row.c_sku) ? row.c_sku : null,
+        sku: (hasVariant && row.v_sku) ? row.v_sku : ((hasColors && row.c_sku) ? row.c_sku : null),
         imageUrl,
         unitPrice,
         quantity,
@@ -453,9 +526,9 @@ export async function createCheckoutAttemptFromCart(
 
     for (const res of pendingReservations) {
       await conn.execute(
-        `INSERT INTO stock_reservations (id, attempt_id, product_id, color_id, quantity, status, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, NOW(), NOW())`,
-        [crypto.randomUUID(), attemptId, res.productId, res.colorId, res.quantity, expiresAt]
+        `INSERT INTO stock_reservations (id, attempt_id, product_id, color_id, variant_id, quantity, status, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NOW(), NOW())`,
+        [crypto.randomUUID(), attemptId, res.productId, res.colorId, res.variantId, res.quantity, expiresAt]
       );
     }
 
@@ -514,7 +587,12 @@ export async function createBuyNowCheckoutAttempt(
     let orderSubtotal = 0;
     let orderDiscountTotal = 0;
     const preparedItems: any[] = [];
-    const pendingReservations: Array<{ productId: string; colorId: string; quantity: number }> = [];
+    const pendingReservations: Array<{
+      productId: string;
+      colorId: string | null;
+      variantId: string | null;
+      quantity: number;
+    }> = [];
 
     for (const itemInput of items) {
       const cleanProductId = validateId(itemInput.productId, "Product ID");
@@ -549,32 +627,11 @@ export async function createBuyNowCheckoutAttempt(
       let itemName = product.name;
       let colorRecord: any = null;
       let variantRecord: any = null;
+      let resolvedColorId = cleanColorId;
 
-      if (hasColors) {
-        if (!cleanColorId) {
-          throw new CheckoutAttemptError(`Please select a color for product "${product.name}"`, 400);
-        }
-        const [colorRows]: any = await conn.execute(
-          "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, price_override, is_active FROM product_colors WHERE id = ? LIMIT 1",
-          [cleanColorId]
-        );
-        if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
-          throw new CheckoutAttemptError(`Selected color does not belong to product "${product.name}"`, 400);
-        }
-        colorRecord = colorRows[0];
-        const isColorActive = Boolean(colorRecord.is_active === 1 || colorRecord.is_active === true);
-        if (!isColorActive) {
-          throw new CheckoutAttemptError(`Color "${colorRecord.name}" is currently inactive`, 400);
-        }
-        unitPrice =
-          colorRecord.price_override !== null && colorRecord.price_override !== undefined
-            ? Number(colorRecord.price_override)
-            : Number(product.price || 0);
-        effectiveStock = Math.max(0, Number(colorRecord.stock ?? 0) - Number(colorRecord.reserved_stock ?? 0));
-        itemName = `${product.name} (${colorRecord.name})`;
-      } else if (cleanVariantId) {
+      if (cleanVariantId) {
         const [variantRows]: any = await conn.execute(
-          "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE id = ? LIMIT 1",
+          "SELECT id, product_id, color_id, size_name, name, sku, price, stock_quantity, is_active FROM product_variants WHERE id = ? LIMIT 1",
           [cleanVariantId]
         );
         if (!variantRows || variantRows.length === 0 || variantRows[0].product_id !== cleanProductId) {
@@ -585,14 +642,54 @@ export async function createBuyNowCheckoutAttempt(
         if (!isVariantActive) {
           throw new CheckoutAttemptError(`Variant "${variantRecord.name}" is currently inactive`, 400);
         }
-        unitPrice =
-          variantRecord.price !== null && variantRecord.price !== undefined
-            ? Number(variantRecord.price)
-            : Number(product.price || 0);
-        effectiveStock = Number(variantRecord.stock_quantity ?? 0);
-        itemName = `${product.name} (${variantRecord.name})`;
+        if (variantRecord.color_id) {
+          if (resolvedColorId && resolvedColorId !== variantRecord.color_id) {
+            throw new CheckoutAttemptError(`Selected variant does not match the chosen color`, 400);
+          }
+          resolvedColorId = variantRecord.color_id;
+        }
+      }
+
+      if (hasColors || resolvedColorId) {
+        if (!resolvedColorId) {
+          throw new CheckoutAttemptError(`Please select a color for product "${product.name}"`, 400);
+        }
+        const [colorRows]: any = await conn.execute(
+          "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, price_override, is_active FROM product_colors WHERE id = ? LIMIT 1",
+          [resolvedColorId]
+        );
+        if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
+          throw new CheckoutAttemptError(`Selected color does not belong to product "${product.name}"`, 400);
+        }
+        colorRecord = colorRows[0];
+        const isColorActive = Boolean(colorRecord.is_active === 1 || colorRecord.is_active === true);
+        if (!isColorActive) {
+          throw new CheckoutAttemptError(`Color "${colorRecord.name}" is currently inactive`, 400);
+        }
+      }
+
+      unitPrice = resolveAuthoritativeUnitPrice({
+        productPrice: product.price,
+        colorPriceOverride: colorRecord?.price_override,
+        variantPrice: variantRecord?.price,
+      });
+
+      if (variantRecord) {
+        const [varResRows]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [variantRecord.id]
+        );
+        const variantReservedStock = Number(varResRows?.[0]?.reserved_qty || 0);
+        effectiveStock = Math.max(0, Number(variantRecord.stock_quantity ?? 0) - variantReservedStock);
+        itemName = colorRecord
+          ? `${product.name} (${colorRecord.name} / ${variantRecord.size_name || variantRecord.name})`
+          : `${product.name} (${variantRecord.name})`;
+      } else if (colorRecord) {
+        effectiveStock = Math.max(0, Number(colorRecord.stock ?? 0) - Number(colorRecord.reserved_stock ?? 0));
+        itemName = `${product.name} (${colorRecord.name})`;
       } else {
-        unitPrice = Number(product.price || 0);
         effectiveStock = Number(product.stock_quantity ?? 0);
       }
 
@@ -603,13 +700,38 @@ export async function createBuyNowCheckoutAttempt(
         );
       }
 
-      // Reserve stock on product_colors
-      if (hasColors && cleanColorId) {
+      // Reserve stock atomically
+      if (variantRecord) {
+        const [vLock]: any = await conn.execute(
+          "SELECT stock_quantity FROM product_variants WHERE id = ? FOR UPDATE",
+          [variantRecord.id]
+        );
+        const [resLock]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [variantRecord.id]
+        );
+        const lockedStock = Number(vLock?.[0]?.stock_quantity ?? 0);
+        const reservedStock = Number(resLock?.[0]?.reserved_qty ?? 0);
+        if (quantity > (lockedStock - reservedStock)) {
+          throw new CheckoutAttemptError(
+            `Insufficient available stock for "${itemName}". Another customer just reserved the last units.`,
+            409
+          );
+        }
+        pendingReservations.push({
+          productId: cleanProductId,
+          colorId: resolvedColorId || null,
+          variantId: variantRecord.id,
+          quantity,
+        });
+      } else if (hasColors && resolvedColorId) {
         const [resResult]: any = await conn.execute(
           `UPDATE product_colors
            SET reserved_stock = reserved_stock + ?, updated_at = NOW()
            WHERE id = ? AND is_active = 1 AND (stock - reserved_stock) >= ?`,
-          [quantity, cleanColorId, quantity]
+          [quantity, resolvedColorId, quantity]
         );
         if (resResult.affectedRows === 0) {
           throw new CheckoutAttemptError(
@@ -619,20 +741,21 @@ export async function createBuyNowCheckoutAttempt(
         }
         pendingReservations.push({
           productId: cleanProductId,
-          colorId: cleanColorId,
+          colorId: resolvedColorId,
+          variantId: null,
           quantity,
         });
       }
 
       // Query product images
       let imageUrl = "/product-samples/1.jpeg";
-      if (cleanColorId) {
+      if (resolvedColorId) {
         const [imgRows]: any = await conn.execute(
           `SELECT storage_path FROM product_images
            WHERE product_id = ? AND (color_id = ? OR color_id IS NULL)
            ORDER BY (CASE WHEN color_id = ? THEN 0 ELSE 1 END), sort_order ASC
            LIMIT 1`,
-          [cleanProductId, cleanColorId, cleanColorId]
+          [cleanProductId, resolvedColorId, resolvedColorId]
         );
         if (imgRows && imgRows.length > 0) {
           imageUrl = imgRows[0].storage_path;
@@ -668,13 +791,13 @@ export async function createBuyNowCheckoutAttempt(
       preparedItems.push({
         id: crypto.randomUUID(),
         productId: cleanProductId,
-        variantId: cleanVariantId || null,
-        colorId: cleanColorId || null,
+        variantId: variantRecord ? variantRecord.id : null,
+        colorId: resolvedColorId || null,
         productName: product.name,
-        variantName: variantRecord ? variantRecord.name : null,
+        variantName: variantRecord ? (variantRecord.size_name || variantRecord.name) : null,
         colorName: colorRecord ? colorRecord.name : null,
         colorHex: colorRecord ? colorRecord.hex : null,
-        sku: colorRecord ? colorRecord.sku : (variantRecord ? variantRecord.sku : null),
+        sku: variantRecord?.sku || colorRecord?.sku || null,
         imageUrl,
         unitPrice,
         quantity,
@@ -737,9 +860,9 @@ export async function createBuyNowCheckoutAttempt(
 
     for (const res of pendingReservations) {
       await conn.execute(
-        `INSERT INTO stock_reservations (id, attempt_id, product_id, color_id, quantity, status, expires_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'active', ?, NOW(), NOW())`,
-        [crypto.randomUUID(), attemptId, res.productId, res.colorId, res.quantity, expiresAt]
+        `INSERT INTO stock_reservations (id, attempt_id, product_id, color_id, variant_id, quantity, status, expires_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'active', ?, NOW(), NOW())`,
+        [crypto.randomUUID(), attemptId, res.productId, res.colorId, res.variantId, res.quantity, expiresAt]
       );
     }
 
@@ -926,7 +1049,26 @@ export async function finalizeOrderFromAttempt(
     // 5. Deduct inventory atomically
     for (const item of items) {
       const qty = Number(item.quantity);
-      if (item.colorId) {
+      if (item.variantId) {
+        const [result]: any = await conn.execute(
+          `UPDATE product_variants
+           SET stock_quantity = stock_quantity - ?, updated_at = NOW()
+           WHERE id = ? AND stock_quantity >= ?`,
+          [qty, item.variantId, qty]
+        );
+        if (result.affectedRows === 0) {
+          throw new CheckoutAttemptError(
+            `Insufficient stock available for "${item.productName || "variant"}". Cannot finalize order.`,
+            409
+          );
+        }
+        await conn.execute(
+          `UPDATE stock_reservations
+           SET status = 'consumed', updated_at = NOW()
+           WHERE attempt_id = ? AND variant_id = ? AND status = 'active'`,
+          [attemptRow.id, item.variantId]
+        );
+      } else if (item.colorId) {
         const [result]: any = await conn.execute(
           `UPDATE product_colors
            SET stock = stock - ?,
@@ -947,19 +1089,6 @@ export async function finalizeOrderFromAttempt(
            WHERE attempt_id = ? AND color_id = ? AND status = 'active'`,
           [attemptRow.id, item.colorId]
         );
-      } else if (item.variantId) {
-        const [result]: any = await conn.execute(
-          `UPDATE product_variants
-           SET stock_quantity = stock_quantity - ?, updated_at = NOW()
-           WHERE id = ? AND stock_quantity >= ?`,
-          [qty, item.variantId, qty]
-        );
-        if (result.affectedRows === 0) {
-          throw new CheckoutAttemptError(
-            `Insufficient stock available for "${item.productName || "variant"}". Cannot finalize order.`,
-            409
-          );
-        }
       } else if (item.productId) {
         const [result]: any = await conn.execute(
           `UPDATE products
@@ -973,6 +1102,12 @@ export async function finalizeOrderFromAttempt(
             409
           );
         }
+        await conn.execute(
+          `UPDATE stock_reservations
+           SET status = 'consumed', updated_at = NOW()
+           WHERE attempt_id = ? AND product_id = ? AND color_id IS NULL AND variant_id IS NULL AND status = 'active'`,
+          [attemptRow.id, item.productId]
+        );
       }
     }
 
@@ -1192,77 +1327,95 @@ export async function cleanupCheckoutAttempts(): Promise<{
   purgedCount: number;
   releasedReservationsCount: number;
 }> {
-  let releasedReservationsCount = 0;
+  return await withTransaction(async (conn) => {
+    let releasedReservationsCount = 0;
+    let expiredCount = 0;
 
-  // Step 1: Find pending attempts past expiry and release reservations
-  const expiredAttempts = await query<any[]>(
-    `SELECT id FROM checkout_attempts
-     WHERE status = 'pending' AND expires_at < NOW()`
-  );
-
-  if (expiredAttempts && expiredAttempts.length > 0) {
-    const expiredIds = expiredAttempts.map((a) => a.id);
-    const placeholders = expiredIds.map(() => "?").join(",");
-
-    const reservations = await query<any[]>(
-      `SELECT id, color_id, quantity
-       FROM stock_reservations
-       WHERE status = 'active' AND attempt_id IN (${placeholders})`,
-      expiredIds
+    // Step 1: Find pending or abandoned attempts past expiry that do not have captured or verified payments
+    const [expiredAttempts]: any = await conn.execute(
+      `SELECT ca.id FROM checkout_attempts ca
+       WHERE ca.status IN ('pending', 'abandoned')
+         AND ca.expires_at < NOW()
+         AND NOT EXISTS (
+           SELECT 1 FROM payments p
+           WHERE (p.order_id = ca.id OR p.provider_order_id = ca.provider_order_id)
+             AND p.status IN ('captured', 'verified')
+         )
+       FOR UPDATE`
     );
 
-    for (const res of reservations || []) {
-      await query(
-        `UPDATE product_colors
-         SET reserved_stock = GREATEST(0, reserved_stock - ?), updated_at = NOW()
-         WHERE id = ?`,
-        [res.quantity, res.color_id]
+    if (expiredAttempts && expiredAttempts.length > 0) {
+      const expiredIds = expiredAttempts.map((a: any) => a.id);
+      const placeholders = expiredIds.map(() => "?").join(",");
+
+      const [reservations]: any = await conn.execute(
+        `SELECT id, color_id, variant_id, quantity
+         FROM stock_reservations
+         WHERE status = 'active' AND attempt_id IN (${placeholders})
+         FOR UPDATE`,
+        expiredIds
       );
-      await query(
-        `UPDATE stock_reservations
-         SET status = 'released', updated_at = NOW()
-         WHERE id = ?`,
-        [res.id]
+
+      for (const res of reservations || []) {
+        if (res.color_id && !res.variant_id) {
+          await conn.execute(
+            `UPDATE product_colors
+             SET reserved_stock = GREATEST(0, reserved_stock - ?), updated_at = NOW()
+             WHERE id = ?`,
+            [res.quantity, res.color_id]
+          );
+        }
+        const [updateRes]: any = await conn.execute(
+          `UPDATE stock_reservations
+           SET status = 'released', updated_at = NOW()
+           WHERE id = ? AND status = 'active'`,
+          [res.id]
+        );
+        if (updateRes && updateRes.affectedRows > 0) {
+          releasedReservationsCount++;
+        }
+      }
+
+      // Step 2: Mark those expired attempts as 'expired' and set retention
+      const [expireResult]: any = await conn.execute(
+        `UPDATE checkout_attempts
+         SET status = 'expired',
+             retention_until = DATE_ADD(NOW(), INTERVAL ${ABANDONED_ATTEMPT_RETENTION_DAYS} DAY),
+             updated_at = NOW()
+         WHERE id IN (${placeholders})`,
+        expiredIds
       );
-      releasedReservationsCount++;
+      expiredCount = Number(expireResult?.affectedRows || 0);
     }
-  }
 
-  // Step 2: Mark pending attempts past expiry as expired and set 90-day retention
-  const expireResult: any = await query(
-    `UPDATE checkout_attempts
-     SET status = 'expired',
-         retention_until = DATE_ADD(NOW(), INTERVAL ${ABANDONED_ATTEMPT_RETENTION_DAYS} DAY),
-         updated_at = NOW()
-     WHERE status = 'pending'
-       AND expires_at < NOW()`
-  );
-  const expiredCount = Number(expireResult?.affectedRows || 0);
-
-  // Step 3: Purge attempts past retention (and clean up reservations)
-  const toPurge = await query<any[]>(
-    `SELECT id FROM checkout_attempts
-     WHERE status IN ('expired', 'failed', 'abandoned')
-       AND retention_until < NOW()`
-  );
-  if (toPurge && toPurge.length > 0) {
-    const purgeIds = toPurge.map((a) => a.id);
-    const placeholders = purgeIds.map(() => "?").join(",");
-    await query(
-      `DELETE FROM stock_reservations WHERE attempt_id IN (${placeholders})`,
-      purgeIds
+    // Step 3: Purge attempts past retention (and clean up reservations)
+    let purgedCount = 0;
+    const [toPurge]: any = await conn.execute(
+      `SELECT id FROM checkout_attempts
+       WHERE status IN ('expired', 'failed', 'abandoned')
+         AND retention_until < NOW()
+       FOR UPDATE`
     );
-  }
+    if (toPurge && toPurge.length > 0) {
+      const purgeIds = toPurge.map((a: any) => a.id);
+      const placeholders = purgeIds.map(() => "?").join(",");
+      await conn.execute(
+        `DELETE FROM stock_reservations WHERE attempt_id IN (${placeholders})`,
+        purgeIds
+      );
+      const [purgeResult]: any = await conn.execute(
+        `DELETE FROM checkout_attempts
+         WHERE id IN (${placeholders})`,
+        purgeIds
+      );
+      purgedCount = Number(purgeResult?.affectedRows || 0);
+    }
 
-  const purgeResult: any = await query(
-    `DELETE FROM checkout_attempts
-     WHERE status IN ('expired', 'failed', 'abandoned')
-       AND retention_until < NOW()`
-  );
-  const purgedCount = Number(purgeResult?.affectedRows || 0);
-
-  return { expiredCount, purgedCount, releasedReservationsCount };
+    return { expiredCount, purgedCount, releasedReservationsCount };
+  });
 }
+
+export const cleanupExpiredCheckoutAttempts = cleanupCheckoutAttempts;
 
 /**
  * Manually releases any active stock reservations for a specific checkout attempt (e.g. upon payment failure or cancellation).
@@ -1276,27 +1429,32 @@ export async function releaseCheckoutAttemptReservations(
 
   const runWithConn = async (c: any) => {
     const [reservations]: any = await c.execute(
-      `SELECT id, color_id, quantity
+      `SELECT id, color_id, variant_id, quantity
        FROM stock_reservations
-       WHERE attempt_id = ? AND status = 'active'`,
+       WHERE attempt_id = ? AND status = 'active'
+       FOR UPDATE`,
       [cleanId]
     );
 
     let count = 0;
     for (const res of reservations || []) {
-      await c.execute(
-        `UPDATE product_colors
-         SET reserved_stock = GREATEST(0, reserved_stock - ?), updated_at = NOW()
-         WHERE id = ?`,
-        [res.quantity, res.color_id]
-      );
-      await c.execute(
+      if (res.color_id && !res.variant_id) {
+        await c.execute(
+          `UPDATE product_colors
+           SET reserved_stock = GREATEST(0, reserved_stock - ?), updated_at = NOW()
+           WHERE id = ?`,
+          [res.quantity, res.color_id]
+        );
+      }
+      const [updateRes]: any = await c.execute(
         `UPDATE stock_reservations
          SET status = 'released', updated_at = NOW()
-         WHERE id = ?`,
+         WHERE id = ? AND status = 'active'`,
         [res.id]
       );
-      count++;
+      if (updateRes && updateRes.affectedRows > 0) {
+        count++;
+      }
     }
     return count;
   };

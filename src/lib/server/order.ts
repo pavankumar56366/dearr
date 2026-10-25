@@ -7,6 +7,10 @@ import {
 } from "./discount";
 import { getStoreSettings, checkRateLimit } from "./settings";
 import {
+  resolveAuthoritativeUnitPrice,
+  resolveAuthoritativeEffectiveStock,
+} from "./variant-resolver";
+import {
   resolveReportingPeriod,
   PLACED_ORDER_SQL_PREDICATE,
 } from "./order-analytics";
@@ -374,28 +378,57 @@ export async function createOrderFromCart(
     }
     const cart = carts[0];
 
-    // 2. Load cart items with current product/variant data
+    // 2. Load cart items with current product/variant/color data
     const itemRows = await conn.execute(
       `SELECT
          ci.id AS item_id,
          ci.product_id,
          ci.variant_id,
+         ci.color_id,
          ci.quantity,
          p.id AS p_id,
          p.name AS p_name,
          p.price AS p_price,
          p.stock_quantity AS p_stock,
          p.is_active AS p_is_active,
+         p.has_colors AS p_has_colors,
          p.cod_enabled AS p_cod_enabled,
          p.category_id AS p_category_id,
          pv.id AS v_id,
          pv.name AS v_name,
          pv.price AS v_price,
+         pv.sku AS v_sku,
+         pv.color_id AS v_color_id,
+         pv.size_name AS v_size_name,
          pv.stock_quantity AS v_stock,
-         pv.is_active AS v_is_active
+         pv.is_active AS v_is_active,
+         pc.id AS c_id,
+         pc.name AS c_name,
+         pc.hex AS c_hex,
+         pc.sku AS c_sku,
+         pc.stock AS c_stock,
+         pc.reserved_stock AS c_reserved_stock,
+         pc.price_override AS c_price_override,
+         pc.is_active AS c_is_active,
+         (
+           SELECT pi.storage_path
+           FROM product_images pi
+           WHERE pi.product_id = p.id
+             AND (pi.color_id = ci.color_id OR (ci.color_id IS NULL AND pi.color_id IS NULL))
+           ORDER BY pi.sort_order ASC
+           LIMIT 1
+         ) AS primary_image,
+         (
+           SELECT pi.storage_path
+           FROM product_images pi
+           WHERE pi.product_id = p.id AND pi.color_id IS NULL
+           ORDER BY pi.sort_order ASC
+           LIMIT 1
+         ) AS fallback_image
        FROM cart_items ci
        INNER JOIN products p ON ci.product_id = p.id
        LEFT JOIN product_variants pv ON ci.variant_id = pv.id
+       LEFT JOIN product_colors pc ON ci.color_id = pc.id
        WHERE ci.cart_id = ?
        ORDER BY ci.created_at ASC`,
       [cart.id]
@@ -443,8 +476,13 @@ export async function createOrderFromCart(
       id: string;
       productId: string;
       variantId: string | null;
+      colorId: string | null;
       productName: string;
       variantName: string | null;
+      colorName: string | null;
+      colorHex: string | null;
+      sku: string | null;
+      imageUrl: string | null;
       unitPrice: number;
       quantity: number;
       discountAmountPerUnit: number;
@@ -464,11 +502,20 @@ export async function createOrderFromCart(
         );
       }
 
+      const hasColors = Boolean(row.p_has_colors === 1 || row.p_has_colors === true);
       const hasVariant = Boolean(row.variant_id);
       let unitPrice = 0;
       let effectiveStock = 0;
+      let itemName = row.p_name;
+      const imageUrl = row.primary_image || row.fallback_image || "/product-samples/1.jpeg";
 
       if (hasVariant) {
+        if (!row.v_id) {
+          throw new OrderValidationError(
+            `Variant for product "${row.p_name}" was not found`,
+            400
+          );
+        }
         const isVariantActive = Boolean(row.v_is_active === 1 || row.v_is_active === true);
         if (!isVariantActive) {
           throw new OrderValidationError(
@@ -476,11 +523,63 @@ export async function createOrderFromCart(
             400
           );
         }
-        unitPrice =
-          row.v_price !== null && row.v_price !== undefined
-            ? Number(row.v_price)
-            : Number(row.p_price || 0);
-        effectiveStock = Number(row.v_stock ?? 0);
+        if (row.color_id) {
+          if (!row.c_id) {
+            throw new OrderValidationError(
+              `Color variant for product "${row.p_name}" was not found`,
+              400
+            );
+          }
+          const isColorActive = Boolean(row.c_is_active === 1 || row.c_is_active === true);
+          if (!isColorActive) {
+            throw new OrderValidationError(
+              `Color "${row.c_name}" for product "${row.p_name}" is currently inactive`,
+              400
+            );
+          }
+          if (row.v_color_id && row.v_color_id !== row.color_id) {
+            throw new OrderValidationError("Variant does not match the selected color", 400);
+          }
+        }
+
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: row.p_price,
+          colorPriceOverride: row.color_id ? row.c_price_override : null,
+          variantPrice: row.v_price,
+        });
+
+        const [varResRows]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [row.variant_id]
+        );
+        const variantReservedStock = Number(varResRows?.[0]?.reserved_qty || 0);
+        effectiveStock = Math.max(0, Number(row.v_stock ?? 0) - variantReservedStock);
+
+        itemName = row.color_id && row.c_name
+          ? `${row.p_name} (${row.c_name} / ${row.v_size_name || row.v_name})`
+          : `${row.p_name} (${row.v_name})`;
+      } else if (hasColors && row.color_id) {
+        if (!row.c_id) {
+          throw new OrderValidationError(
+            `Color variant for product "${row.p_name}" was not found`,
+            400
+          );
+        }
+        const isColorActive = Boolean(row.c_is_active === 1 || row.c_is_active === true);
+        if (!isColorActive) {
+          throw new OrderValidationError(
+            `Color "${row.c_name}" for product "${row.p_name}" is currently inactive`,
+            400
+          );
+        }
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: row.p_price,
+          colorPriceOverride: row.c_price_override,
+        });
+        effectiveStock = Math.max(0, Number(row.c_stock ?? 0) - Number(row.c_reserved_stock ?? 0));
+        itemName = `${row.p_name} (${row.c_name})`;
       } else {
         unitPrice = Number(row.p_price || 0);
         effectiveStock = Number(row.p_stock ?? 0);
@@ -489,7 +588,6 @@ export async function createOrderFromCart(
       const quantity = Number(row.quantity);
 
       if (quantity > effectiveStock) {
-        const itemName = hasVariant ? `${row.p_name} (${row.v_name})` : row.p_name;
         throw new OrderValidationError(
           `Insufficient stock for "${itemName}": requested ${quantity}, only ${effectiveStock} available`,
           400
@@ -519,8 +617,13 @@ export async function createOrderFromCart(
         id: crypto.randomUUID(),
         productId: row.product_id,
         variantId: row.variant_id || null,
+        colorId: (hasColors && row.color_id) ? row.color_id : null,
         productName: row.p_name,
-        variantName: hasVariant && row.v_name ? row.v_name : null,
+        variantName: hasVariant && (row.v_size_name || row.v_name) ? (row.v_size_name || row.v_name) : null,
+        colorName: (hasColors && row.c_name) ? row.c_name : null,
+        colorHex: (hasColors && row.c_hex) ? row.c_hex : null,
+        sku: (hasVariant && row.v_sku) ? row.v_sku : ((hasColors && row.c_sku) ? row.c_sku : null),
+        imageUrl,
         unitPrice,
         quantity,
         discountAmountPerUnit,
@@ -584,22 +687,27 @@ export async function createOrderFromCart(
       ] as any[]
     );
 
-    // 5. Insert order items (historical snapshots)
+    // 5. Insert order items (historical snapshots with 15 columns)
     for (const item of preparedItems) {
       await conn.execute(
         `INSERT INTO order_items (
-           id, order_id, product_id, variant_id,
-           product_name, variant_name, unit_price,
-           quantity, discount_amount, line_total,
+           id, order_id, product_id, variant_id, color_id,
+           product_name, variant_name, color_name, color_hex, sku, image_url,
+           unit_price, quantity, discount_amount, line_total,
            created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           item.id,
           orderId,
           item.productId,
           item.variantId ?? null,
+          item.colorId ?? null,
           item.productName,
           item.variantName ?? null,
+          item.colorName ?? null,
+          item.colorHex ?? null,
+          item.sku ?? null,
+          item.imageUrl ?? null,
           item.unitPrice,
           item.quantity,
           item.lineDiscount,
@@ -718,7 +826,59 @@ export async function createOrderFromBuyNow(
       let colorRecord: any = null;
       let variantRecord: any = null;
 
-      if (hasColors) {
+      if (cleanVariantId) {
+        const [variantRows]: any = await conn.execute(
+          "SELECT id, product_id, name, sku, price, stock_quantity, is_active, color_id, size_name FROM product_variants WHERE id = ? LIMIT 1",
+          [cleanVariantId]
+        );
+        if (!variantRows || variantRows.length === 0 || variantRows[0].product_id !== cleanProductId) {
+          throw new OrderValidationError(`Selected variant does not belong to product "${product.name}"`, 400);
+        }
+        variantRecord = variantRows[0];
+        const isVariantActive = Boolean(variantRecord.is_active === 1 || variantRecord.is_active === true);
+        if (!isVariantActive) {
+          throw new OrderValidationError(`Variant "${variantRecord.name}" is currently inactive`, 400);
+        }
+
+        const effectiveColorId = cleanColorId || variantRecord.color_id;
+        if (variantRecord.color_id && cleanColorId && variantRecord.color_id !== cleanColorId) {
+          throw new OrderValidationError("Variant does not match the selected color", 400);
+        }
+
+        if (effectiveColorId) {
+          const [colorRows]: any = await conn.execute(
+            "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, price_override, is_active FROM product_colors WHERE id = ? LIMIT 1",
+            [effectiveColorId]
+          );
+          if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
+            throw new OrderValidationError(`Selected color does not belong to product "${product.name}"`, 400);
+          }
+          colorRecord = colorRows[0];
+          const isColorActive = Boolean(colorRecord.is_active === 1 || colorRecord.is_active === true);
+          if (!isColorActive) {
+            throw new OrderValidationError(`Color "${colorRecord.name}" is currently inactive`, 400);
+          }
+        }
+
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: product.price,
+          colorPriceOverride: colorRecord ? colorRecord.price_override : null,
+          variantPrice: variantRecord.price,
+        });
+
+        const [varResRows]: any = await conn.execute(
+          `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+           FROM stock_reservations
+           WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+          [cleanVariantId]
+        );
+        const variantReservedStock = Number(varResRows?.[0]?.reserved_qty || 0);
+        effectiveStock = Math.max(0, Number(variantRecord.stock_quantity ?? 0) - variantReservedStock);
+
+        itemName = colorRecord
+          ? `${product.name} (${colorRecord.name} / ${variantRecord.size_name || variantRecord.name})`
+          : `${product.name} (${variantRecord.name})`;
+      } else if (hasColors || cleanColorId) {
         if (!cleanColorId) {
           throw new OrderValidationError(`Please select a color for product "${product.name}"`, 400);
         }
@@ -734,31 +894,12 @@ export async function createOrderFromBuyNow(
         if (!isColorActive) {
           throw new OrderValidationError(`Color "${colorRecord.name}" is currently inactive`, 400);
         }
-        unitPrice =
-          colorRecord.price_override !== null && colorRecord.price_override !== undefined
-            ? Number(colorRecord.price_override)
-            : Number(product.price || 0);
+        unitPrice = resolveAuthoritativeUnitPrice({
+          productPrice: product.price,
+          colorPriceOverride: colorRecord.price_override,
+        });
         effectiveStock = Math.max(0, Number(colorRecord.stock ?? 0) - Number(colorRecord.reserved_stock ?? 0));
         itemName = `${product.name} (${colorRecord.name})`;
-      } else if (cleanVariantId) {
-        const [variantRows]: any = await conn.execute(
-          "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE id = ? LIMIT 1",
-          [cleanVariantId]
-        );
-        if (!variantRows || variantRows.length === 0 || variantRows[0].product_id !== cleanProductId) {
-          throw new OrderValidationError(`Selected variant does not belong to product "${product.name}"`, 400);
-        }
-        variantRecord = variantRows[0];
-        const isVariantActive = Boolean(variantRecord.is_active === 1 || variantRecord.is_active === true);
-        if (!isVariantActive) {
-          throw new OrderValidationError(`Variant "${variantRecord.name}" is currently inactive`, 400);
-        }
-        unitPrice =
-          variantRecord.price !== null && variantRecord.price !== undefined
-            ? Number(variantRecord.price)
-            : Number(product.price || 0);
-        effectiveStock = Number(variantRecord.stock_quantity ?? 0);
-        itemName = `${product.name} (${variantRecord.name})`;
       } else {
         unitPrice = Number(product.price || 0);
         effectiveStock = Number(product.stock_quantity ?? 0);
@@ -769,6 +910,24 @@ export async function createOrderFromBuyNow(
           `Insufficient stock for "${itemName}": requested ${quantity}, only ${effectiveStock} available`,
           400
         );
+      }
+
+      // Fetch primary image for product + color, or fallback
+      const [imgRows]: any = await conn.execute(
+        `SELECT storage_path FROM product_images
+         WHERE product_id = ? AND (color_id = ? OR (color_id IS NULL AND ? IS NULL))
+         ORDER BY sort_order ASC LIMIT 1`,
+        [cleanProductId, colorRecord?.id || null, colorRecord?.id || null]
+      );
+      let imageUrl = imgRows?.[0]?.storage_path;
+      if (!imageUrl) {
+        const [fallbackRows]: any = await conn.execute(
+          `SELECT storage_path FROM product_images
+           WHERE product_id = ? AND color_id IS NULL
+           ORDER BY sort_order ASC LIMIT 1`,
+          [cleanProductId]
+        );
+        imageUrl = fallbackRows?.[0]?.storage_path || "/product-samples/1.jpeg";
       }
 
       let discountAmountPerUnit = 0;
@@ -793,12 +952,13 @@ export async function createOrderFromBuyNow(
         id: crypto.randomUUID(),
         productId: cleanProductId,
         variantId: cleanVariantId || null,
-        colorId: cleanColorId || null,
+        colorId: colorRecord ? colorRecord.id : null,
         productName: product.name,
-        variantName: variantRecord ? variantRecord.name : null,
+        variantName: variantRecord ? (variantRecord.size_name || variantRecord.name) : null,
         colorName: colorRecord ? colorRecord.name : null,
         colorHex: colorRecord ? colorRecord.hex : null,
-        sku: colorRecord ? colorRecord.sku : (variantRecord ? variantRecord.sku : null),
+        sku: variantRecord?.sku || colorRecord?.sku || null,
+        imageUrl,
         unitPrice,
         quantity,
         discountAmountPerUnit,
@@ -859,18 +1019,23 @@ export async function createOrderFromBuyNow(
     for (const item of preparedItems) {
       await conn.execute(
         `INSERT INTO order_items (
-           id, order_id, product_id, variant_id,
-           product_name, variant_name, unit_price,
-           quantity, discount_amount, line_total,
+           id, order_id, product_id, variant_id, color_id,
+           product_name, variant_name, color_name, color_hex, sku, image_url,
+           unit_price, quantity, discount_amount, line_total,
            created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           item.id,
           orderId,
           item.productId,
           item.variantId ?? null,
+          item.colorId ?? null,
           item.productName,
           item.variantName ?? null,
+          item.colorName ?? null,
+          item.colorHex ?? null,
+          item.sku ?? null,
+          item.imageUrl ?? null,
           item.unitPrice,
           item.quantity,
           item.lineDiscount,
@@ -1358,15 +1523,15 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       const items = (itemRows as any)[0] as any[];
 
       for (const item of items || []) {
-        if (item.color_id) {
-          await conn.execute(
-            "UPDATE product_colors SET stock = stock + ?, updated_at = NOW() WHERE id = ?",
-            [item.quantity, item.color_id]
-          );
-        } else if (item.variant_id) {
+        if (item.variant_id) {
           await conn.execute(
             "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
             [item.quantity, item.variant_id]
+          );
+        } else if (item.color_id) {
+          await conn.execute(
+            "UPDATE product_colors SET stock = stock + ?, updated_at = NOW() WHERE id = ?",
+            [item.quantity, item.color_id]
           );
         } else if (item.product_id) {
           await conn.execute(

@@ -300,6 +300,7 @@ export {
   updateCheckoutAttemptProviderOrder,
   markAttemptConverted,
   cleanupCheckoutAttempts,
+  cleanupExpiredCheckoutAttempts,
   reconcileLatePaymentAttempt,
   ATTEMPT_EXPIRY_MINUTES,
   ATTEMPT_RETENTION_DAYS,
@@ -421,3 +422,11 @@ export {
   MAX_DAILY_OTP_REQUESTS_PER_ACCOUNT,
   GENERIC_OTP_PUBLIC_RESPONSE,
 } from "./otp";
+
+export {
+  resolveAuthoritativeUnitPrice,
+  resolveAuthoritativeEffectiveStock,
+  resolveAuthoritativeItemFromDb,
+  AuthoritativeResolverError,
+  type AuthoritativeItemResolution,
+} from "./variant-resolver";

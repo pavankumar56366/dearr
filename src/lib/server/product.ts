@@ -1645,3 +1645,11 @@ export async function findTrendingProducts(limit = 4): Promise<Product[]> {
     );
   });
 }
+
+export {
+  resolveAuthoritativeUnitPrice,
+  resolveAuthoritativeEffectiveStock,
+  resolveAuthoritativeItemFromDb,
+  AuthoritativeResolverError,
+  type AuthoritativeItemResolution,
+} from "./variant-resolver";
