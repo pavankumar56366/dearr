@@ -208,8 +208,8 @@ export default function ProductDetailsClient({
 
   // Single-SKU Variant & Quantity state
   const defaultVariant =
-    product?.variants?.find((v: any) => v.isActive && v.stockQuantity > 0) ||
-    product?.variants?.[0];
+    product?.variants?.find((v: any) => v.isActive !== false && v.stockQuantity > 0) ||
+    product?.variants?.find((v: any) => v.isActive !== false);
 
   const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(
     defaultVariant?.id
@@ -220,8 +220,8 @@ export default function ProductDetailsClient({
   useEffect(() => {
     if (product) {
       const def =
-        product.variants?.find((v: any) => v.isActive && v.stockQuantity > 0) ||
-        product.variants?.[0];
+        product.variants?.find((v: any) => v.isActive !== false && v.stockQuantity > 0) ||
+        product.variants?.find((v: any) => v.isActive !== false);
       setSelectedVariantId(def?.id);
     }
   }, [product?.id]);

@@ -52,7 +52,9 @@ export default function ProductVariants({
       >
         {variants.map((v) => {
           const isSelected = selectedVariantId === v.id;
-          const isAvailable = v.isActive && v.stockQuantity > 0;
+          const isInactive = v.isActive === false;
+          const isOutOfStock = !isInactive && v.stockQuantity <= 0;
+          const isAvailable = !isInactive && !isOutOfStock;
 
           return (
             <button
@@ -60,8 +62,12 @@ export default function ProductVariants({
               type="button"
               role="radio"
               aria-checked={isSelected}
-              disabled={disabled || !v.isActive}
-              onClick={() => onSelectVariant(v.id)}
+              disabled={disabled || isInactive}
+              onClick={() => {
+                if (!isInactive) {
+                  onSelectVariant(v.id);
+                }
+              }}
               className="px-3.5 py-2 rounded-xl text-xs font-semibold transition-all duration-150 focus:outline-none cursor-pointer disabled:cursor-not-allowed"
               style={{
                 background: isSelected
@@ -75,21 +81,25 @@ export default function ProductVariants({
                   : isAvailable
                   ? "var(--color-neutral-700)"
                   : "var(--color-neutral-400)",
-                opacity: v.isActive ? 1 : 0.6,
+                opacity: isInactive ? 0.45 : 1,
                 boxShadow: isSelected
                   ? "0 0 0 2px rgba(162, 203, 139, 0.2)"
                   : "none",
               }}
             >
               <span>{v.name}</span>
-              {!isAvailable && (
+              {isInactive ? (
                 <span className="ml-1.5 text-[10px] text-neutral-400 font-normal">
+                  (Unavailable)
+                </span>
+              ) : isOutOfStock ? (
+                <span className="ml-1.5 text-[10px] text-red-500 font-normal">
                   (Out of Stock)
                 </span>
-              )}
-              {v.price && (
+              ) : null}
+              {v.price !== undefined && v.price !== null && (
                 <span className="ml-1.5 opacity-80">
-                  (₹{v.price.toLocaleString("en-IN")})
+                  (₹{Number(v.price).toLocaleString("en-IN")})
                 </span>
               )}
             </button>

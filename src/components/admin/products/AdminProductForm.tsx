@@ -356,7 +356,20 @@ export function AdminProductForm({
           img.url !== initialImages[idx]?.url ||
           img.isPrimary !== initialImages[idx]?.isPrimary
       ) ||
-      variants.length !== (initialProduct.variants?.length || 0)
+      variants.length !== (initialProduct.variants?.length || 0) ||
+      variants.some((v, idx) => {
+        const orig = initialProduct.variants?.[idx];
+        if (!orig) return true;
+        return (
+          v.name !== orig.name ||
+          v.sku !== orig.sku ||
+          v.price !== orig.price ||
+          v.stockQuantity !== orig.stockQuantity ||
+          v.isActive !== orig.isActive ||
+          (v.colorId || null) !== (orig.colorId || null) ||
+          (v.sizeName || null) !== (orig.sizeName || null)
+        );
+      })
     );
   }, [
     mode,
@@ -548,6 +561,49 @@ export function AdminProductForm({
       }
     }
 
+    if (variants.length > 0) {
+      const seenVariantSkus = new Set<string>();
+      const seenCombos = new Set<string>();
+      for (const v of variants) {
+        if (!v.name.trim()) {
+          newErrors.title = "All product variants must have a name.";
+          break;
+        }
+        if (!v.sku.trim()) {
+          newErrors.sku = "All product variants must have an SKU.";
+          break;
+        }
+        const cleanSku = v.sku.trim().toUpperCase();
+        if (seenVariantSkus.has(cleanSku)) {
+          newErrors.sku = `Duplicate variant SKU "${cleanSku}". All variant SKUs must be unique.`;
+          break;
+        }
+        seenVariantSkus.add(cleanSku);
+
+        if (v.price !== undefined && v.price !== null) {
+          const p = Number(v.price);
+          if (isNaN(p) || p < 0) {
+            newErrors.price = `Variant "${v.name}" has an invalid price. Price cannot be negative.`;
+            break;
+          }
+        }
+
+        if (typeof v.stockQuantity !== "number" || isNaN(v.stockQuantity) || v.stockQuantity < 0) {
+          newErrors.stockQuantity = `Variant "${v.name}" must have a stock quantity of 0 or greater.`;
+          break;
+        }
+
+        if (v.colorId || v.sizeName) {
+          const comboKey = `${v.colorId || "none"}::${(v.sizeName || "").trim().toLowerCase()}`;
+          if (seenCombos.has(comboKey)) {
+            newErrors.title = `Duplicate variant combination "${v.name}". Each color and size combination must be unique.`;
+            break;
+          }
+          seenCombos.add(comboKey);
+        }
+      }
+    }
+
     setErrors(newErrors);
     setTouched({
       title: true,
@@ -697,12 +753,6 @@ export function AdminProductForm({
         }
       }
 
-      // Ensure proper sorting by sortOrder and re-index sequentially
-      finalImages.sort((a, b) => a.sortOrder - b.sortOrder);
-      finalImages.forEach((img, idx) => {
-        img.sortOrder = idx;
-      });
-
       // 2. Resolve Category ID
       const selectedCategoryObj = categoriesList.find(
         (c: any) =>
@@ -714,12 +764,32 @@ export function AdminProductForm({
 
       // 3. Format Variants
       const formattedVariants = variants.map((v) => ({
+        id: v.id && !v.id.startsWith("var-temp-") && !v.id.startsWith("new-") ? v.id : undefined,
+        colorId: v.colorId ? v.colorId.trim() : null,
+        sizeName: v.sizeName ? v.sizeName.trim() : null,
         name: v.name.trim(),
         sku: v.sku.trim(),
-        price: v.price !== undefined && v.price !== null ? Number(v.price) : null,
-        stockQuantity: Number(v.stockQuantity || 0),
+        price:
+          v.price !== undefined && v.price !== null && !isNaN(Number(v.price))
+            ? Number(v.price)
+            : null,
+        stockQuantity: Math.max(0, Number(v.stockQuantity || 0)),
         isActive: v.isActive !== false,
       }));
+
+      // If variants exist, total stock is calculated from variant inventory
+      if (formattedVariants.length > 0) {
+        parsedStock = formattedVariants.reduce(
+          (sum, v) => sum + (v.stockQuantity || 0),
+          0
+        );
+      }
+
+      // Ensure proper sorting by sortOrder and re-index sequentially
+      finalImages.sort((a, b) => a.sortOrder - b.sortOrder);
+      finalImages.forEach((img, idx) => {
+        img.sortOrder = idx;
+      });
 
       // 4. Parse Pricing & Inventory
       const parsedPrice = parseFloat(price);
@@ -743,11 +813,8 @@ export function AdminProductForm({
           codEnabled: codEnabled,
           colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
+          variants: formattedVariants,
         };
-
-        if (formattedVariants.length > 0) {
-          patchPayload.variants = formattedVariants;
-        }
 
         res = await fetch(`/api/admin/products/${encodeURIComponent(initialProduct.id)}`, {
           method: "PATCH",
@@ -1715,8 +1782,11 @@ export function AdminProductForm({
             <AdminProductVariants
               variants={variants}
               onChange={(updated) => setVariants(updated)}
+              colors={colors}
+              hasColors={hasColors}
               basePrice={parseFloat(price) || 0}
               baseSku={sku.trim()}
+              onToggleHasColors={(enabled) => setHasColors(enabled)}
             />
           </div>
 
@@ -1778,7 +1848,9 @@ export function AdminProductForm({
             price={price.trim() ? parseFloat(price) : null}
             compareAtPrice={compareAtPrice.trim() ? parseFloat(compareAtPrice) : null}
             stockQuantity={
-              hasColors
+              variants.length > 0
+                ? variants.reduce((acc, v) => acc + (Number(v.stockQuantity) || 0), 0)
+                : hasColors
                 ? colors.reduce((acc, c) => acc + (Number(c.stock) || 0), 0)
                 : stockQuantity.trim()
                 ? parseInt(stockQuantity, 10)
@@ -1792,7 +1864,7 @@ export function AdminProductForm({
             primaryImage={primaryImage}
             isActive={isActive}
             isFeatured={isFeatured}
-            variantsCount={hasColors ? colors.length : variants.length}
+            variantsCount={variants.length > 0 ? variants.length : hasColors ? colors.length : 0}
           />
         </div>
       </form>
