@@ -18,6 +18,8 @@ export interface ProductImage {
 export interface ProductVariant {
   id: string;
   productId: string;
+  colorId?: string | null;
+  sizeName?: string | null;
   name: string;
   sku: string;
   price: number | null;
@@ -122,6 +124,8 @@ export interface CreateProductInput {
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
+    colorId?: string | null;
+    sizeName?: string | null;
     name: string;
     sku: string;
     price?: number | null;
@@ -146,6 +150,8 @@ export interface UpdateProductInput {
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
+    colorId?: string | null;
+    sizeName?: string | null;
     name: string;
     sku: string;
     price?: number | null;
@@ -268,9 +274,13 @@ export function toProductImage(row: any): ProductImage {
  * Maps raw database rows to a sanitized ProductVariant object.
  */
 function toProductVariant(row: any): ProductVariant {
+  const rawColorId = row.color_id || row.colorId;
+  const rawSizeName = row.size_name || row.sizeName;
   return {
     id: row.id,
     productId: row.product_id,
+    colorId: typeof rawColorId === "string" && rawColorId.trim().length > 0 ? rawColorId.trim() : null,
+    sizeName: typeof rawSizeName === "string" && rawSizeName.trim().length > 0 ? rawSizeName.trim() : null,
     name: row.name,
     sku: row.sku,
     price: row.price !== null && row.price !== undefined ? Number(row.price) : null,
@@ -859,6 +869,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
     ]);
 
     // Insert Colors if provided and hasColors is enabled
+    const validColorIds = new Set<string>();
     if (hasColors && input.colors && Array.isArray(input.colors)) {
       if (input.colors.length > 12) {
         throw new ProductValidationError("Maximum 12 colors allowed per product", 400);
@@ -907,6 +918,7 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
         }
 
         const colorId = c.id?.trim() || crypto.randomUUID();
+        validColorIds.add(colorId);
         const sortOrder = c.sortOrder !== undefined ? c.sortOrder : i;
         const cActive = c.isActive !== false ? 1 : 0;
 
@@ -939,6 +951,8 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
 
     // Insert Variants if provided
     if (input.variants && Array.isArray(input.variants)) {
+      const seenVariantIds = new Set<string>();
+      const seenCombos = new Set<string>();
       for (const v of input.variants) {
         if (!v.name || typeof v.name !== "string" || v.name.trim().length === 0) {
           throw new ProductValidationError("Variant name is required", 400);
@@ -956,6 +970,29 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
           throw new ProductValidationError(`Variant SKU '${sku}' already exists`, 409);
         }
 
+        const rawVarId = typeof v.id === "string" ? v.id.trim() : "";
+        const cleanVarId = rawVarId.length > 0 ? rawVarId : null;
+        if (cleanVarId) {
+          if (seenVariantIds.has(cleanVarId)) {
+            throw new ProductValidationError(
+              `Duplicate variant ID '${cleanVarId}' provided in variants array`,
+              400
+            );
+          }
+          seenVariantIds.add(cleanVarId);
+
+          const [existingVar]: any = await conn.execute(
+            "SELECT id FROM product_variants WHERE id = ? LIMIT 1",
+            [cleanVarId]
+          );
+          if (existingVar.length > 0) {
+            throw new ProductValidationError(
+              `Variant ID '${cleanVarId}' already exists`,
+              409
+            );
+          }
+        }
+
         const vPrice = v.price !== undefined && v.price !== null ? v.price : null;
         if (vPrice !== null && (typeof vPrice !== "number" || isNaN(vPrice) || vPrice < 0)) {
           throw new ProductValidationError("Variant price must be non-negative or null", 400);
@@ -966,10 +1003,58 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
           throw new ProductValidationError("Variant stock quantity must be a non-negative integer", 400);
         }
 
-        const varId = v.id?.trim() || crypto.randomUUID();
+        // Validate colorId belongs to this product
+        let colorId: string | null = null;
+        if (v.colorId !== undefined && v.colorId !== null) {
+          if (typeof v.colorId !== "string") {
+            throw new ProductValidationError("Variant colorId must be a valid string", 400);
+          }
+          const cleanColorId = v.colorId.trim();
+          if (cleanColorId.length > 0) {
+            if (!validColorIds.has(cleanColorId)) {
+              throw new ProductValidationError(
+                `Referenced colorId '${cleanColorId}' does not belong to this product`,
+                400
+              );
+            }
+            colorId = cleanColorId;
+          }
+        }
+
+        // Validate sizeName is bounded and trimmed
+        let sizeName: string | null = null;
+        if (v.sizeName !== undefined && v.sizeName !== null) {
+          if (typeof v.sizeName !== "string") {
+            throw new ProductValidationError("Variant size name must be a valid string", 400);
+          }
+          const cleanSizeName = v.sizeName.trim();
+          if (cleanSizeName.length > 100) {
+            throw new ProductValidationError(
+              "Variant size name cannot exceed 100 characters",
+              400
+            );
+          }
+          if (cleanSizeName.length > 0) {
+            sizeName = cleanSizeName;
+          }
+        }
+
+        // Enforce combination uniqueness in memory
+        if (colorId !== null || sizeName !== null) {
+          const comboKey = `${colorId ?? "00000000-0000-0000-0000-000000000000"}::${(sizeName ?? "").toLowerCase()}`;
+          if (seenCombos.has(comboKey)) {
+            throw new ProductValidationError(
+              `Duplicate variant combination '${v.name}' within product`,
+              400
+            );
+          }
+          seenCombos.add(comboKey);
+        }
+
+        const varId = cleanVarId || crypto.randomUUID();
         await conn.execute(
-          "INSERT INTO product_variants (id, product_id, name, sku, price, stock_quantity, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [varId, id, v.name.trim(), sku, vPrice, vStock, v.isActive !== false ? 1 : 0]
+          "INSERT INTO product_variants (id, product_id, color_id, size_name, name, sku, price, stock_quantity, is_active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          [varId, id, colorId, sizeName, v.name.trim(), sku, vPrice, vStock, v.isActive !== false ? 1 : 0]
         );
       }
     }
@@ -1277,9 +1362,84 @@ export async function updateProduct(
       }
     }
 
-    // Replace variants if a variants array was provided
+    // Upsert variants safely if a variants array was provided
     if (input.variants !== undefined && Array.isArray(input.variants)) {
-      await conn.execute("DELETE FROM product_variants WHERE product_id = ?", [cleanId]);
+      const [productColorRows]: any = await conn.execute(
+        "SELECT id FROM product_colors WHERE product_id = ?",
+        [cleanId]
+      );
+      const validColorIds = new Set<string>(
+        productColorRows.map((r: any) => String(r.id))
+      );
+
+      const [existingVariantRows]: any = await conn.execute(
+        "SELECT id FROM product_variants WHERE product_id = ?",
+        [cleanId]
+      );
+      const existingVariantIds = new Set<string>(
+        existingVariantRows.map((r: any) => String(r.id))
+      );
+
+      const incomingVariantIds = new Set<string>();
+      for (const v of input.variants) {
+        const rawId = typeof v.id === "string" ? v.id.trim() : "";
+        if (rawId.length > 0) {
+          if (incomingVariantIds.has(rawId)) {
+            throw new ProductValidationError(
+              `Duplicate variant ID '${rawId}' provided in variants array`,
+              400
+            );
+          }
+          incomingVariantIds.add(rawId);
+        }
+      }
+
+      // Reject any incoming variant ID that exists in the database but belongs to another product
+      for (const incomingId of Array.from(incomingVariantIds)) {
+        if (!existingVariantIds.has(incomingId)) {
+          const [otherVarRows]: any = await conn.execute(
+            "SELECT product_id FROM product_variants WHERE id = ? LIMIT 1",
+            [incomingId]
+          );
+          if (otherVarRows.length > 0) {
+            throw new ProductValidationError(
+              `Variant ID '${incomingId}' already exists and belongs to another product`,
+              409
+            );
+          }
+        }
+      }
+
+      // Handle removed variants safely without breaking historical FK references
+      for (const oldId of Array.from(existingVariantIds)) {
+        if (!incomingVariantIds.has(oldId)) {
+          const [orderRefs]: any = await conn.execute(
+            "SELECT id FROM order_items WHERE variant_id = ? LIMIT 1",
+            [oldId]
+          );
+          const [cartRefs]: any = await conn.execute(
+            "SELECT id FROM cart_items WHERE variant_id = ? LIMIT 1",
+            [oldId]
+          );
+          const [resRefs]: any = await conn.execute(
+            "SELECT id FROM stock_reservations WHERE variant_id = ? LIMIT 1",
+            [oldId]
+          );
+          const hasReservationRefs = resRefs.length > 0;
+
+          if (orderRefs.length > 0 || cartRefs.length > 0 || hasReservationRefs) {
+            // Soft-deactivate to preserve historical order, cart, and reservation references
+            await conn.execute(
+              "UPDATE product_variants SET is_active = 0, updated_at = NOW() WHERE id = ?",
+              [oldId]
+            );
+          } else {
+            await conn.execute("DELETE FROM product_variants WHERE id = ?", [oldId]);
+          }
+        }
+      }
+
+      const seenCombos = new Set<string>();
       for (const v of input.variants) {
         if (!v.name || typeof v.name !== "string" || v.name.trim().length === 0) {
           throw new ProductValidationError("Variant name is required", 400);
@@ -1288,9 +1448,12 @@ export async function updateProduct(
           throw new ProductValidationError("Variant SKU is required", 400);
         }
         const sku = v.sku.trim();
+        const rawVarId = typeof v.id === "string" ? v.id.trim() : "";
+        const cleanVarId = rawVarId.length > 0 ? rawVarId : null;
+
         const [existingSku] = await conn.execute(
-          "SELECT id FROM product_variants WHERE sku = ? AND product_id != ? LIMIT 1",
-          [sku, cleanId]
+          "SELECT id FROM product_variants WHERE sku = ? AND id != ? LIMIT 1",
+          [sku, cleanVarId || ""]
         );
         if ((existingSku as any[]).length > 0) {
           throw new ProductValidationError(`Variant SKU '${sku}' already exists`, 409);
@@ -1306,11 +1469,70 @@ export async function updateProduct(
           throw new ProductValidationError("Variant stock quantity must be a non-negative integer", 400);
         }
 
-        const varId = v.id?.trim() || crypto.randomUUID();
-        await conn.execute(
-          "INSERT INTO product_variants (id, product_id, name, sku, price, stock_quantity, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [varId, cleanId, v.name.trim(), sku, vPrice, vStock, v.isActive !== false ? 1 : 0]
-        );
+        // Validate colorId belongs to this product
+        let colorId: string | null = null;
+        if (v.colorId !== undefined && v.colorId !== null) {
+          if (typeof v.colorId !== "string") {
+            throw new ProductValidationError("Variant colorId must be a valid string", 400);
+          }
+          const cleanColorId = v.colorId.trim();
+          if (cleanColorId.length > 0) {
+            if (!validColorIds.has(cleanColorId)) {
+              throw new ProductValidationError(
+                `Referenced colorId '${cleanColorId}' does not belong to this product`,
+                400
+              );
+            }
+            colorId = cleanColorId;
+          }
+        }
+
+        // Validate sizeName is bounded and trimmed
+        let sizeName: string | null = null;
+        if (v.sizeName !== undefined && v.sizeName !== null) {
+          if (typeof v.sizeName !== "string") {
+            throw new ProductValidationError("Variant size name must be a valid string", 400);
+          }
+          const cleanSizeName = v.sizeName.trim();
+          if (cleanSizeName.length > 100) {
+            throw new ProductValidationError(
+              "Variant size name cannot exceed 100 characters",
+              400
+            );
+          }
+          if (cleanSizeName.length > 0) {
+            sizeName = cleanSizeName;
+          }
+        }
+
+        // Enforce combination uniqueness in memory
+        if (colorId !== null || sizeName !== null) {
+          const comboKey = `${colorId ?? "00000000-0000-0000-0000-000000000000"}::${(sizeName ?? "").toLowerCase()}`;
+          if (seenCombos.has(comboKey)) {
+            throw new ProductValidationError(
+              `Duplicate variant combination '${v.name}' within product`,
+              400
+            );
+          }
+          seenCombos.add(comboKey);
+        }
+
+        if (cleanVarId && existingVariantIds.has(cleanVarId)) {
+          await conn.execute(
+            `UPDATE product_variants
+             SET color_id = ?, size_name = ?, name = ?, sku = ?, price = ?, stock_quantity = ?, is_active = ?, updated_at = NOW()
+             WHERE id = ?`,
+            [colorId, sizeName, v.name.trim(), sku, vPrice, vStock, v.isActive !== false ? 1 : 0, cleanVarId]
+          );
+        } else {
+          const varId = cleanVarId || crypto.randomUUID();
+          await conn.execute(
+            `INSERT INTO product_variants (
+              id, product_id, color_id, size_name, name, sku, price, stock_quantity, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+            [varId, cleanId, colorId, sizeName, v.name.trim(), sku, vPrice, vStock, v.isActive !== false ? 1 : 0]
+          );
+        }
       }
     }
 

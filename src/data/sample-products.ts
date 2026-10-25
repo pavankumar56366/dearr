@@ -15,6 +15,8 @@ export interface SampleProductVariant {
   price?: number;
   stockQuantity: number;
   isActive: boolean;
+  colorId?: string | null;
+  sizeName?: string | null;
 }
 
 export interface SampleProductSpecification {

@@ -7,6 +7,8 @@ export interface ProductVariantItem {
   price?: number | null;
   stockQuantity: number;
   isActive?: boolean;
+  colorId?: string | null;
+  sizeName?: string | null;
 }
 
 interface ProductVariantsProps {
