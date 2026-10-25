@@ -29,7 +29,7 @@ ALTER TABLE `product_variants`
         CONCAT(COALESCE(`color_id`, '00000000-0000-0000-0000-000000000000'), '::', LOWER(TRIM(`size_name`)))
       ELSE NULL
     END
-  ) STORED AFTER `size_name`,
+  ) VIRTUAL AFTER `size_name`,
   ADD KEY `idx_product_variants_color_id` (`color_id`),
   ADD KEY `idx_product_variants_size_name` (`size_name`),
   ADD UNIQUE KEY `uq_product_variants_combo` (`product_id`, `combo_hash`),
