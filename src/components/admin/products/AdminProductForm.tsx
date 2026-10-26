@@ -859,7 +859,9 @@ export function AdminProductForm({
             : res.status === 409
             ? "A product with this URL slug or SKU already exists. Please customize the slug."
             : "Failed to save product to database. Please check required fields and try again.");
-        throw new Error(errorMsg);
+        setSaveErrorMessage(errorMsg);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return;
       }
 
       const returnedProduct = resData.product;
@@ -913,7 +915,7 @@ export function AdminProductForm({
       setSavedProduct(mappedSuccessProduct);
       router.refresh();
     } catch (err: unknown) {
-      console.error("[AdminProductForm Save Error]", err);
+      console.warn("[AdminProductForm Save Error]", err);
       const msg = err instanceof Error ? err.message : "Failed to persist product. Please try again.";
       setSaveErrorMessage(msg);
       window.scrollTo({ top: 0, behavior: "smooth" });
