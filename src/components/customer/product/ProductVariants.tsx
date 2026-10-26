@@ -16,6 +16,7 @@ interface ProductVariantsProps {
   selectedVariantId?: string;
   onSelectVariant: (variantId: string) => void;
   disabled?: boolean;
+  label?: string;
 }
 
 /**
@@ -30,6 +31,7 @@ export default function ProductVariants({
   selectedVariantId,
   onSelectVariant,
   disabled = false,
+  label = "Select Option",
 }: ProductVariantsProps) {
   // If product does not have variants defined, render nothing
   if (!variants || variants.length === 0) {
@@ -42,19 +44,20 @@ export default function ProductVariants({
         className="text-xs font-bold uppercase tracking-wider"
         style={{ color: "var(--color-neutral-700)" }}
       >
-        Select Option
+        {label}
       </label>
 
       <div
         className="flex flex-wrap gap-2"
         role="radiogroup"
-        aria-label="Product options"
+        aria-label={label}
       >
         {variants.map((v) => {
           const isSelected = selectedVariantId === v.id;
           const isInactive = v.isActive === false;
           const isOutOfStock = !isInactive && v.stockQuantity <= 0;
           const isAvailable = !isInactive && !isOutOfStock;
+          const displayName = v.sizeName?.trim() || v.name;
 
           return (
             <button
@@ -87,7 +90,7 @@ export default function ProductVariants({
                   : "none",
               }}
             >
-              <span>{v.name}</span>
+              <span>{displayName}</span>
               {isInactive ? (
                 <span className="ml-1.5 text-[10px] text-neutral-400 font-normal">
                   (Unavailable)

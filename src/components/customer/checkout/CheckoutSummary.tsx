@@ -93,21 +93,24 @@ export default function CheckoutSummary({
               <span className="text-xs font-bold text-neutral-900 truncate">
                 {item.name}
               </span>
-              {item.colorName ? (
-                <span className="text-[11px] text-neutral-600 flex items-center gap-1.5 mt-0.5 truncate">
-                  {item.colorHex && (
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-full border border-neutral-300 shrink-0"
-                      style={{ backgroundColor: item.colorHex }}
-                    />
-                  )}
-                  <span>Color: {item.colorName}</span>
-                </span>
-              ) : item.variantName ? (
-                <span className="text-[11px] text-neutral-500 truncate">
-                  Finish: {item.variantName}
-                </span>
-              ) : null}
+              <div className="flex flex-col gap-0.5 mt-0.5">
+                {item.colorName && (
+                  <span className="text-[11px] text-neutral-600 flex items-center gap-1.5 truncate">
+                    {item.colorHex && (
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full border border-neutral-300 shrink-0"
+                        style={{ backgroundColor: item.colorHex }}
+                      />
+                    )}
+                    <span>Color: <strong className="font-semibold text-neutral-900">{item.colorName}</strong></span>
+                  </span>
+                )}
+                {item.variantName && (
+                  <span className="text-[11px] text-neutral-600 truncate">
+                    Option: <strong className="font-semibold text-neutral-900">{item.variantName}</strong>
+                  </span>
+                )}
+              </div>
               <span className="text-[11px] text-neutral-600 mt-0.5">
                 ₹{item.price.toLocaleString("en-IN")} each
               </span>

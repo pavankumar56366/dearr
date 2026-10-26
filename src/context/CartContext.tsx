@@ -100,7 +100,7 @@ function mapApiCartItem(item: any): CartItem {
     colorId: item.colorId || item.color?.id || undefined,
     colorName: item.color?.name || undefined,
     colorHex: item.color?.hex || undefined,
-    sku: item.color?.sku || item.variant?.sku || undefined,
+    sku: item.variant?.sku || item.color?.sku || undefined,
     isActive: Boolean(
       item.product?.isActive &&
         (item.color ? item.color.isActive : true) &&
@@ -305,7 +305,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       const sampleProd = product as SampleProduct;
       const effectiveStock = variant?.stockQuantity ?? sampleProd.stockQuantity ?? 10;
       const effectivePrice = variant?.price ?? sampleProd.price ?? 0;
-      const variantKey = color ? `color-${color.id}` : (variant ? variant.id : "default");
+      const variantKey =
+        color && variant
+          ? `color-${color.id}-var-${variant.id}`
+          : color
+          ? `color-${color.id}`
+          : variant
+          ? `var-${variant.id}`
+          : "default";
       const compositeId = `${product.id}-${variantKey}`;
 
       setItems((prev) => {
@@ -334,7 +341,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           colorId: color?.id,
           colorName: color?.name,
           colorHex: color?.hex,
-          sku: color?.sku || (variant as any)?.sku,
+          sku: (variant as any)?.sku || color?.sku,
           isActive: true,
           codEnabled: sampleProd.codEnabled !== undefined ? Boolean(sampleProd.codEnabled) : true,
         };

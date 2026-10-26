@@ -52,6 +52,8 @@ export default function ProductActions({
     }, 3000);
   };
 
+  const isPurchaseDisabled = isOutOfStock || (hasVariants && !selectedVariantId);
+
   const handleAddToCart = () => {
     if (isOutOfStock) return;
     if (hasVariants && !selectedVariantId) {
@@ -140,16 +142,20 @@ export default function ProductActions({
           <button
             type="button"
             id="btn-add-to-cart"
-            disabled={isOutOfStock}
+            disabled={isPurchaseDisabled}
             onClick={handleAddToCart}
             className="flex-1 flex items-center justify-center gap-2 h-12 px-6 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-md active:scale-[0.98]"
             style={{
               background: cartSuccess
                 ? "var(--color-success)"
-                : isOutOfStock
+                : isPurchaseDisabled
                 ? "var(--color-neutral-300)"
                 : "var(--color-primary)",
-              color: cartSuccess ? "#FFFFFF" : "var(--color-neutral-900)",
+              color: cartSuccess
+                ? "#FFFFFF"
+                : isPurchaseDisabled
+                ? "var(--color-neutral-600)"
+                : "var(--color-neutral-900)",
             }}
           >
             {cartSuccess ? (
@@ -159,6 +165,8 @@ export default function ProductActions({
               </>
             ) : isOutOfStock ? (
               <span>Out of Stock</span>
+            ) : hasVariants && !selectedVariantId ? (
+              <span>Select an Option</span>
             ) : (
               <>
                 <CartIcon size={18} />
@@ -196,15 +204,20 @@ export default function ProductActions({
           <button
             type="button"
             id="btn-buy-now"
+            disabled={isPurchaseDisabled}
             onClick={handleBuyNow}
-            className="w-full flex items-center justify-center h-12 px-6 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary hover:bg-neutral-100 active:scale-[0.98]"
+            className="w-full flex items-center justify-center h-12 px-6 rounded-xl font-bold text-sm tracking-wide transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-primary hover:bg-neutral-100 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
             style={{
               background: "var(--color-surface)",
-              border: "2px solid var(--color-primary)",
-              color: "var(--color-neutral-900)",
+              border: isPurchaseDisabled
+                ? "2px solid var(--color-neutral-300)"
+                : "2px solid var(--color-primary)",
+              color: isPurchaseDisabled
+                ? "var(--color-neutral-400)"
+                : "var(--color-neutral-900)",
             }}
           >
-            Buy Now
+            {hasVariants && !selectedVariantId ? "Select an Option" : "Buy Now"}
           </button>
         )}
       </div>
