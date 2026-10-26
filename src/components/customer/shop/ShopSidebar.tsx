@@ -80,17 +80,22 @@ export default function ShopSidebar({
 
   // Compute real product count per category (active products only)
   const categoryCounts = categories.map((cat) => {
-    const count = (products || []).filter((p) => {
+    const fallbackCount = (products || []).filter((p) => {
       const pCatSlug =
         typeof p.category === "object" && p.category !== null
           ? p.category.slug
           : p.categorySlug;
       return pCatSlug === cat.slug && p.isActive !== false;
     }).length;
+    const count = cat.productCount ?? cat.activeProductCount ?? fallbackCount;
     return { ...cat, liveCount: count };
   });
 
-  const totalActive = (products || []).filter((p) => p.isActive !== false).length;
+  const totalActive =
+    categories.reduce(
+      (sum, c) => sum + (c.productCount ?? c.activeProductCount ?? 0),
+      0
+    ) || (products || []).filter((p) => p.isActive !== false).length;
 
   return (
     <aside

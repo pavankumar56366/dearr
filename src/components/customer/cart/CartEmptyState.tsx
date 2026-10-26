@@ -68,7 +68,7 @@ export default function CartEmptyState() {
           </span>
           <div className="flex flex-wrap justify-center gap-2">
             <Link
-              href="/shop?cat=spiritual-idols"
+              href="/shop?cat=devotional"
               className="px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-neutral-100 transition-colors"
               style={{
                 background: "var(--color-neutral-100)",
@@ -78,7 +78,7 @@ export default function CartEmptyState() {
               🪔 Spiritual Idols
             </Link>
             <Link
-              href="/shop?cat=articulated-toys"
+              href="/shop?cat=curio"
               className="px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-neutral-100 transition-colors"
               style={{
                 background: "var(--color-neutral-100)",
@@ -88,7 +88,7 @@ export default function CartEmptyState() {
               🧩 Articulated & Toys
             </Link>
             <Link
-              href="/shop?cat=custom-keychains"
+              href="/shop?cat=keychain"
               className="px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-neutral-100 transition-colors"
               style={{
                 background: "var(--color-neutral-100)",

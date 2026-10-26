@@ -31,6 +31,7 @@ import ShopToolbar from "./ShopToolbar";
 import type { SortOption, ViewMode } from "./ShopToolbar";
 import MobileFilterSheet from "./MobileFilterSheet";
 import ShopEmptyState from "./ShopEmptyState";
+import { normalizeCategorySlug } from "@/lib/category-slugs";
 
 const CATEGORY_ICON_MAP: Record<string, string> = {
   "teddy-bear": "🧸",
@@ -79,7 +80,8 @@ export default function ShopPageClient({
   const pathname = usePathname();
 
   // ─── State from URL params ──────────────────────────────────────────────
-  const urlCategory = searchParams.get("cat") || searchParams.get("category") || "all";
+  const rawUrlCategory = searchParams.get("cat") || searchParams.get("category") || "all";
+  const urlCategory = rawUrlCategory === "all" ? "all" : normalizeCategorySlug(rawUrlCategory);
   const urlSort = (searchParams.get("sort") as SortOption) || "featured";
   const urlQuery = searchParams.get("q") || searchParams.get("search") || "";
   const urlPage = parseInt(searchParams.get("page") || "1", 10) || 1;
@@ -287,7 +289,8 @@ export default function ShopPageClient({
   // ─── Category label for breadcrumb ──────────────────────────────────────
   const activeCategoryLabel = useMemo(() => {
     if (activeCategory === "all") return "All Products";
-    const found = categories.find((c) => c.slug === activeCategory);
+    const canonical = normalizeCategorySlug(activeCategory);
+    const found = categories.find((c) => c.slug === activeCategory || c.slug === canonical);
     return found?.name || activeCategory;
   }, [activeCategory, categories]);
 
@@ -314,12 +317,18 @@ export default function ShopPageClient({
 
     // Category filter
     if (activeCategory !== "all") {
+      const canonicalActive = normalizeCategorySlug(activeCategory);
       results = results.filter((p) => {
         const catSlug =
           typeof p.category === "object" && p.category !== null
             ? p.category.slug
             : p.categorySlug;
-        return catSlug === activeCategory;
+        const canonicalCat = normalizeCategorySlug(catSlug);
+        return (
+          catSlug === activeCategory ||
+          catSlug === canonicalActive ||
+          canonicalCat === canonicalActive
+        );
       });
     }
 

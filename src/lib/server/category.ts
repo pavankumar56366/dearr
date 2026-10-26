@@ -1,6 +1,7 @@
 import "server-only";
 import crypto from "crypto";
 import { query } from "./db";
+import { normalizeCategorySlug } from "../category-slugs";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -160,9 +161,10 @@ export async function findCategoryBySlug(
 ): Promise<Category | null> {
   const cleanSlug = slug?.trim().toLowerCase();
   if (!cleanSlug) return null;
+  const canonical = normalizeCategorySlug(cleanSlug);
 
-  let sql = `SELECT * FROM categories WHERE slug = ?`;
-  const params: any[] = [cleanSlug];
+  let sql = `SELECT * FROM categories WHERE (slug = ? OR slug = ? OR LOWER(slug) = ?)`;
+  const params: any[] = [canonical, cleanSlug, cleanSlug.replace(/_/g, "-")];
 
   if (!includeInactive) {
     sql += " AND is_active = 1";

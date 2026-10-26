@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { query, withTransaction } from "./db";
 import { PoolConnection } from "mysql2/promise";
 import { recordProductPriceChange } from "./price-history";
+import { normalizeCategorySlug } from "../category-slugs";
 
 export interface ProductImage {
   id: string;
@@ -628,13 +629,14 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
     queryParams.push(filters.categoryId.trim());
   }
 
-  // Category Slug filter (supports both kebab-case and SCREAMING_SNAKE_CASE from Hostinger URLs)
+  // Category Slug filter (supports kebab-case, SCREAMING_SNAKE_CASE, and canonical aliases)
   if (filters.categorySlug) {
     const raw = filters.categorySlug.trim().toLowerCase();
-    const withHyphen = raw.replace(/_/g, "-");
-    const withUnderscore = raw.replace(/-/g, "_");
-    whereConditions.push("(c.slug = ? OR c.slug = ? OR LOWER(c.slug) = ?)");
-    queryParams.push(withHyphen, withUnderscore, raw);
+    const canonical = normalizeCategorySlug(raw);
+    const withHyphen = canonical.replace(/_/g, "-");
+    const withUnderscore = canonical.replace(/-/g, "_");
+    whereConditions.push("(c.slug = ? OR c.slug = ? OR LOWER(c.slug) = ? OR c.slug = ? OR LOWER(c.slug) = ?)");
+    queryParams.push(withHyphen, withUnderscore, canonical, raw, raw.replace(/_/g, "-"));
   }
 
   // Search keyword (matches in name or description)

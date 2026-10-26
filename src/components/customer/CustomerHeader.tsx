@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { DesktopHeader } from "./DesktopHeader";
@@ -24,8 +24,40 @@ export interface CustomerHeaderProps {
 
 export function CustomerHeader({
   initialData,
-  categories = DEFAULT_CATEGORIES,
+  categories: propCategories,
 }: CustomerHeaderProps) {
+  const [categories, setCategories] = useState<CategoryItem[]>(
+    propCategories && propCategories.length > 0 ? propCategories : DEFAULT_CATEGORIES
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadCategories() {
+      try {
+        const res = await fetch("/api/categories");
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.ok && Array.isArray(data.categories) && data.categories.length > 0) {
+            setCategories([
+              { id: "all", name: "All 3D Prints", slug: "all" },
+              ...data.categories.map((c: any) => ({
+                id: c.id,
+                name: c.name,
+                slug: c.slug,
+                description: c.description,
+              })),
+            ]);
+          }
+        }
+      } catch {
+        // Fallback to defaults
+      }
+    }
+    loadCategories();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const { totalCount, subtotal } = useCart();
   const { user, isLoggedIn } = useAuth();
   const { wishlistCount } = useWishlist();

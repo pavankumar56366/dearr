@@ -69,7 +69,7 @@ export default function HeroSection() {
                 Shop 3D Prints
               </Link>
               <Link
-                href="/shop?cat=custom-keychains"
+                href="/shop?cat=keychain"
                 className="btn-base btn-secondary text-base px-8 shadow-sm hover:opacity-95"
                 style={{ height: "52px", fontSize: "16px" }}
               >

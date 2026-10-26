@@ -80,7 +80,7 @@ export default function HowItWorksPage() {
               Explore Products
             </Link>
             <Link
-              href="/shop?cat=spiritual-idols"
+              href="/shop?cat=devotional"
               className="px-6 py-3 rounded-xl bg-surface border border-neutral-300 hover:bg-neutral-100 text-neutral-900 font-semibold text-sm transition-all active:scale-95"
             >
               Spiritual Idols
