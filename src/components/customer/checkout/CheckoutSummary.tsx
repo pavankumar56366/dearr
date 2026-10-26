@@ -22,6 +22,7 @@ interface CheckoutSummaryProps {
   shippingFee?: number;
   freeShippingThreshold?: number;
   totalPayable?: number;
+  discount?: number;
 }
 
 export default function CheckoutSummary({
@@ -38,10 +39,12 @@ export default function CheckoutSummary({
   shippingFee,
   freeShippingThreshold,
   totalPayable,
+  discount = 0,
 }: CheckoutSummaryProps) {
   const isSubmitDisabled = !isAddressValid || totalCount === 0 || hasUnavailableItems || isProcessing;
   const effectiveShipping = shippingFee !== undefined ? shippingFee : 0;
-  const effectiveTotal = totalPayable !== undefined ? totalPayable : (subtotal + effectiveShipping);
+  const effectiveDiscount = discount !== undefined ? Math.max(0, discount) : 0;
+  const effectiveTotal = totalPayable !== undefined ? totalPayable : Math.max(0, subtotal - effectiveDiscount + effectiveShipping);
 
   return (
     <aside
@@ -159,6 +162,13 @@ export default function CheckoutSummary({
             ₹{subtotal.toLocaleString("en-IN")}
           </span>
         </div>
+
+        {effectiveDiscount > 0 && (
+          <div className="flex items-center justify-between text-emerald-700 font-semibold">
+            <span>Promotion Discount</span>
+            <span>-₹{effectiveDiscount.toLocaleString("en-IN")}</span>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>Standard Shipping</span>
