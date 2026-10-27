@@ -63,7 +63,7 @@ export default function AddressForm({
           if (!isCurrent) return;
           if (data.ok && data.serviceable) {
             const etd = data.availableCouriers?.[0]?.etd || data.estimatedDeliveryText || "3–5 days";
-            const courier = data.recommendedCourier || "Shiprocket Express";
+            const courier = data.recommendedCourier || "Express Delivery";
             setPincodeStatus({
               loading: false,
               serviceable: true,

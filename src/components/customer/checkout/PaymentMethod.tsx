@@ -10,6 +10,7 @@ interface PaymentMethodProps {
   onSelectMethod: (method: PaymentOption) => void;
   codAvailable?: boolean;
   codUnavailableReason?: string;
+  codFee?: number;
 }
 
 export default function PaymentMethod({
@@ -17,6 +18,7 @@ export default function PaymentMethod({
   onSelectMethod,
   codAvailable = false,
   codUnavailableReason,
+  codFee,
 }: PaymentMethodProps) {
   return (
     <section
@@ -128,12 +130,23 @@ export default function PaymentMethod({
                     <span className="text-sm font-bold text-neutral-900">
                       Cash on Delivery (COD)
                     </span>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                      Eligible
-                    </span>
+                    {typeof codFee === "number" && codFee > 0 ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+                        +₹{codFee} Handling Fee
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                        Eligible
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-neutral-600">
                     Pay with cash upon delivery of your order.
+                    {typeof codFee === "number" && codFee > 0 && (
+                      <span className="block text-[11px] text-amber-700 mt-0.5 font-medium">
+                        Standard ₹{codFee} cash handling fee applies to Cash on Delivery.
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
