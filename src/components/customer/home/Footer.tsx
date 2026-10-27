@@ -56,10 +56,10 @@ export default function Footer() {
             <ul className="space-y-2.5">
               {[
                 { label: "All Creations", href: "/shop" },
-                { label: "Spiritual Idols", href: "/shop?cat=spiritual-idols" },
-                { label: "Articulated & Toys", href: "/shop?cat=articulated-toys" },
-                { label: "Custom Keychains", href: "/shop?cat=custom-keychains" },
-                { label: "Lithophane Lamps", href: "/shop?cat=lithophane-lamps" },
+                { label: "Spiritual Idols", href: "/shop?cat=devotional" },
+                { label: "Articulated & Curios", href: "/shop?cat=curio" },
+                { label: "Custom Keychains", href: "/shop?cat=keychain" },
+                { label: "Night Lamps", href: "/shop?cat=night-lamp" },
               ].map((link) => (
                 <li key={link.href}>
                   <Link

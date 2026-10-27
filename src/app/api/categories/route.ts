@@ -34,7 +34,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const categories = await listCategories({ isActive: true });
+    const categories = await listCategories({ isActive: true, includeProductCounts: true });
 
     return NextResponse.json({
       ok: true,
@@ -44,6 +44,7 @@ export async function GET(req: Request) {
         slug: c.slug,
         description: c.description,
         isActive: c.isActive,
+        productCount: c.activeProductCount ?? c.productCount ?? 0,
       })),
     });
   } catch (err: unknown) {

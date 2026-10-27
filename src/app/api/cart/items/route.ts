@@ -93,7 +93,8 @@ export async function POST(request: Request) {
 
       updatedCart = await addCartItem(user.id, {
         productId: body.productId,
-        variantId: body.variantId ?? body.colorId ?? null,
+        variantId: body.variantId ?? null,
+        colorId: body.colorId ?? null,
         quantity: body.quantity,
       });
     }

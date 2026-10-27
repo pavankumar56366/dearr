@@ -6,7 +6,7 @@ const PROMOTION_INFO = {
   subtitle:
     "From personalized car keychains to illuminated lithophane night lights. Precision crafted layer by layer, delivered across India.",
   ctaText: "Explore Creations",
-  ctaHref: "/shop?cat=custom-keychains",
+  ctaHref: "/shop?cat=keychain",
 };
 
 /**

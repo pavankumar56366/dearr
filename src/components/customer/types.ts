@@ -34,10 +34,16 @@ export const DEFAULT_NAVBAR_DATA: NavbarData = {
  */
 export const DEFAULT_CATEGORIES: CategoryItem[] = [
   { id: "all", name: "All 3D Prints", slug: "all" },
-  { id: "spiritual", name: "Spiritual Idols", slug: "spiritual-idols" },
-  { id: "articulated", name: "Articulated & Toys", slug: "articulated-toys" },
-  { id: "keychains", name: "Custom Keychains", slug: "custom-keychains" },
-  { id: "organizers", name: "Desk Organizers", slug: "desk-organizers" },
-  { id: "lithophanes", name: "Lithophane Lamps", slug: "lithophane-lamps" },
-  { id: "miniatures", name: "Miniatures & Decor", slug: "miniatures-decor" },
+  { id: "devotional", name: "Devotional & Idols", slug: "devotional" },
+  { id: "keychain", name: "Custom Keychains", slug: "keychain" },
+  { id: "curio", name: "Articulated & Curios", slug: "curio" },
+  { id: "night-lamp", name: "Night Lamps", slug: "night-lamp" },
+  { id: "name-plate", name: "Name Plates", slug: "name-plate" },
+  { id: "lithophane-panel", name: "Lithophanes", slug: "lithophane-panel" },
+  { id: "desktop-accessory", name: "Desktop Accessories", slug: "desktop-accessory" },
+  { id: "teddy-bear", name: "Teddy Bears", slug: "teddy-bear" },
+  { id: "litho-keychain", name: "Litho Keychains", slug: "litho-keychain" },
+  { id: "photo-figurine", name: "Photo Figurines", slug: "photo-figurine" },
+  { id: "wall-art", name: "Wall Art", slug: "wall-art" },
+  { id: "other", name: "More Gifts", slug: "other" },
 ];

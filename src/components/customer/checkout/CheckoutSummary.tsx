@@ -22,6 +22,7 @@ interface CheckoutSummaryProps {
   shippingFee?: number;
   freeShippingThreshold?: number;
   totalPayable?: number;
+  discount?: number;
 }
 
 export default function CheckoutSummary({
@@ -38,10 +39,12 @@ export default function CheckoutSummary({
   shippingFee,
   freeShippingThreshold,
   totalPayable,
+  discount = 0,
 }: CheckoutSummaryProps) {
   const isSubmitDisabled = !isAddressValid || totalCount === 0 || hasUnavailableItems || isProcessing;
   const effectiveShipping = shippingFee !== undefined ? shippingFee : 0;
-  const effectiveTotal = totalPayable !== undefined ? totalPayable : (subtotal + effectiveShipping);
+  const effectiveDiscount = discount !== undefined ? Math.max(0, discount) : 0;
+  const effectiveTotal = totalPayable !== undefined ? totalPayable : Math.max(0, subtotal - effectiveDiscount + effectiveShipping);
 
   return (
     <aside
@@ -93,21 +96,24 @@ export default function CheckoutSummary({
               <span className="text-xs font-bold text-neutral-900 truncate">
                 {item.name}
               </span>
-              {item.colorName ? (
-                <span className="text-[11px] text-neutral-600 flex items-center gap-1.5 mt-0.5 truncate">
-                  {item.colorHex && (
-                    <span
-                      className="inline-block w-2.5 h-2.5 rounded-full border border-neutral-300 shrink-0"
-                      style={{ backgroundColor: item.colorHex }}
-                    />
-                  )}
-                  <span>Color: {item.colorName}</span>
-                </span>
-              ) : item.variantName ? (
-                <span className="text-[11px] text-neutral-500 truncate">
-                  Finish: {item.variantName}
-                </span>
-              ) : null}
+              <div className="flex flex-col gap-0.5 mt-0.5">
+                {item.colorName && (
+                  <span className="text-[11px] text-neutral-600 flex items-center gap-1.5 truncate">
+                    {item.colorHex && (
+                      <span
+                        className="inline-block w-2.5 h-2.5 rounded-full border border-neutral-300 shrink-0"
+                        style={{ backgroundColor: item.colorHex }}
+                      />
+                    )}
+                    <span>Color: <strong className="font-semibold text-neutral-900">{item.colorName}</strong></span>
+                  </span>
+                )}
+                {item.variantName && (
+                  <span className="text-[11px] text-neutral-600 truncate">
+                    Option: <strong className="font-semibold text-neutral-900">{item.variantName}</strong>
+                  </span>
+                )}
+              </div>
               <span className="text-[11px] text-neutral-600 mt-0.5">
                 ₹{item.price.toLocaleString("en-IN")} each
               </span>
@@ -156,6 +162,13 @@ export default function CheckoutSummary({
             ₹{subtotal.toLocaleString("en-IN")}
           </span>
         </div>
+
+        {effectiveDiscount > 0 && (
+          <div className="flex items-center justify-between text-emerald-700 font-semibold">
+            <span>Promotion Discount</span>
+            <span>-₹{effectiveDiscount.toLocaleString("en-IN")}</span>
+          </div>
+        )}
 
         <div className="flex items-center justify-between text-neutral-600">
           <span>Standard Shipping</span>

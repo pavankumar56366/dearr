@@ -27,13 +27,34 @@ interface CategoryChipsProps {
 
 const CATEGORY_SVG_MAP: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   "spiritual-idols": SpiritualIdolsIcon,
+  "devotional": SpiritualIdolsIcon,
   "articulated-toys": ArticulatedToysIcon,
   "custom-keychains": CustomKeychainsIcon,
+  "keychain": CustomKeychainsIcon,
   "desk-organizers": DeskOrganizersIcon,
+  "desktop-accessory": DeskOrganizersIcon,
   "lithophane-lamps": LithophaneLampsIcon,
+  "lithophane-panel": LithophaneLampsIcon,
   "miniatures-decor": MiniaturesDecorIcon,
+  "curio": MiniaturesDecorIcon,
   "home-decor": MiniaturesDecorIcon,
+  "wall-art": MiniaturesDecorIcon,
   "study-projects": StudyProjectsIcon,
+};
+
+const CATEGORY_EMOJI_MAP: Record<string, string> = {
+  "teddy-bear": "🧸",
+  "night-lamp": "💡",
+  "wall-art": "🖼️",
+  "name-plate": "🏷️",
+  "keychain": "🔑",
+  "lithophane-panel": "✨",
+  "litho-keychain": "🔦",
+  "photo-figurine": "👤",
+  "devotional": "🪔",
+  "curio": "🐱",
+  "desktop-accessory": "✏️",
+  "other": "🎁",
 };
 
 /**
@@ -112,7 +133,8 @@ export default function CategoryChips({ initialCategories }: CategoryChipsProps)
           }}
         >
           {categories.map((cat) => {
-            const SvgIcon = CATEGORY_SVG_MAP[cat.slug] || SparkleIcon;
+            const SvgIcon = CATEGORY_SVG_MAP[cat.slug];
+            const emoji = cat.icon || CATEGORY_EMOJI_MAP[cat.slug];
 
             return (
               <Link
@@ -136,7 +158,13 @@ export default function CategoryChips({ initialCategories }: CategoryChipsProps)
                     (e.currentTarget as HTMLDivElement).style.background = "var(--color-neutral-100)";
                   }}
                 >
-                  <SvgIcon size={36} />
+                  {SvgIcon ? (
+                    <SvgIcon size={36} />
+                  ) : emoji ? (
+                    <span className="text-2xl sm:text-3xl select-none leading-none">{emoji}</span>
+                  ) : (
+                    <SparkleIcon size={36} />
+                  )}
                 </div>
                 {/* Label */}
                 <span

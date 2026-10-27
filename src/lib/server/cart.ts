@@ -6,6 +6,10 @@ import {
   getApplicableDiscountForProduct,
   computeDiscountAmount,
 } from "./discount";
+import {
+  resolveAuthoritativeUnitPrice,
+  resolveAuthoritativeEffectiveStock,
+} from "./variant-resolver";
 
 // ---------------------------------------------------------------------------
 // Error Handling
@@ -275,6 +279,11 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
        pc.price_override AS c_price_override,
        pc.is_active AS c_is_active,
        (
+         SELECT COALESCE(SUM(sr.quantity), 0)
+         FROM stock_reservations sr
+         WHERE sr.variant_id = pv.id AND sr.status = 'active' AND sr.expires_at > NOW()
+       ) AS v_reserved_stock,
+       (
          SELECT pi.storage_path
          FROM product_images pi
          WHERE pi.product_id = p.id AND (pi.color_id = ci.color_id OR (ci.color_id IS NULL AND pi.color_id IS NULL))
@@ -313,25 +322,21 @@ export async function getCartForUser(userId: string): Promise<CartRecord> {
         ? Boolean(row.v_is_active === 1 || row.v_is_active === true)
         : true;
 
-      let unitPrice = 0;
-      let availableStock = 0;
+      const unitPrice = resolveAuthoritativeUnitPrice({
+        productPrice: row.p_price,
+        colorPriceOverride: hasColor ? row.c_price_override : null,
+        variantPrice: hasVariant ? row.v_price : null,
+      });
 
-      if (hasColor) {
-        unitPrice =
-          row.c_price_override !== null && row.c_price_override !== undefined
-            ? Number(row.c_price_override)
-            : Number(row.p_price || 0);
-        availableStock = Math.max(0, Number(row.c_stock ?? 0) - Number(row.c_reserved_stock ?? 0));
-      } else if (hasVariant) {
-        unitPrice =
-          row.v_price !== null && row.v_price !== undefined
-            ? Number(row.v_price)
-            : Number(row.p_price || 0);
-        availableStock = Number(row.v_stock_quantity ?? 0);
-      } else {
-        unitPrice = Number(row.p_price || 0);
-        availableStock = Number(row.p_stock_quantity ?? 0);
-      }
+      const availableStock = resolveAuthoritativeEffectiveStock({
+        hasVariant,
+        variantStock: row.v_stock_quantity,
+        variantReservedStock: row.v_reserved_stock,
+        hasColor: hasColor && !hasVariant,
+        colorStock: row.c_stock,
+        colorReservedStock: row.c_reserved_stock,
+        productStock: row.p_stock_quantity,
+      });
 
       const originalUnitPrice =
         row.p_compare_at_price !== null &&
@@ -492,91 +497,110 @@ async function addSingleCartItemInternal(
 
   const productHasColors = Boolean(product.has_colors === 1 || product.has_colors === true);
   let effectiveStock = 0;
+  let resolvedColorId = cleanColorId;
 
-  if (productHasColors) {
-    if (!cleanColorId) {
+  // 2. Validate Variant if provided
+  let variantRecord: any = null;
+  if (cleanVariantId) {
+    const [variantRows]: any = await conn.execute(
+      "SELECT id, product_id, color_id, size_name, name, sku, price, stock_quantity, is_active FROM product_variants WHERE id = ? LIMIT 1",
+      [cleanVariantId]
+    );
+
+    if (!variantRows || variantRows.length === 0 || variantRows[0].product_id !== cleanProductId) {
+      throw new CartValidationError("The selected variant does not belong to this product", 400);
+    }
+
+    variantRecord = variantRows[0];
+    const isVariantActive = Boolean(
+      variantRecord.is_active === 1 || variantRecord.is_active === true
+    );
+    if (!isVariantActive) {
+      throw new CartValidationError("The selected variant is currently inactive", 400);
+    }
+
+    if (variantRecord.color_id) {
+      if (resolvedColorId && resolvedColorId !== variantRecord.color_id) {
+        throw new CartValidationError("The selected variant does not match the chosen color", 400);
+      }
+      resolvedColorId = variantRecord.color_id;
+    }
+  }
+
+  // 3. Validate Color if required or present
+  let colorRecord: any = null;
+  if (productHasColors || resolvedColorId) {
+    if (!resolvedColorId) {
       throw new CartValidationError("Please select a color for this product", 400);
     }
 
     const [colorRows]: any = await conn.execute(
       "SELECT id, product_id, name, slug, hex, sku, stock, reserved_stock, is_active FROM product_colors WHERE id = ? LIMIT 1",
-      [cleanColorId]
+      [resolvedColorId]
     );
 
     if (!colorRows || colorRows.length === 0 || colorRows[0].product_id !== cleanProductId) {
       throw new CartValidationError("The selected color does not belong to this product", 400);
     }
 
-    const color = colorRows[0];
-    const isColorActive = Boolean(color.is_active === 1 || color.is_active === true);
+    colorRecord = colorRows[0];
+    const isColorActive = Boolean(colorRecord.is_active === 1 || colorRecord.is_active === true);
     if (!isColorActive) {
-      throw new CartValidationError(`The selected color "${color.name}" is currently inactive`, 400);
+      throw new CartValidationError(`The selected color "${colorRecord.name}" is currently inactive`, 400);
     }
+  }
 
-    effectiveStock = Math.max(0, Number(color.stock ?? 0) - Number(color.reserved_stock ?? 0));
-  } else {
-    // Check product variants in database
-    const [variantRows]: any = await conn.execute(
-      "SELECT id, product_id, name, sku, price, stock_quantity, is_active FROM product_variants WHERE product_id = ?",
-      [cleanProductId]
+  // 4. Resolve effective stock authoritatively
+  if (variantRecord) {
+    const [resRows]: any = await conn.execute(
+      `SELECT COALESCE(SUM(quantity), 0) AS reserved_qty
+       FROM stock_reservations
+       WHERE variant_id = ? AND status = 'active' AND expires_at > NOW()`,
+      [variantRecord.id]
     );
-
-    const hasVariants = Boolean(variantRows && variantRows.length > 0);
-
-    if (hasVariants) {
-      if (!cleanVariantId) {
-        throw new CartValidationError("Please select a valid variant for this product", 400);
-      }
-
-      const matchedVariant = variantRows.find((v: any) => v.id === cleanVariantId);
-      if (!matchedVariant) {
-        throw new CartValidationError("The selected variant does not belong to this product", 400);
-      }
-
-      const isVariantActive = Boolean(
-        matchedVariant.is_active === 1 || matchedVariant.is_active === true
-      );
-      if (!isVariantActive) {
-        throw new CartValidationError("The selected variant is currently inactive", 400);
-      }
-
-      effectiveStock = Number(matchedVariant.stock_quantity ?? 0);
-    } else {
-      if (cleanColorId) {
-        throw new CartValidationError("This product does not have color options", 400);
-      }
-      if (cleanVariantId) {
-        throw new CartValidationError("This product does not have variants", 400);
-      }
-      effectiveStock = Number(product.stock_quantity ?? 0);
+    const reservedQty = Number(resRows?.[0]?.reserved_qty || 0);
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: true,
+      variantStock: variantRecord.stock_quantity,
+      variantReservedStock: reservedQty,
+      hasColor: false,
+    });
+  } else if (colorRecord) {
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: false,
+      hasColor: true,
+      colorStock: colorRecord.stock,
+      colorReservedStock: colorRecord.reserved_stock,
+    });
+  } else {
+    // Simple product without variants or colors
+    if (cleanColorId) {
+      throw new CartValidationError("This product does not have color options", 400);
     }
+    if (cleanVariantId) {
+      throw new CartValidationError("This product does not have variants", 400);
+    }
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: false,
+      hasColor: false,
+      productStock: product.stock_quantity,
+    });
   }
 
   if (effectiveStock <= 0) {
     throw new CartValidationError("This item is currently out of stock", 400);
   }
 
-  // Check for existing cart item for same product + color / variant
-  let existingItemRows: any[];
-  if (cleanColorId) {
-    const [rows]: any = await conn.execute(
-      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND color_id = ? LIMIT 1",
-      [cartId, cleanProductId, cleanColorId]
-    );
-    existingItemRows = rows;
-  } else if (cleanVariantId) {
-    const [rows]: any = await conn.execute(
-      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant_id = ? LIMIT 1",
-      [cartId, cleanProductId, cleanVariantId]
-    );
-    existingItemRows = rows;
-  } else {
-    const [rows]: any = await conn.execute(
-      "SELECT id, quantity FROM cart_items WHERE cart_id = ? AND product_id = ? AND variant_id IS NULL AND color_id IS NULL LIMIT 1",
-      [cartId, cleanProductId]
-    );
-    existingItemRows = rows;
-  }
+  // 5. Match existing cart item for same product + variant + color combination using null-safe equality
+  const [existingItemRows]: any = await conn.execute(
+    `SELECT id, quantity FROM cart_items
+     WHERE cart_id = ?
+       AND product_id = ?
+       AND (variant_id <=> ?)
+       AND (color_id <=> ?)
+     LIMIT 1`,
+    [cartId, cleanProductId, cleanVariantId || null, resolvedColorId || null]
+  );
 
   const existingItem = existingItemRows && existingItemRows.length > 0 ? existingItemRows[0] : null;
   const existingQuantity = existingItem ? Number(existingItem.quantity) : 0;
@@ -606,7 +630,7 @@ async function addSingleCartItemInternal(
     await conn.execute(
       `INSERT INTO cart_items (id, cart_id, product_id, variant_id, color_id, quantity, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())`,
-      [newItemId, cartId, cleanProductId, cleanVariantId || null, cleanColorId || null, targetQuantity]
+      [newItemId, cartId, cleanProductId, cleanVariantId || null, resolvedColorId || null, targetQuantity]
     );
   }
 }
@@ -676,6 +700,11 @@ export async function updateCartItemQuantity(
        pv.name AS variant_name,
        pv.is_active AS variant_is_active,
        pv.stock_quantity AS variant_stock_quantity,
+       (
+         SELECT COALESCE(SUM(sr.quantity), 0)
+         FROM stock_reservations sr
+         WHERE sr.variant_id = pv.id AND sr.status = 'active' AND sr.expires_at > NOW()
+       ) AS variant_reserved_stock,
        pc.name AS color_name,
        pc.stock AS color_stock,
        pc.reserved_stock AS color_reserved_stock,
@@ -701,20 +730,40 @@ export async function updateCartItemQuantity(
   }
 
   let effectiveStock = 0;
-  if (row.color_id) {
-    const isColorActive = Boolean(row.color_is_active === 1 || row.color_is_active === true);
-    if (!isColorActive) {
-      throw new CartValidationError("The selected color is no longer active", 400);
-    }
-    effectiveStock = Math.max(0, Number(row.color_stock ?? 0) - Number(row.color_reserved_stock ?? 0));
-  } else if (row.variant_id) {
+  if (row.variant_id) {
     const isVariantActive = Boolean(row.variant_is_active === 1 || row.variant_is_active === true);
     if (!isVariantActive) {
       throw new CartValidationError("The selected variant is no longer active", 400);
     }
-    effectiveStock = Number(row.variant_stock_quantity ?? 0);
+    if (row.color_id) {
+      const isColorActive = Boolean(row.color_is_active === 1 || row.color_is_active === true);
+      if (!isColorActive) {
+        throw new CartValidationError("The selected color is no longer active", 400);
+      }
+    }
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: true,
+      variantStock: row.variant_stock_quantity,
+      variantReservedStock: row.variant_reserved_stock,
+      hasColor: false,
+    });
+  } else if (row.color_id) {
+    const isColorActive = Boolean(row.color_is_active === 1 || row.color_is_active === true);
+    if (!isColorActive) {
+      throw new CartValidationError("The selected color is no longer active", 400);
+    }
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: false,
+      hasColor: true,
+      colorStock: row.color_stock,
+      colorReservedStock: row.color_reserved_stock,
+    });
   } else {
-    effectiveStock = Number(row.product_stock_quantity ?? 0);
+    effectiveStock = resolveAuthoritativeEffectiveStock({
+      hasVariant: false,
+      hasColor: false,
+      productStock: row.product_stock_quantity,
+    });
   }
 
   if (desiredQuantity > effectiveStock) {

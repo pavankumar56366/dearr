@@ -52,11 +52,11 @@ export function getDbConfig(): DbConfig {
           if (eqIdx > 0) {
             const k = trimmed.slice(0, eqIdx).trim();
             const v = trimmed.slice(eqIdx + 1).trim();
-            if (k === "DB_HOST" && !host) host = v;
-            if (k === "DB_PORT" && isNaN(port)) port = parseInt(v, 10);
-            if (k === "DB_NAME" && !database) database = v;
-            if (k === "DB_USER" && !user) user = v;
-            if (k === "DB_PASSWORD" && password === undefined) password = v;
+            if (k === "DB_HOST" && (isTestMode || !host)) host = v;
+            if (k === "DB_PORT" && (isTestMode || isNaN(port))) port = parseInt(v, 10);
+            if (k === "DB_NAME" && (isTestMode || !database)) database = v;
+            if (k === "DB_USER" && (isTestMode || !user)) user = v;
+            if (k === "DB_PASSWORD" && (isTestMode || password === undefined)) password = v;
           }
         }
       }

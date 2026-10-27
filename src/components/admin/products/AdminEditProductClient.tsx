@@ -49,6 +49,8 @@ function mapApiProductToSampleProduct(p: any): SampleProduct {
             price: v.price !== null && v.price !== undefined ? Number(v.price) : undefined,
             stockQuantity: Number(v.stockQuantity ?? 0),
             isActive: Boolean(v.isActive),
+            colorId: v.colorId ?? v.color_id ?? null,
+            sizeName: v.sizeName ?? v.size_name ?? null,
           }))
         : undefined,
     hasColors: Boolean(p.hasColors ?? p.has_colors),

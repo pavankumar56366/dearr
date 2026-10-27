@@ -70,7 +70,7 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
     }
 
     const [cats, prodsRes] = await Promise.all([
-      listCategories({ isActive: true }),
+      listCategories({ isActive: true, includeProductCounts: true }),
       listProducts(filters),
     ]);
     initialCategories = cats;

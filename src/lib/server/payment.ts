@@ -199,7 +199,7 @@ export async function processTestPayment(
 
       // Deduct inventory atomically inside this transaction
       const [itemRows] = (await conn.execute(
-        "SELECT product_id, variant_id, quantity, product_name FROM order_items WHERE order_id = ?",
+        "SELECT product_id, variant_id, color_id, quantity, product_name FROM order_items WHERE order_id = ?",
         [cleanOrderId]
       )) as any[];
 
@@ -215,6 +215,19 @@ export async function processTestPayment(
           if ((result as any).affectedRows === 0) {
             throw new PaymentValidationError(
               `Insufficient stock available for variant of "${item.product_name || "product"}". Cannot settle payment.`,
+              409
+            );
+          }
+        } else if (item.color_id) {
+          const [result] = (await conn.execute(
+            `UPDATE product_colors
+             SET stock = stock - ?, updated_at = NOW()
+             WHERE id = ? AND stock >= ?`,
+            [qty, item.color_id, qty]
+          )) as any[];
+          if ((result as any).affectedRows === 0) {
+            throw new PaymentValidationError(
+              `Insufficient stock available for color of "${item.product_name || "product"}". Cannot settle payment.`,
               409
             );
           }
@@ -1235,7 +1248,7 @@ export async function settlePaidOrder(
 
     // 8. Deduct inventory atomically inside this transaction
     const [itemRows] = (await conn.execute(
-      "SELECT product_id, variant_id, quantity, product_name FROM order_items WHERE order_id = ?",
+      "SELECT product_id, variant_id, color_id, quantity, product_name FROM order_items WHERE order_id = ?",
       [orderRow.id]
     )) as any[];
 
@@ -1251,6 +1264,19 @@ export async function settlePaidOrder(
         if ((result as any).affectedRows === 0) {
           throw new PaymentValidationError(
             `Insufficient stock available for variant of "${item.product_name || "product"}". Cannot settle payment.`,
+            409
+          );
+        }
+      } else if (item.color_id) {
+        const [result] = (await conn.execute(
+          `UPDATE product_colors
+           SET stock = stock - ?, updated_at = NOW()
+           WHERE id = ? AND stock >= ?`,
+          [qty, item.color_id, qty]
+        )) as any[];
+        if ((result as any).affectedRows === 0) {
+          throw new PaymentValidationError(
+            `Insufficient stock available for color of "${item.product_name || "product"}". Cannot settle payment.`,
             409
           );
         }

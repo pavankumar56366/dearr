@@ -89,6 +89,7 @@ export function AdminProductColors({
     };
 
     const newColor: AdminProductColor = {
+      id: crypto.randomUUID(),
       name: nextPreset.name,
       hex: nextPreset.hex,
       sku: baseSku ? `${baseSku}-${nextPreset.name.replace(/\s+/g, "").toUpperCase()}` : "",

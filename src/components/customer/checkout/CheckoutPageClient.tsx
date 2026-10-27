@@ -138,7 +138,7 @@ export default function CheckoutPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const intentId = searchParams.get("intentId");
-  const { items, subtotal, totalCount, hasUnavailableItems, clearCart } = useCart();
+  const { items, subtotal, discount, totalCount, hasUnavailableItems, clearCart } = useCart();
 
   const [intentData, setIntentData] = useState<any>(null);
   const [intentLoading, setIntentLoading] = useState<boolean>(Boolean(intentId));
@@ -274,6 +274,7 @@ export default function CheckoutPageClient() {
   }, [intentData, items]);
 
   const activeSubtotal = intentData ? intentData.subtotal : subtotal;
+  const activeDiscount = intentData ? (Number(intentData.discountAmount) || 0) : (discount || 0);
   const activeTotalCount = intentData
     ? (intentData.items || []).reduce((count: number, it: any) => count + it.quantity, 0)
     : totalCount;
@@ -282,7 +283,7 @@ export default function CheckoutPageClient() {
     : (activeSubtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee);
   const activeTotalPayable = intentData
     ? intentData.totalAmount
-    : Math.max(0, activeSubtotal + activeShippingFee);
+    : Math.max(0, activeSubtotal - activeDiscount + activeShippingFee);
 
   const isCodMasterEnabled = Boolean(storeSettings.codEnabled);
   const areItemsCodEligible = useMemo(() => {
@@ -1074,6 +1075,7 @@ export default function CheckoutPageClient() {
               shippingFee={activeShippingFee}
               freeShippingThreshold={storeSettings.freeShippingThreshold}
               totalPayable={activeTotalPayable}
+              discount={activeDiscount}
               actionLabel={
                 currentStep === "payment"
                   ? paymentMethod === "cod"

@@ -150,16 +150,23 @@ export default function ProductDetailsClient({
   }, [activeSlug, initialProduct, initialRelatedProducts]);
 
   // Determine Color Variants Configuration
+  const productColors: any[] = useMemo(() => {
+    if (!Array.isArray(product?.colors)) return [];
+    return product.colors.filter((c: any) => c.isActive !== false);
+  }, [product?.colors]);
+
   const hasColors = Boolean(
     product?.hasColors ??
       product?.has_colors ??
-      (Array.isArray(product?.colors) && product.colors.length > 0)
+      productColors.length > 0
   );
 
-  const productColors: any[] = useMemo(() => {
-    if (!hasColors || !Array.isArray(product?.colors)) return [];
-    return product.colors.filter((c: any) => c.isActive !== false);
-  }, [hasColors, product?.colors]);
+  const productVariants: any[] = useMemo(() => {
+    if (!Array.isArray(product?.variants)) return [];
+    return product.variants;
+  }, [product?.variants]);
+
+  const hasVariants = productVariants.length > 0;
 
   // Initial Color Selection with deep link support
   const initialSelectedColor = useMemo(() => {
@@ -186,12 +193,63 @@ export default function ProductDetailsClient({
     }
   }, [initialSelectedColor, activeColorId]);
 
-  // Multi-color purchasing rows state
+  // Available variants filtered for active color if variants are color-linked
+  const availableVariants = useMemo(() => {
+    if (!hasVariants) return [];
+    if (!hasColors || !activeColorId) return productVariants;
+    const hasColorLinked = productVariants.some((v) => Boolean(v.colorId));
+    if (!hasColorLinked) return productVariants;
+    return productVariants.filter((v) => !v.colorId || v.colorId === activeColorId);
+  }, [hasVariants, hasColors, activeColorId, productVariants]);
+
+  // Default variant resolution: prefers active in-stock, falls back to active, never inactive
+  const findDefaultVariant = useCallback((variantsList: any[], preferredSizeName?: string | null) => {
+    if (!variantsList || variantsList.length === 0) return undefined;
+    if (preferredSizeName) {
+      const match = variantsList.find(
+        (v) => v.isActive !== false && v.sizeName?.toLowerCase() === preferredSizeName.toLowerCase() && v.stockQuantity > 0
+      ) || variantsList.find(
+        (v) => v.isActive !== false && v.sizeName?.toLowerCase() === preferredSizeName.toLowerCase()
+      );
+      if (match) return match;
+    }
+    const inStock = variantsList.find((v) => v.isActive !== false && v.stockQuantity > 0);
+    if (inStock) return inStock;
+    return variantsList.find((v) => v.isActive !== false);
+  }, []);
+
+  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(undefined);
+  const [singleQuantity, setSingleQuantity] = useState(1);
+  const { addItem, addBatchItems } = useCart();
+
+  // Sync selected variant when availableVariants change or on color switch
+  useEffect(() => {
+    if (!hasVariants) {
+      setSelectedVariantId(undefined);
+      return;
+    }
+
+    if (availableVariants.length > 0) {
+      setSelectedVariantId((prevId) => {
+        const current = availableVariants.find((v) => v.id === prevId);
+        if (current && current.isActive !== false) {
+          return prevId;
+        }
+        const prevVariant = productVariants.find((v) => v.id === prevId);
+        const def = findDefaultVariant(availableVariants, prevVariant?.sizeName);
+        return def?.id;
+      });
+    } else {
+      setSelectedVariantId(undefined);
+    }
+  }, [hasVariants, availableVariants, productVariants, findDefaultVariant]);
+
+  // Multi-color purchasing rows state (only for pure color-only products)
   const [colorRows, setColorRows] = useState<ColorOrderRow[]>([]);
 
-  // Initialize or reset color rows when product changes
+  // Initialize or reset color rows when pure color product changes
   useEffect(() => {
-    if (hasColors && productColors.length > 0) {
+    if (hasColors && !hasVariants && productColors.length > 0) {
       const firstCol = initialSelectedColor || productColors[0];
       setColorRows((prev) => {
         if (prev.length > 0) return prev;
@@ -204,27 +262,7 @@ export default function ProductDetailsClient({
         ];
       });
     }
-  }, [hasColors, productColors, initialSelectedColor]);
-
-  // Single-SKU Variant & Quantity state
-  const defaultVariant =
-    product?.variants?.find((v: any) => v.isActive && v.stockQuantity > 0) ||
-    product?.variants?.[0];
-
-  const [selectedVariantId, setSelectedVariantId] = useState<string | undefined>(
-    defaultVariant?.id
-  );
-  const [singleQuantity, setSingleQuantity] = useState(1);
-  const { addItem, addBatchItems } = useCart();
-
-  useEffect(() => {
-    if (product) {
-      const def =
-        product.variants?.find((v: any) => v.isActive && v.stockQuantity > 0) ||
-        product.variants?.[0];
-      setSelectedVariantId(def?.id);
-    }
-  }, [product?.id]);
+  }, [hasColors, hasVariants, productColors, initialSelectedColor]);
 
   if (isLoading) {
     return (
@@ -276,8 +314,6 @@ export default function ProductDetailsClient({
     return <ProductNotFound slug={activeSlug} />;
   }
 
-  const hasVariants = !hasColors && Boolean(product.variants && product.variants.length > 0);
-
   // Normalize category info
   const categoryName =
     typeof product.category === "object" && product.category !== null
@@ -303,25 +339,58 @@ export default function ProductDetailsClient({
   const isAllColorsOutOfStock =
     hasColors && productColors.every((c) => (c.availableStock ?? c.stock ?? 0) <= 0);
 
-  // Selected variant adjustments for single-SKU
-  const currentVariant = product.variants?.find((v: any) => v.id === selectedVariantId);
-  const currentPrice = currentVariant?.price ?? product.price;
-  const maxStock = hasColors
-    ? productColors.reduce((sum, c) => sum + (c.availableStock ?? c.stock ?? 0), 0)
-    : currentVariant
-    ? currentVariant.stockQuantity
-    : product.stockQuantity;
+  // Selected variant
+  const currentVariant = useMemo(() => {
+    if (!hasVariants) return undefined;
+    return availableVariants.find((v) => v.id === selectedVariantId) ||
+           productVariants.find((v) => v.id === selectedVariantId);
+  }, [hasVariants, availableVariants, productVariants, selectedVariantId]);
 
-  // Determine overall out-of-stock state
-  const isOutOfStock =
-    product.isActive === false ||
-    (hasColors
-      ? isAllColorsOutOfStock
-      : currentVariant
-      ? !currentVariant.isActive || currentVariant.stockQuantity <= 0
-      : product.stockQuantity <= 0);
+  // Authoritative price calculation:
+  // 1. Variant price (strictly preserves 0!)
+  // 2. Color price override (strictly preserves 0!)
+  // 3. Base product price
+  const effectiveDisplayPrice = useMemo(() => {
+    if (currentVariant && currentVariant.price !== null && currentVariant.price !== undefined) {
+      const vp = Number(currentVariant.price);
+      if (!isNaN(vp) && vp >= 0) return Math.round(vp * 100) / 100;
+    }
+    if (hasColors && activeColor && activeColor.priceOverride !== null && activeColor.priceOverride !== undefined) {
+      const cp = Number(activeColor.priceOverride);
+      if (!isNaN(cp) && cp >= 0) return Math.round(cp * 100) / 100;
+    }
+    const bp = Number(product?.price || 0);
+    return Math.max(0, Math.round((isNaN(bp) ? 0 : bp) * 100) / 100);
+  }, [currentVariant, hasColors, activeColor, product?.price]);
 
-  // Multi-color Calculations
+  // Stock calculation:
+  // For variant products, stock is variant stockQuantity
+  // For color products without variants, stock is sum of color stock
+  // For simple products, stock is product.stockQuantity
+  const maxStock = useMemo(() => {
+    if (hasVariants) {
+      return currentVariant ? Math.max(0, currentVariant.stockQuantity) : 0;
+    }
+    if (hasColors) {
+      return productColors.reduce((sum, c) => sum + (c.availableStock ?? c.stock ?? 0), 0);
+    }
+    return Math.max(0, product.stockQuantity || 0);
+  }, [hasVariants, currentVariant, hasColors, productColors, product.stockQuantity]);
+
+  // Overall out-of-stock determination
+  const isOutOfStock = useMemo(() => {
+    if (product.isActive === false) return true;
+    if (hasVariants) {
+      if (!currentVariant) return true;
+      return currentVariant.isActive === false || currentVariant.stockQuantity <= 0;
+    }
+    if (hasColors) {
+      return isAllColorsOutOfStock;
+    }
+    return (product.stockQuantity ?? 0) <= 0;
+  }, [product.isActive, hasVariants, currentVariant, hasColors, isAllColorsOutOfStock, product.stockQuantity]);
+
+  // Multi-color Calculations (for pure color-only products)
   const multiColorTotalQuantity = colorRows.reduce((sum, r) => sum + r.quantity, 0);
   const multiColorTotalPrice = colorRows.reduce((sum, r) => {
     const col = productColors.find((c) => c.id === r.colorId);
@@ -331,13 +400,6 @@ export default function ProductDetailsClient({
         : Number(product.price);
     return sum + unitPrice * r.quantity;
   }, 0);
-
-  // Discount calculation
-  const effectiveDisplayPrice = hasColors
-    ? (activeColor?.priceOverride !== null && activeColor?.priceOverride !== undefined
-        ? Number(activeColor.priceOverride)
-        : Number(product.price))
-    : currentPrice;
 
   const hasDiscount =
     product.compareAtPrice !== null && product.compareAtPrice > effectiveDisplayPrice;
@@ -420,10 +482,10 @@ export default function ProductDetailsClient({
     setActiveColorId(newColorId);
   };
 
-  // Variant selector for single-SKU legacy products
+  // Variant selector
   const handleVariantSelect = (variantId: string) => {
     setSelectedVariantId(variantId);
-    const variant = product.variants?.find((v: any) => v.id === variantId);
+    const variant = productVariants.find((v: any) => v.id === variantId);
     if (variant) {
       if (variant.stockQuantity <= 0 || !variant.isActive) {
         setSingleQuantity(1);
@@ -435,7 +497,30 @@ export default function ProductDetailsClient({
 
   // Add to Cart Action
   const handleAddToCart = () => {
-    if (hasColors) {
+    if (isOutOfStock) return;
+    if (hasVariants && !selectedVariantId) return;
+
+    if (hasVariants) {
+      // Combination product or variant-only product
+      const activeColorObj = hasColors && activeColor ? {
+        id: activeColor.id,
+        name: activeColor.name,
+        hex: activeColor.hex,
+        sku: activeColor.sku || null,
+        image: activeColor.primaryImage || null,
+      } : undefined;
+
+      const cartProduct = {
+        ...product,
+        price: effectiveDisplayPrice,
+        image: activeColorObj?.image || mainImage,
+        category: categoryName,
+        categorySlug: categorySlug,
+      };
+
+      addItem(cartProduct, singleQuantity, currentVariant, activeColorObj);
+    } else if (hasColors) {
+      // Pure color-only product with multi-color rows
       if (colorRows.length === 0) return;
       const batchItems = colorRows.map((r) => {
         const col = productColors.find((c) => c.id === r.colorId)!;
@@ -463,19 +548,23 @@ export default function ProductDetailsClient({
       });
       addBatchItems(batchItems);
     } else {
+      // Simple product
       const cartProduct = {
         ...product,
+        price: effectiveDisplayPrice,
         image: mainImage,
         category: categoryName,
         categorySlug: categorySlug,
       };
-      addItem(cartProduct, singleQuantity, currentVariant);
+      addItem(cartProduct, singleQuantity, undefined, undefined);
     }
   };
 
   // Buy Now Action: isolated checkout intent
   const handleBuyNow = async () => {
     if (isOutOfStock) return;
+    if (hasVariants && !selectedVariantId) return;
+
     try {
       let itemsToOrder: Array<{
         productId: string;
@@ -484,7 +573,16 @@ export default function ProductDetailsClient({
         quantity: number;
       }> = [];
 
-      if (hasColors) {
+      if (hasVariants) {
+        itemsToOrder = [
+          {
+            productId: product.id,
+            variantId: currentVariant?.id || null,
+            colorId: (hasColors && activeColor ? activeColor.id : currentVariant?.colorId) || null,
+            quantity: singleQuantity,
+          },
+        ];
+      } else if (hasColors) {
         itemsToOrder = colorRows.map((r) => ({
           productId: product.id,
           colorId: r.colorId,
@@ -494,7 +592,6 @@ export default function ProductDetailsClient({
         itemsToOrder = [
           {
             productId: product.id,
-            variantId: currentVariant?.id || null,
             quantity: singleQuantity,
           },
         ];
@@ -693,7 +790,7 @@ export default function ProductDetailsClient({
                       {activeColor?.name || "Choose Color"}
                     </span>
                   </div>
-                  {activeColor && (
+                  {activeColor && !hasVariants && (
                     <span className="text-xs text-neutral-500">
                       {activeColorStock > 0 ? (
                         <span className="text-emerald-700 font-medium">
@@ -755,8 +852,9 @@ export default function ProductDetailsClient({
 
             {/* ==========================================================
                 MULTI-COLOR PURCHASING SECTION (PDP Multi-Color Buying)
+                Only rendered for pure color-only products (hasColors && !hasVariants)
                 ========================================================== */}
-            {hasColors && productColors.length > 0 && (
+            {hasColors && !hasVariants && productColors.length > 0 && (
               <div
                 className="p-4 sm:p-5 rounded-2xl border space-y-4"
                 style={{
@@ -900,18 +998,19 @@ export default function ProductDetailsClient({
               </div>
             )}
 
-            {/* Reusable Variants Selector for single-SKU legacy products */}
+            {/* Reusable Variants Selector */}
             {hasVariants && (
               <ProductVariants
-                variants={product.variants}
+                variants={availableVariants}
                 selectedVariantId={selectedVariantId}
                 onSelectVariant={handleVariantSelect}
                 disabled={!product.isActive}
+                label={hasColors ? "Select Size / Option" : "Select Option"}
               />
             )}
 
-            {/* Quantity Selector for single-SKU legacy products */}
-            {!hasColors && (
+            {/* Quantity Selector: for simple products and single-combination variant products */}
+            {(!hasColors || hasVariants) && (
               <QuantitySelector
                 quantity={singleQuantity}
                 onQuantityChange={setSingleQuantity}
@@ -926,7 +1025,7 @@ export default function ProductDetailsClient({
               productId={product.id}
               productSlug={product.slug}
               productName={product.name}
-              price={hasColors ? multiColorTotalPrice : currentPrice * singleQuantity}
+              price={hasColors && !hasVariants ? multiColorTotalPrice : effectiveDisplayPrice * singleQuantity}
               isOutOfStock={isOutOfStock}
               hasVariants={hasVariants}
               selectedVariantId={selectedVariantId}
