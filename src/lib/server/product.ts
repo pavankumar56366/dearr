@@ -590,6 +590,162 @@ export async function getRelatedProducts(
   });
 }
 
+let isCatalogSeededChecked = false;
+
+/**
+ * Ensures the full 86-product catalog from SAMPLE_PRODUCTS is populated in the database.
+ * If the database has fewer than 10 active products (e.g. freshly provisioned or unseeded),
+ * it automatically synchronizes all categories and products so the storefront displays them.
+ */
+export async function ensureCatalogSeeded(force = false): Promise<{ count: number; seeded: boolean }> {
+  if (isCatalogSeededChecked && !force) {
+    return { count: 0, seeded: false };
+  }
+
+  try {
+    const countRows = await query<any[]>("SELECT COUNT(*) AS total FROM products WHERE is_active = 1");
+    const count = Number(countRows[0]?.total ?? 0);
+    if (count >= 10 && !force) {
+      isCatalogSeededChecked = true;
+      return { count, seeded: false };
+    }
+
+    console.log(`[CatalogSync] Active product count is ${count}. Populating catalog from SAMPLE_PRODUCTS...`);
+    const { SAMPLE_CATEGORIES, SAMPLE_PRODUCTS } = await import("@/data/sample-products");
+
+    // 1. Seed Categories
+    const categoryIdMap = new Map<string, string>();
+    for (const cat of SAMPLE_CATEGORIES) {
+      const rawSlug = (cat as any).rawSlug || cat.slug;
+      const existing = await query<any[]>(
+        "SELECT id FROM categories WHERE slug = ? OR slug = ? LIMIT 1",
+        [cat.slug, rawSlug]
+      );
+      let catId: string;
+      if (existing && existing.length > 0) {
+        catId = existing[0].id;
+        await query(
+          "UPDATE categories SET name = ?, description = ?, is_active = 1 WHERE id = ?",
+          [cat.name, cat.description, catId]
+        );
+      } else {
+        catId = crypto.randomUUID();
+        await query(
+          "INSERT INTO categories (id, name, slug, description, is_active) VALUES (?, ?, ?, ?, 1)",
+          [catId, cat.name, cat.slug, cat.description]
+        );
+      }
+      categoryIdMap.set(cat.slug, catId);
+      if (rawSlug) categoryIdMap.set(rawSlug, catId);
+    }
+
+    // 2. Seed Products
+    let insertedOrUpdated = 0;
+    for (const prod of SAMPLE_PRODUCTS) {
+      const existing = await query<any[]>(
+        "SELECT id FROM products WHERE slug = ? LIMIT 1",
+        [prod.slug]
+      );
+      let prodId: string;
+      const catId = categoryIdMap.get(prod.categorySlug) || categoryIdMap.get((prod as any).rawCategorySlug) || null;
+
+      if (existing && existing.length > 0) {
+        prodId = existing[0].id;
+        await query(
+          `UPDATE products SET
+            category_id = ?, name = ?, description = ?, price = ?,
+            compare_at_price = ?, stock_quantity = ?, is_featured = ?, is_active = 1
+          WHERE id = ?`,
+          [
+            catId,
+            prod.name,
+            prod.description,
+            prod.price,
+            prod.compareAtPrice,
+            prod.stockQuantity,
+            prod.isFeatured ? 1 : 0,
+            prodId,
+          ]
+        );
+        insertedOrUpdated++;
+
+        if (prod.image) {
+          const existingImg = await query<any[]>(
+            "SELECT id FROM product_images WHERE product_id = ? LIMIT 1",
+            [prodId]
+          );
+          if (existingImg && existingImg.length > 0) {
+            await query(
+              "UPDATE product_images SET storage_path = ?, alt_text = ? WHERE id = ?",
+              [prod.image, prod.name, existingImg[0].id]
+            );
+          } else {
+            const imgId = crypto.randomUUID();
+            await query(
+              "INSERT INTO product_images (id, product_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, 0)",
+              [imgId, prodId, prod.image, prod.name]
+            );
+          }
+        }
+      } else {
+        prodId = crypto.randomUUID();
+        await query(
+          `INSERT INTO products (
+            id, category_id, name, slug, description, price, compare_at_price,
+            stock_quantity, is_featured, is_active
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            prodId,
+            catId,
+            prod.name,
+            prod.slug,
+            prod.description,
+            prod.price,
+            prod.compareAtPrice,
+            prod.stockQuantity,
+            prod.isFeatured ? 1 : 0,
+            prod.isActive ? 1 : 0,
+          ]
+        );
+        insertedOrUpdated++;
+
+        if (prod.image) {
+          const imgId = crypto.randomUUID();
+          await query(
+            "INSERT INTO product_images (id, product_id, storage_path, alt_text, sort_order) VALUES (?, ?, ?, ?, 0)",
+            [imgId, prodId, prod.image, prod.name]
+          );
+        }
+
+        if (prod.variants && prod.variants.length > 0) {
+          for (const variant of prod.variants) {
+            const varId = crypto.randomUUID();
+            await query(
+              "INSERT INTO product_variants (id, product_id, name, sku, price, stock_quantity, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [
+                varId,
+                prodId,
+                variant.name,
+                variant.sku || `SKU-${prod.slug.replace(/[^a-zA-Z0-9]/g, "").slice(0, 6).toUpperCase()}-${varId.slice(0, 8).toUpperCase()}`,
+                variant.price ?? prod.price,
+                variant.stockQuantity,
+                variant.isActive ? 1 : 0,
+              ]
+            );
+          }
+        }
+      }
+    }
+
+    isCatalogSeededChecked = true;
+    console.log(`[CatalogSync] Successfully synchronized ${insertedOrUpdated} products into catalog!`);
+    return { count: insertedOrUpdated, seeded: true };
+  } catch (err: any) {
+    console.warn("[CatalogSync] Auto-seed check error:", err.message);
+    return { count: 0, seeded: false };
+  }
+}
+
 /**
  * Lists products matching filter criteria with pagination.
  */
@@ -602,6 +758,7 @@ export async function listProducts(filters: ProductListFilters = {}): Promise<{
     totalPages: number;
   };
 }> {
+  await ensureCatalogSeeded();
   const page = Math.max(1, filters.page || 1);
   const pageSize = Math.min(100, Math.max(1, filters.pageSize || 24));
   const offset = (page - 1) * pageSize;

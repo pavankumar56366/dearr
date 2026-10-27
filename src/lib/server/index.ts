@@ -75,6 +75,7 @@ export {
   findProductBySlug,
   getRelatedProducts,
   listProducts,
+  ensureCatalogSeeded,
   createProduct,
   updateProduct,
   deactivateProduct,
