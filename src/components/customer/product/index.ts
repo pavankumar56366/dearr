@@ -7,3 +7,5 @@ export { default as ProductSpecifications } from "./ProductSpecifications";
 export { default as ProductAccordion } from "./ProductAccordion";
 export { default as ProductNotFound } from "./ProductNotFound";
 export { default as ProductDetailsClient } from "./ProductDetailsClient";
+export { PincodeServiceabilityWidget } from "./PincodeServiceabilityWidget";
+

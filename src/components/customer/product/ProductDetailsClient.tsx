@@ -47,6 +47,8 @@ import ProductActions from "./ProductActions";
 import ProductSpecifications from "./ProductSpecifications";
 import ProductAccordion from "./ProductAccordion";
 import ProductNotFound from "./ProductNotFound";
+import { PincodeServiceabilityWidget } from "./PincodeServiceabilityWidget";
+
 import { useCart } from "@/context/CartContext";
 import { getProductGalleryImages, getProductPrimaryImage } from "@/lib/product-image";
 
@@ -1032,6 +1034,12 @@ export default function ProductDetailsClient({
               onAddToCart={handleAddToCart}
               onBuyNow={handleBuyNow}
             />
+
+            {/* Delivery & Pincode Serviceability Check Widget */}
+            <PincodeServiceabilityWidget
+              productWeightKg={product?.weight ? Number(product.weight) : 0.5}
+            />
+
 
             {/* 3D Printing Highlights Badge */}
             <div
