@@ -4,6 +4,7 @@ import {
   getOrderById,
   updateOrderStatus,
   cancelOrder,
+  markOrderCodCollected,
   getOrderAddressHistory,
   OrderValidationError,
   type OrderStatus,
@@ -42,15 +43,14 @@ export async function GET(
 }
 
 /**
- * PATCH /api/admin/orders/[id] — Update order fulfillment status or cancel order.
+ * PATCH /api/admin/orders/[id] — Update order fulfillment status, cancel order, or collect COD cash.
  *
  * Admin-only endpoint. Requires valid founder/admin session.
  *
  * Body:
- *   { status: OrderStatus }  — fulfillment status update (validated state-machine transitions)
- *   { action: "cancel" }      — cancel order
- *
- * Note: paymentStatus mutation is strictly disallowed in B-17.
+ *   { status: OrderStatus }       — fulfillment status update (validated state-machine transitions)
+ *   { action: "cancel" }           — cancel order
+ *   { action: "mark_cod_collected"} — mark COD payment as collected in cash
  */
 export async function PATCH(
   request: NextRequest,
@@ -65,6 +65,8 @@ export async function PATCH(
 
     if (body.action === "cancel") {
       order = await cancelOrder(id);
+    } else if (body.action === "mark_cod_collected" || body.action === "mark_cod_paid") {
+      order = await markOrderCodCollected(id);
     } else if (body.status) {
       // In B-17: Only fulfillment status is mutable. paymentStatus is strictly ignored/rejected.
       order = await updateOrderStatus(id, body.status as OrderStatus);

@@ -83,6 +83,18 @@ export interface OrderRecord {
   shippingPostalCode: string;
   shippingCountry: string;
   items: OrderItemSnapshot[];
+  paymentMethod?: string;
+  shippingBaseAmount?: number;
+  shippingMarkupAmount?: number;
+  shippingCourierId?: number | null;
+  shippingCourierName?: string | null;
+  shippingEstimatedDays?: number | null;
+  shippingRateSource?: string | null;
+  codFeeAmount?: number;
+  codCollectedAt?: Date | null;
+  awbCode?: string | null;
+  courierName?: string | null;
+  courierStatus?: string | null;
   addressEditDeadline?: Date | null;
   addressChangeCount?: number;
   dispatchedAt?: Date | null;
@@ -308,6 +320,18 @@ function mapOrderRow(row: any): Omit<OrderRecord, "items"> {
     shippingCountry: row.shipping_country,
     addressEditDeadline: row.address_edit_deadline ? new Date(row.address_edit_deadline) : null,
     addressChangeCount: Number(row.address_change_count ?? 0),
+    paymentMethod: row.payment_method || "prepaid",
+    shippingBaseAmount: Number(row.shipping_base_amount || 0),
+    shippingMarkupAmount: Number(row.shipping_markup_amount || 0),
+    shippingCourierId: row.shipping_courier_id ? Number(row.shipping_courier_id) : null,
+    shippingCourierName: row.shipping_courier_name || null,
+    shippingEstimatedDays: row.shipping_estimated_days ? Number(row.shipping_estimated_days) : null,
+    shippingRateSource: row.shipping_rate_source || "standard",
+    codFeeAmount: Number(row.cod_fee_amount || 0),
+    codCollectedAt: row.cod_collected_at ? new Date(row.cod_collected_at) : null,
+    awbCode: row.awb_code || null,
+    courierName: row.courier_name || null,
+    courierStatus: row.courier_status || null,
     dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at) : null,
     deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
     cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : null,
@@ -729,9 +753,53 @@ export async function createOrderFromCart(
       );
     }
 
-    // 6. Stock: In B-17, stock is strictly validated above (sufficient quantity required),
-    // but NOT decremented here. Stock decrement belongs to the payment verification flow (B-18 / Razorpay).
-    // An unpaid pending order must not silently consume inventory.
+    // 6. Stock: For COD orders, decrement inventory atomically inside this transaction.
+    // For prepaid (Razorpay) orders, stock deduction occurs upon payment verification (B-18).
+    if (isCod) {
+      for (const item of preparedItems) {
+        const qty = Number(item.quantity);
+        if (item.variantId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_variants 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.variantId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for variant of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.colorId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_colors
+             SET stock = stock - ?, updated_at = NOW()
+             WHERE id = ? AND stock >= ?`,
+            [qty, item.colorId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for color of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.productId) {
+          const [result]: any = await conn.execute(
+            `UPDATE products 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.productId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        }
+      }
+    }
 
     // 7. Mark cart as converted and clear items
     await conn.execute(
@@ -1069,6 +1137,53 @@ export async function createOrderFromBuyNow(
           item.lineTotal,
         ] as any[]
       );
+    }
+
+    // For COD orders, decrement inventory atomically inside this transaction.
+    if (isCod) {
+      for (const item of preparedItems) {
+        const qty = Number(item.quantity);
+        if (item.variantId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_variants 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.variantId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for variant of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.colorId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_colors
+             SET stock = stock - ?, updated_at = NOW()
+             WHERE id = ? AND stock >= ?`,
+            [qty, item.colorId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for color of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.productId) {
+          const [result]: any = await conn.execute(
+            `UPDATE products 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.productId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        }
+      }
     }
 
     // Customer's cart is untouched!
@@ -2267,3 +2382,57 @@ export async function getOrderAddressHistory(
     };
   });
 }
+
+/**
+ * Marks a Cash on Delivery order as collected (paid in cash) by the admin/courier.
+ * Records cod_collected_at timestamp and updates payment_status to 'paid'.
+ */
+export async function markOrderCodCollected(orderId: string): Promise<OrderRecord> {
+  const cleanId = orderId.trim();
+  if (!cleanId) {
+    throw new OrderValidationError("Order ID is required", 400);
+  }
+
+  return await withTransaction(async (conn) => {
+    const [rows]: any = await conn.execute(
+      "SELECT id, order_number, payment_status, payment_method, total_amount FROM orders WHERE id = ? FOR UPDATE",
+      [cleanId]
+    );
+    if (!rows || rows.length === 0) {
+      throw new OrderValidationError("Order not found", 404);
+    }
+    const order = rows[0];
+    const isCod =
+      (order.payment_method || "").toLowerCase().includes("cash on delivery") ||
+      (order.payment_method || "").toLowerCase() === "cod";
+
+    if (!isCod) {
+      throw new OrderValidationError(
+        "Cannot collect COD cash on a prepaid or online order",
+        400
+      );
+    }
+
+    if (order.payment_status === "paid") {
+      return await getOrderByIdInternal(cleanId, conn);
+    }
+
+    await conn.execute(
+      "UPDATE orders SET payment_status = 'paid', cod_collected_at = NOW(), updated_at = NOW() WHERE id = ?",
+      [cleanId]
+    );
+
+    const paymentId = crypto.randomUUID();
+    await conn.execute(
+      `INSERT INTO payments (
+         id, order_id, provider, amount, currency, status,
+         provider_payment_id, created_at, updated_at
+       ) VALUES (?, ?, 'cod_cash', ?, 'INR', 'paid', ?, NOW(), NOW())
+       ON DUPLICATE KEY UPDATE status = 'paid', updated_at = NOW()`,
+      [paymentId, cleanId, order.total_amount, `COD_CASH_${order.order_number}`]
+    );
+
+    return await getOrderByIdInternal(cleanId, conn);
+  });
+}
+

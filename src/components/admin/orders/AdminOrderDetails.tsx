@@ -41,6 +41,7 @@ export function AdminOrderDetails({
   const [order, setOrder] = useState<AdminOrder | null>(initialOrder ?? null);
   const [loading, setLoading] = useState(!initialOrder);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isCollectingCod, setIsCollectingCod] = useState(false);
 
   // Status update modal state
   const [showStatusModal, setShowStatusModal] = useState(false);
@@ -91,7 +92,12 @@ export function AdminOrderDetails({
             currency: o.currency || "INR",
             orderStatus: o.status,
             paymentStatus: o.paymentStatus,
-            paymentMethod: "Razorpay (Online)",
+            paymentMethod: o.paymentMethod || "Razorpay (Online)",
+            shippingBaseAmount: Number(o.shippingBaseAmount || 0),
+            shippingMarkupAmount: Number(o.shippingMarkupAmount || 0),
+            shippingCourierName: o.shippingCourierName || null,
+            codFeeAmount: Number(o.codFeeAmount || 0),
+            codCollectedAt: o.codCollectedAt ? (typeof o.codCollectedAt === "string" ? o.codCollectedAt : new Date(o.codCollectedAt).toISOString()) : null,
             shippingAddress: {
               fullName: o.shippingFullName,
               phone: o.shippingPhone,
@@ -185,6 +191,39 @@ export function AdminOrderDetails({
       showToast(`Order ${updated.orderNumber} updated to ${updated.orderStatus}`);
     }
     setShowStatusModal(false);
+  };
+
+  const handleMarkCodCollected = async () => {
+    if (!order) return;
+    try {
+      setIsCollectingCod(true);
+      const res = await fetch(`/api/admin/orders/${encodeURIComponent(order.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "mark_cod_collected" }),
+      });
+      const data = await res.json();
+      if (res.ok && data.ok && data.order) {
+        setOrder((prev) =>
+          prev
+            ? {
+                ...prev,
+                paymentStatus: data.order.paymentStatus || "paid",
+                codCollectedAt: data.order.codCollectedAt
+                  ? new Date(data.order.codCollectedAt).toISOString()
+                  : new Date().toISOString(),
+              }
+            : null
+        );
+        showToast(`Cash collected! Order ${data.order.orderNumber} marked as Paid.`);
+      } else {
+        showToast(data.error || "Failed to mark COD cash collected");
+      }
+    } catch {
+      showToast("Network error updating COD payment");
+    } finally {
+      setIsCollectingCod(false);
+    }
   };
 
   const renderOrderStatusBadge = (status: OrderStatus) => {
@@ -342,6 +381,27 @@ export function AdminOrderDetails({
         </div>
 
         <div className="flex items-center gap-2.5">
+          {Boolean(
+            (order.paymentMethod?.toLowerCase().includes("cod") ||
+              order.paymentMethod?.toLowerCase().includes("cash on delivery")) &&
+              order.paymentStatus !== "paid" &&
+              order.orderStatus !== "cancelled"
+          ) && (
+            <button
+              type="button"
+              disabled={isCollectingCod}
+              onClick={handleMarkCodCollected}
+              className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+            >
+              <CheckCircleIcon size={15} />
+              <span>
+                {isCollectingCod
+                  ? "Collecting..."
+                  : `Mark COD Cash Collected (₹${order.totalAmount.toLocaleString("en-IN")})`}
+              </span>
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => handleCopy(order.orderNumber, "Order #")}
@@ -564,6 +624,25 @@ export function AdminOrderDetails({
                     : "Free Shipping (₹0)"}
                 </span>
               </div>
+
+              {order.codFeeAmount !== undefined && order.codFeeAmount > 0 && (
+                <div className="flex items-center justify-between text-neutral-700">
+                  <span>Cash on Delivery Handling:</span>
+                  <span className="font-semibold text-neutral-900">
+                    ₹{order.codFeeAmount.toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
+
+              {order.codCollectedAt && (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs flex items-center gap-2">
+                  <CheckCircleIcon size={14} className="text-emerald-700 shrink-0" />
+                  <span>
+                    <strong>COD Cash Collected:</strong> Paid in full on{" "}
+                    {formatDateTime(order.codCollectedAt)}
+                  </span>
+                </div>
+              )}
 
               <div className="pt-2 border-t border-neutral-200/80 flex items-center justify-between text-sm sm:text-base font-bold text-neutral-900">
                 <span>Total Amount:</span>

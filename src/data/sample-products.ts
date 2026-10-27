@@ -67,6 +67,9 @@ export interface SampleProduct {
   hasColors?: boolean;
   colors?: SampleProductColor[];
   codEnabled?: boolean;
+  codFee?: number | null;
+  dispatchLeadDays?: number;
+  dispatchTimelineText?: string | null;
 }
 
 export interface SampleCategory {
