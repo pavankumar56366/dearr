@@ -5,6 +5,7 @@ import { query } from "@/lib/server/db";
 import {
   isShiprocketConfigured,
   isShiprocketEnabled,
+  checkCourierServiceability,
   createShiprocketOrder,
   generateShiprocketAWB,
   requestShiprocketPickup,
@@ -40,7 +41,7 @@ export async function GET(
     try {
       const shipments = await query<any[]>(
         `SELECT id, order_id, shiprocket_order_id, shiprocket_shipment_id, 
-                awb_code, courier_id, courier_name, status, pickup_location, 
+                awb_code, courier_id, courier_name, shipment_actual_cost, status, pickup_location, 
                 pickup_scheduled_date, pickup_token, label_url, manifest_url, 
                 etd, last_tracking_activity, last_tracking_at, created_at, updated_at 
          FROM order_shipments 
@@ -68,6 +69,59 @@ export async function GET(
       }
     }
 
+    // Available couriers for custom selection (if shipment created and live API configured)
+    let availableCouriers: Array<{
+      courierCompanyId: number;
+      courierName: string;
+      rate: number;
+      estimatedDeliveryDays: number | string;
+      rating?: number;
+    }> = [];
+
+    if (
+      isShiprocketConfigured() &&
+      isShiprocketEnabled() &&
+      order.shippingPostalCode &&
+      (!awbCode || !shipmentRecord?.shipment_actual_cost)
+    ) {
+      try {
+        const isCod = Boolean(
+          (order as any).paymentMethod?.toLowerCase().includes("cod") ||
+          (order as any).paymentMethod?.toLowerCase().includes("cash on delivery")
+        );
+        const serviceability = await checkCourierServiceability({
+          pickupPincode: "560038",
+          deliveryPincode: order.shippingPostalCode,
+          weightKg: 0.5,
+          cod: isCod,
+          declaredValue: order.totalAmount,
+        });
+
+        if (serviceability.availableCouriers && Array.isArray(serviceability.availableCouriers)) {
+          availableCouriers = serviceability.availableCouriers.map((c) => ({
+            courierCompanyId: c.courier_company_id,
+            courierName: c.courier_name,
+            rate: Number(c.rate || 0),
+            estimatedDeliveryDays: c.estimated_delivery_days || c.etd || "2-4",
+            rating: typeof c.rating === "number" ? c.rating : undefined,
+          }));
+        }
+      } catch (err: any) {
+        console.warn("[Admin Shiprocket] Serviceability fetch failed:", err?.message);
+      }
+    }
+
+    const customerShipping = Number(order.shippingAmount || 0);
+    const codFee = Number((order as any).codFeeAmount || 0);
+    const totalShippingRevenue = customerShipping + codFee;
+    const actualFreightCost =
+      shipmentRecord?.shipment_actual_cost != null
+        ? Number(shipmentRecord.shipment_actual_cost)
+        : null;
+
+    const netFreightMargin =
+      actualFreightCost != null ? totalShippingRevenue - actualFreightCost : null;
+
     return NextResponse.json({
       ok: true,
       isConfigured: isShiprocketConfigured(),
@@ -76,6 +130,14 @@ export async function GET(
       orderAwb: awbCode || null,
       courierName: shipmentRecord?.courier_name || (order as any).courier_name || null,
       liveTracking,
+      availableCouriers,
+      freightAccounting: {
+        customerShippingFee: customerShipping,
+        codFeeAmount: codFee,
+        totalShippingCollected: totalShippingRevenue,
+        actualFreightCost,
+        netFreightMargin,
+      },
     });
   } catch (err: any) {
     if (err instanceof OrderValidationError) {
@@ -283,11 +345,14 @@ export async function POST(
           );
         }
 
+        const selectedCourierId = body.courierId ? Number(body.courierId) : undefined;
+        const passedCost = body.actualCost != null ? Number(body.actualCost) : null;
+
         let awbResult: any;
         try {
           awbResult = await generateShiprocketAWB({
             shipmentId,
-            courierId: body.courierId ? Number(body.courierId) : undefined,
+            courierId: selectedCourierId,
           });
         } catch (awbErr: any) {
           const errMsg = awbErr?.message || "";
@@ -303,7 +368,9 @@ export async function POST(
           throw awbErr;
         }
 
-        // Update orders table with awb
+        const finalActualCost = passedCost ?? awbResult.freightCost ?? null;
+
+        // Update orders & order_shipments table with awb and actual cost
         if (awbResult.awbCode) {
           try {
             await query(
@@ -311,11 +378,14 @@ export async function POST(
               [awbResult.awbCode, awbResult.courierName, order.id]
             );
             await query(
-              "UPDATE order_shipments SET awb_code = ?, courier_id = ?, courier_name = ?, status = 'AWB_ASSIGNED', updated_at = NOW() WHERE order_id = ? AND shiprocket_shipment_id = ?",
+              `UPDATE order_shipments 
+               SET awb_code = ?, courier_id = ?, courier_name = ?, shipment_actual_cost = ?, status = 'AWB_ASSIGNED', updated_at = NOW() 
+               WHERE order_id = ? AND shiprocket_shipment_id = ?`,
               [
                 awbResult.awbCode,
-                awbResult.courierCompanyId || null,
+                awbResult.courierCompanyId || selectedCourierId || null,
                 awbResult.courierName || null,
+                finalActualCost,
                 order.id,
                 String(shipmentId),
               ]
@@ -330,6 +400,7 @@ export async function POST(
           message: "AWB generated successfully",
           awbCode: awbResult.awbCode,
           courierName: awbResult.courierName,
+          actualCost: finalActualCost,
         });
       }
 

@@ -56,6 +56,22 @@ interface LiveTrackingData {
   error?: string;
 }
 
+interface AvailableCourier {
+  courierCompanyId: number;
+  courierName: string;
+  rate: number;
+  estimatedDeliveryDays: number | string;
+  rating?: number;
+}
+
+interface FreightAccounting {
+  customerShippingFee: number;
+  codFeeAmount: number;
+  totalShippingCollected: number;
+  actualFreightCost: number | null;
+  netFreightMargin: number | null;
+}
+
 export function AdminShiprocketCard({
   orderId,
   orderNumber,
@@ -69,6 +85,9 @@ export function AdminShiprocketCard({
   const [isEnabled, setIsEnabled] = useState(true);
   const [shipment, setShipment] = useState<ShipmentData | null>(null);
   const [liveTracking, setLiveTracking] = useState<LiveTrackingData | null>(null);
+  const [availableCouriers, setAvailableCouriers] = useState<AvailableCourier[]>([]);
+  const [selectedCourierId, setSelectedCourierId] = useState<string>("");
+  const [freightAccounting, setFreightAccounting] = useState<FreightAccounting | null>(null);
 
   // Action states
   const [creatingOrder, setCreatingOrder] = useState(false);
@@ -106,6 +125,12 @@ export function AdminShiprocketCard({
         }
         if (data.liveTracking) {
           setLiveTracking(data.liveTracking);
+        }
+        if (data.availableCouriers && Array.isArray(data.availableCouriers)) {
+          setAvailableCouriers(data.availableCouriers);
+        }
+        if (data.freightAccounting) {
+          setFreightAccounting(data.freightAccounting);
         }
       }
     } catch (err: any) {
@@ -165,6 +190,12 @@ export function AdminShiprocketCard({
       return;
     }
 
+    const chosenCourier = availableCouriers.find(
+      (c) => String(c.courierCompanyId) === selectedCourierId
+    );
+    const courierId = chosenCourier ? chosenCourier.courierCompanyId : undefined;
+    const actualCost = chosenCourier ? chosenCourier.rate : undefined;
+
     setGeneratingAwb(true);
     setErrorMessage(null);
     try {
@@ -176,6 +207,8 @@ export function AdminShiprocketCard({
           body: JSON.stringify({
             action: "generate_awb",
             shipmentId: Number(shipmentId),
+            courierId,
+            actualCost,
           }),
         }
       );
@@ -478,6 +511,66 @@ export function AdminShiprocketCard({
               )}
             </div>
           )}
+
+          {/* Freight Financial Accounting & Margin */}
+          {freightAccounting && (
+            <div className="p-3 rounded-xl bg-neutral-50/90 border border-neutral-200/80 space-y-2 text-xs">
+              <div className="flex items-center justify-between pb-1.5 border-b border-neutral-200/60">
+                <span className="font-bold text-neutral-900 uppercase text-[10px] tracking-wider">
+                  Freight Financial Accounting
+                </span>
+                {freightAccounting.netFreightMargin !== null && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      freightAccounting.netFreightMargin >= 0
+                        ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                        : "bg-amber-100 text-amber-800 border border-amber-200"
+                    }`}
+                  >
+                    {freightAccounting.netFreightMargin >= 0
+                      ? `+₹${freightAccounting.netFreightMargin.toFixed(2)} Margin`
+                      : `-₹${Math.abs(freightAccounting.netFreightMargin).toFixed(2)} Subsidized`}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-1 text-neutral-600 text-[11px]">
+                <div className="flex justify-between">
+                  <span>Customer Paid Shipping:</span>
+                  <span className="font-semibold text-neutral-900">
+                    {freightAccounting.customerShippingFee === 0
+                      ? "₹0 (Free Shipping)"
+                      : `₹${freightAccounting.customerShippingFee.toFixed(2)}`}
+                  </span>
+                </div>
+
+                {freightAccounting.codFeeAmount > 0 && (
+                  <div className="flex justify-between">
+                    <span>COD Handling Fee:</span>
+                    <span className="font-semibold text-neutral-900">
+                      +₹{freightAccounting.codFeeAmount.toFixed(2)}
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-1 border-t border-neutral-200/40 font-medium">
+                  <span>Total Shipping Revenue:</span>
+                  <span className="font-bold text-neutral-900">
+                    ₹{freightAccounting.totalShippingCollected.toFixed(2)}
+                  </span>
+                </div>
+
+                <div className="flex justify-between pt-1 border-t border-neutral-200/40">
+                  <span>Actual Courier Freight Cost:</span>
+                  <span className="font-bold font-mono text-neutral-900">
+                    {freightAccounting.actualFreightCost !== null
+                      ? `₹${freightAccounting.actualFreightCost.toFixed(2)}`
+                      : "Pending AWB assignment"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="p-3.5 rounded-xl bg-neutral-50 border border-neutral-200 text-center space-y-2">
@@ -558,14 +651,45 @@ export function AdminShiprocketCard({
           <div className="space-y-2">
             {/* If shipment created but no AWB */}
             {!hasAwb && (
-              <button
-                type="button"
-                onClick={handleGenerateAWB}
-                disabled={generatingAwb}
-                className="w-full h-10 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
-              >
-                {generatingAwb ? "Assigning Courier..." : "Generate AWB & Assign Courier"}
-              </button>
+              <div className="space-y-2.5 p-3 rounded-xl bg-neutral-50 border border-neutral-200/80">
+                <div>
+                  <label className="text-[10px] font-bold text-neutral-600 uppercase tracking-wider block mb-1">
+                    Courier Assignment Strategy
+                  </label>
+                  <select
+                    value={selectedCourierId}
+                    onChange={(e) => setSelectedCourierId(e.target.value)}
+                    disabled={generatingAwb}
+                    className="w-full h-8.5 px-2.5 rounded-lg border border-neutral-300 text-xs bg-white text-neutral-900 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
+                  >
+                    <option value="">
+                      ✨ Recommended (Shiprocket AI / Smart Routing)
+                    </option>
+                    {availableCouriers.map((courier) => (
+                      <option key={courier.courierCompanyId} value={courier.courierCompanyId}>
+                        {courier.courierName} — ₹{courier.rate.toFixed(2)} ({courier.estimatedDeliveryDays} days)
+                        {courier.rating ? ` ★ ${courier.rating}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-neutral-400 mt-1">
+                    {selectedCourierId
+                      ? `Selected custom carrier (₹${
+                          availableCouriers.find((c) => String(c.courierCompanyId) === selectedCourierId)?.rate.toFixed(2)
+                        } freight).`
+                      : "Default: Uses Shiprocket Smart AI routing for highest delivery success rate."}
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateAWB}
+                  disabled={generatingAwb}
+                  className="w-full h-10 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-50 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs transition cursor-pointer"
+                >
+                  {generatingAwb ? "Assigning Courier..." : "Generate AWB & Assign Courier"}
+                </button>
+              </div>
             )}
 
             {/* If AWB assigned */}

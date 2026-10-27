@@ -153,6 +153,7 @@ export interface ShiprocketAWBResponse {
   courierCompanyId: number;
   courierName: string;
   assignedDateTime?: string;
+  freightCost?: number;
   raw?: unknown;
 }
 
@@ -545,6 +546,8 @@ export async function generateShiprocketAWB(params: {
   });
 
   const data = response?.response?.data || response?.data || {};
+  const rawCost = data.freight_charges ?? data.rate ?? data.cost ?? response?.freight_charges ?? 0;
+  const freightCost = Number(rawCost) > 0 ? Number(rawCost) : undefined;
 
   return {
     awbAssignStatus: response?.awb_assign_status ?? 1,
@@ -553,6 +556,7 @@ export async function generateShiprocketAWB(params: {
     courierCompanyId: Number(data.courier_company_id || 0),
     courierName: String(data.courier_name || ""),
     assignedDateTime: data.assigned_date_time,
+    freightCost,
     raw: response,
   };
 }
