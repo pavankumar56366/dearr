@@ -1038,6 +1038,8 @@ export default function ProductDetailsClient({
             {/* Delivery & Pincode Serviceability Check Widget */}
             <PincodeServiceabilityWidget
               productWeightKg={product?.weight ? Number(product.weight) : 0.5}
+              dispatchLeadDays={(product as any)?.dispatch_lead_days || (product as any)?.dispatchLeadDays}
+              dispatchTimelineText={(product as any)?.dispatch_timeline_text || (product as any)?.dispatchTimelineText}
             />
 
 

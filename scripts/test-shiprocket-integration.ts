@@ -290,8 +290,32 @@ async function runTests() {
       "verifyShiprocketWebhook returns false for mismatched token"
     );
     assert(
+      verifyShiprocketWebhook("secure_webhook_secret_99") === false,
+      "verifyShiprocketWebhook returns false for token of different length"
+    );
+    assert(
       verifyShiprocketWebhook(null) === false,
       "verifyShiprocketWebhook returns false for missing token"
+    );
+
+    // Fail-closed test when no token is set in environment
+    delete process.env.SHIPROCKET_WEBHOOK_TOKEN;
+    assert(
+      verifyShiprocketWebhook("any_token") === false,
+      "verifyShiprocketWebhook fails-closed (returns false) when SHIPROCKET_WEBHOOK_TOKEN is unset"
+    );
+
+    // -------------------------------------------------------------------------
+    // Test Group 6: Webhook Route Keyword Scrubbing
+    // -------------------------------------------------------------------------
+    console.log("\n[Test Group 6: Courier Webhook Endpoint Neutrality]");
+
+    const webhookRoute = "/api/webhooks/courier-updates";
+    const bannedPatterns = [/shiprocket/i, /kartrocket/i, /\bsr\b/i, /\bkr\b/i];
+    const containsBanned = bannedPatterns.some((p) => p.test(webhookRoute));
+    assert(
+      !containsBanned,
+      "Webhook route path /api/webhooks/courier-updates is free of carrier-specific keywords (shiprocket, kartrocket, sr, kr)"
     );
 
     // -------------------------------------------------------------------------

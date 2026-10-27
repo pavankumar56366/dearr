@@ -5,6 +5,35 @@ import {
   checkCourierServiceability,
 } from "@/lib/server/shiprocket";
 
+// 30-minute in-memory cache for serviceability lookups to minimize external API hits
+interface CacheEntry {
+  timestamp: number;
+  data: any;
+}
+
+const SERVICEABILITY_CACHE = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+const MAX_CACHE_ENTRIES = 1000;
+
+function getCachedServiceability(key: string): any | null {
+  const entry = SERVICEABILITY_CACHE.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    SERVICEABILITY_CACHE.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedServiceability(key: string, data: any): void {
+  // Simple eviction if map grows too large
+  if (SERVICEABILITY_CACHE.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = SERVICEABILITY_CACHE.keys().next().value;
+    if (oldestKey) SERVICEABILITY_CACHE.delete(oldestKey);
+  }
+  SERVICEABILITY_CACHE.set(key, { timestamp: Date.now(), data });
+}
+
 /**
  * GET /api/shipping/serviceability
  * Checks deliverability and estimated delivery timeframe for an Indian pincode.
@@ -34,6 +63,15 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const cacheKey = `${deliveryPincode}:${isCod ? 1 : 0}:${weightKg}`;
+    const cached = getCachedServiceability(cacheKey);
+    if (cached) {
+      return NextResponse.json({
+        ...cached,
+        cached: true,
+      });
+    }
+
     // Default warehouse/store origin pincode if not provided
     const pickupPincode = (
       process.env.SHIPROCKET_PICKUP_PINCODE ||
@@ -42,9 +80,9 @@ export async function GET(request: NextRequest) {
     ).trim();
 
     // If Shiprocket integration is not configured or disabled in environment,
-    // respond gracefully with standard domestic delivery fallback.
+    // respond gracefully with standard domestic delivery fallback (₹50 fallback).
     if (!isShiprocketConfigured() || !isShiprocketEnabled()) {
-      return NextResponse.json({
+      const fallbackData = {
         ok: true,
         source: "fallback",
         serviceable: true,
@@ -55,12 +93,14 @@ export async function GET(request: NextRequest) {
           {
             courierCompanyId: 0,
             courierName: "Standard Express Delivery",
-            rate: 0,
+            rate: 50,
             etd: "3-5 business days",
             cod: isCod ? 1 : 0,
           },
         ],
-      });
+      };
+      setCachedServiceability(cacheKey, fallbackData);
+      return NextResponse.json(fallbackData);
     }
 
     const result = await checkCourierServiceability({
@@ -81,17 +121,20 @@ export async function GET(request: NextRequest) {
       rating: c.rating,
     }));
 
-    return NextResponse.json({
+    const responseData = {
       ok: true,
       source: "shiprocket",
       serviceable: result.isServiceable,
       deliveryPincode,
       recommendedCourier: result.recommendedCourierName,
       availableCouriers: couriers,
-    });
+    };
+
+    setCachedServiceability(cacheKey, responseData);
+    return NextResponse.json(responseData);
   } catch (err: any) {
     console.error("[Shiprocket Serviceability API Error]:", err);
-    // Graceful fallback to avoid blocking customer checkout
+    // Graceful fallback to avoid blocking customer checkout (flat ₹50 fallback)
     return NextResponse.json(
       {
         ok: true,
@@ -99,6 +142,7 @@ export async function GET(request: NextRequest) {
         serviceable: true,
         message: "Delivery is available to your pincode.",
         estimatedDeliveryDays: 4,
+        rate: 50,
       },
       { status: 200 }
     );

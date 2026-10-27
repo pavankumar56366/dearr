@@ -35,11 +35,17 @@ export async function GET(
 
     const order = await getOrderById(id, { isAdmin: true });
 
-    // Look for shipment record in database
+    // Look for shipment record in database (excluding raw_response to prevent PII leakage)
     let shipmentRecord: any = null;
     try {
       const shipments = await query<any[]>(
-        "SELECT * FROM order_shipments WHERE order_id = ? ORDER BY created_at DESC LIMIT 1",
+        `SELECT id, order_id, shiprocket_order_id, shiprocket_shipment_id, 
+                awb_code, courier_id, courier_name, status, pickup_location, 
+                pickup_scheduled_date, pickup_token, label_url, manifest_url, 
+                etd, last_tracking_activity, last_tracking_at, created_at, updated_at 
+         FROM order_shipments 
+         WHERE order_id = ? 
+         ORDER BY created_at DESC LIMIT 1`,
         [order.id]
       );
       if (shipments.length > 0) shipmentRecord = shipments[0];
@@ -124,8 +130,66 @@ export async function POST(
 
     const order = await getOrderById(id, { isAdmin: true });
 
+    // 1. Guard against fulfilling cancelled orders
+    if (order.status === "cancelled") {
+      return NextResponse.json(
+        { ok: false, error: "Cannot dispatch logistics actions for a cancelled order." },
+        { status: 400 }
+      );
+    }
+
+    // 2. Guard payment status before dispatching
+    const paymentMethodLower = String((order as any).paymentMethod || "").toLowerCase();
+    const isCod = paymentMethodLower.includes("cod") || paymentMethodLower.includes("cash on delivery");
+
+    if (!isCod) {
+      // Prepaid order must be paid
+      if (order.paymentStatus !== "paid") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Cannot create shipment: Prepaid order has not been paid yet.",
+          },
+          { status: 400 }
+        );
+      }
+    } else {
+      // COD orders must be confirmed or in processing before booking shipment
+      const validCodStatuses = ["confirmed", "processing", "shipped", "delivered"];
+      if (!validCodStatuses.includes(order.status)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Please confirm this COD order before booking shipment (current status: '${order.status}').`,
+          },
+          { status: 400 }
+        );
+      }
+    }
+
     switch (action) {
       case "create_order": {
+        // Prevent duplicate shipment creation for the same order
+        try {
+          const existingShipment = await query<any[]>(
+            "SELECT id, shiprocket_shipment_id, awb_code, status FROM order_shipments WHERE order_id = ? LIMIT 1",
+            [order.id]
+          );
+          if (existingShipment.length > 0 && existingShipment[0].shiprocket_shipment_id) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: `A shipment already exists for this order (Shipment ID: ${existingShipment[0].shiprocket_shipment_id}).`,
+                shipmentId: existingShipment[0].shiprocket_shipment_id,
+                awbCode: existingShipment[0].awb_code,
+              },
+              { status: 409 }
+            );
+          }
+        } catch {
+          // Table might not exist yet in unmigrated environment
+        }
+
         const payload = mapDearrOrderToShiprocketPayload(
           {
             orderNumber: order.orderNumber,
@@ -161,7 +225,23 @@ export async function POST(
           }
         );
 
-        const srResponse = await createShiprocketOrder(payload);
+        let srResponse: any;
+        try {
+          srResponse = await createShiprocketOrder(payload);
+        } catch (apiErr: any) {
+          // Handle wallet balance or Shiprocket quota errors gracefully
+          const errMsg = apiErr?.message || "";
+          if (/wallet|insufficient|balance|credit/i.test(errMsg)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "Insufficient Shiprocket wallet balance. Please recharge your Shiprocket wallet to book shipments.",
+              },
+              { status: 402 }
+            );
+          }
+          throw apiErr;
+        }
 
         // Record in order_shipments
         try {
@@ -203,10 +283,25 @@ export async function POST(
           );
         }
 
-        const awbResult = await generateShiprocketAWB({
-          shipmentId,
-          courierId: body.courierId ? Number(body.courierId) : undefined,
-        });
+        let awbResult: any;
+        try {
+          awbResult = await generateShiprocketAWB({
+            shipmentId,
+            courierId: body.courierId ? Number(body.courierId) : undefined,
+          });
+        } catch (awbErr: any) {
+          const errMsg = awbErr?.message || "";
+          if (/wallet|insufficient|balance|credit/i.test(errMsg)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "Insufficient Shiprocket wallet balance to assign AWB. Please recharge your wallet.",
+              },
+              { status: 402 }
+            );
+          }
+          throw awbErr;
+        }
 
         // Update orders table with awb
         if (awbResult.awbCode) {
@@ -247,7 +342,29 @@ export async function POST(
           );
         }
 
-        const pickupResult = await requestShiprocketPickup([shipmentId]);
+        let pickupResult: any;
+        try {
+          pickupResult = await requestShiprocketPickup([shipmentId]);
+        } catch (pickupErr: any) {
+          const errMsg = pickupErr?.message || "";
+          if (/already scheduled|pickup already exists|previously scheduled/i.test(errMsg)) {
+            return NextResponse.json({
+              ok: true,
+              message: "Pickup has already been scheduled for this shipment.",
+              alreadyScheduled: true,
+            });
+          }
+          if (/wallet|insufficient|balance|credit/i.test(errMsg)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "Insufficient Shiprocket wallet balance to request pickup. Please recharge your wallet.",
+              },
+              { status: 402 }
+            );
+          }
+          throw pickupErr;
+        }
 
         try {
           await query(

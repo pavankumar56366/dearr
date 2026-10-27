@@ -1,4 +1,5 @@
 import "server-only";
+import crypto from "crypto";
 
 /**
  * =============================================================================
@@ -697,17 +698,27 @@ export async function cancelShiprocketOrders(
 }
 
 /**
- * Verifies webhook authorization against configured SHIPROCKET_WEBHOOK_TOKEN.
+ * Verifies webhook authorization against configured SHIPROCKET_WEBHOOK_TOKEN
+ * using constant-time comparison to protect against timing attacks.
  */
 export function verifyShiprocketWebhook(headerToken?: string | null): boolean {
   const expectedToken = (process.env.SHIPROCKET_WEBHOOK_TOKEN || "").trim();
   if (!expectedToken) {
-    // If no webhook token is configured, log warning and allow or require setup
-    return true;
+    // Fail-closed for security if no webhook token is configured
+    return false;
   }
   if (!headerToken) return false;
-  return headerToken.trim() === expectedToken;
+
+  const providedBuffer = Buffer.from(headerToken.trim());
+  const expectedBuffer = Buffer.from(expectedToken);
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
+
 
 // -----------------------------------------------------------------------------
 // Mapping Helpers (Dearr <-> Shiprocket)

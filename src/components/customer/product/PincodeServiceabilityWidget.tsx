@@ -32,11 +32,15 @@ interface ServiceabilityData {
 
 interface PincodeServiceabilityWidgetProps {
   productWeightKg?: number;
+  dispatchLeadDays?: number;
+  dispatchTimelineText?: string;
   className?: string;
 }
 
 export function PincodeServiceabilityWidget({
   productWeightKg = 0.5,
+  dispatchLeadDays,
+  dispatchTimelineText,
   className = "",
 }: PincodeServiceabilityWidgetProps) {
   const [pincode, setPincode] = useState("");
@@ -237,7 +241,10 @@ export function PincodeServiceabilityWidget({
                 <div className="flex items-center justify-between text-[11px]">
                   <span className="text-neutral-500">Dispatch Speed:</span>
                   <span className="font-semibold text-emerald-700">
-                    Ships in 24–48 hours
+                    {dispatchTimelineText ||
+                      (dispatchLeadDays
+                        ? `Ships in ${dispatchLeadDays} business days`
+                        : "Dispatched in 2–3 business days")}
                   </span>
                 </div>
               </div>
