@@ -37,7 +37,7 @@ async function applyMigration012ToLocal() {
         ADD COLUMN \`combo_hash\` VARCHAR(150) GENERATED ALWAYS AS (
           CASE
             WHEN \`color_id\` IS NOT NULL OR (\`size_name\` IS NOT NULL AND TRIM(\`size_name\`) != '') THEN
-              CONCAT(COALESCE(\`color_id\`, '00000000-0000-0000-0000-000000000000'), '::', LOWER(TRIM(\`size_name\`)))
+              CONCAT(COALESCE(\`color_id\`, '00000000-0000-0000-0000-000000000000'), '::', COALESCE(LOWER(TRIM(\`size_name\`)), ''))
             ELSE NULL
           END
         ) VIRTUAL AFTER \`size_name\`,
@@ -49,7 +49,18 @@ async function applyMigration012ToLocal() {
     `);
     console.log("  [+] product_variants extensions applied (color_id, size_name, combo_hash, uq_product_variants_combo, fk_product_variants_color)");
   } else {
-    console.log("  [.] product_variants.color_id already exists.");
+    console.log("  [.] product_variants.color_id already exists. Ensuring combo_hash definition is up-to-date...");
+    await conn.query(`
+      ALTER TABLE \`product_variants\`
+        MODIFY COLUMN \`combo_hash\` VARCHAR(150) GENERATED ALWAYS AS (
+          CASE
+            WHEN \`color_id\` IS NOT NULL OR (\`size_name\` IS NOT NULL AND TRIM(\`size_name\`) != '') THEN
+              CONCAT(COALESCE(\`color_id\`, '00000000-0000-0000-0000-000000000000'), '::', COALESCE(LOWER(TRIM(\`size_name\`)), ''))
+            ELSE NULL
+          END
+        ) VIRTUAL;
+    `);
+    console.log("  [+] product_variants.combo_hash updated to safe non-null expression.");
   }
 
   // Step 2: Check and apply stock_reservations extensions

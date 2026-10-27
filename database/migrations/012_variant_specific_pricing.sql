@@ -26,7 +26,7 @@ ALTER TABLE `product_variants`
   ADD COLUMN `combo_hash` VARCHAR(150) GENERATED ALWAYS AS (
     CASE
       WHEN `color_id` IS NOT NULL OR (`size_name` IS NOT NULL AND TRIM(`size_name`) != '') THEN
-        CONCAT(COALESCE(`color_id`, '00000000-0000-0000-0000-000000000000'), '::', LOWER(TRIM(`size_name`)))
+        CONCAT(COALESCE(`color_id`, '00000000-0000-0000-0000-000000000000'), '::', COALESCE(LOWER(TRIM(`size_name`)), ''))
       ELSE NULL
     END
   ) VIRTUAL AFTER `size_name`,

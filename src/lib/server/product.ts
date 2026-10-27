@@ -1233,7 +1233,7 @@ export async function updateProduct(
       );
       const incomingColorIds = new Set<string>(input.colors.filter((c) => c.id).map((c) => String(c.id!)));
 
-      // Handle removed colors safely
+      // Handle removed colors safely without breaking historical orders, carts, variants, or reservations
       for (const oldId of Array.from(existingColorIds)) {
         if (!incomingColorIds.has(oldId)) {
           const [orderRefs]: any = await conn.execute(
@@ -1244,8 +1244,16 @@ export async function updateProduct(
             "SELECT id FROM cart_items WHERE color_id = ? LIMIT 1",
             [oldId]
           );
-          if (orderRefs.length > 0 || cartRefs.length > 0) {
-            // Soft-deactivate to preserve historical integrity
+          const [variantRefs]: any = await conn.execute(
+            "SELECT id FROM product_variants WHERE color_id = ? LIMIT 1",
+            [oldId]
+          );
+          const [resRefs]: any = await conn.execute(
+            "SELECT id FROM stock_reservations WHERE color_id = ? LIMIT 1",
+            [oldId]
+          );
+          if (orderRefs.length > 0 || cartRefs.length > 0 || variantRefs.length > 0 || resRefs.length > 0) {
+            // Soft-deactivate to preserve historical integrity and dependent variants
             await conn.execute(
               "UPDATE product_colors SET is_active = 0, updated_at = NOW() WHERE id = ?",
               [oldId]
