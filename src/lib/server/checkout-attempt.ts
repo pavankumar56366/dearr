@@ -11,6 +11,7 @@ import {
 } from "./order";
 import { getApplicableDiscountForProduct, computeDiscountAmount } from "./discount";
 import { getStoreSettings } from "./settings";
+import { getShippingQuote } from "./shipping-quote";
 import {
   resolveAuthoritativeUnitPrice,
   resolveAuthoritativeEffectiveStock,
@@ -483,13 +484,20 @@ export async function createCheckoutAttemptFromCart(
     orderDiscountTotal = Math.round(orderDiscountTotal * 100) / 100;
 
     const storeSettings = await getStoreSettings();
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
+    const netSubtotal = Math.max(0, Math.round((orderSubtotal - orderDiscountTotal) * 100) / 100);
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
+
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
     const totalAmount = Math.max(
       0,
-      Math.round((orderSubtotal - orderDiscountTotal + shippingAmount) * 100) / 100
+      Math.round((netSubtotal + shippingAmount) * 100) / 100
     );
 
     const retentionUntil = new Date(
@@ -502,6 +510,8 @@ export async function createCheckoutAttemptFromCart(
       discountAmount: orderDiscountTotal,
       shippingAmount,
       totalAmount,
+      shippingRateSource: shippingQuote.rateSource,
+      shippingCourierName: shippingQuote.courierName,
       isCodEligible:
         preparedItems.length > 0 &&
         preparedItems.every((it) => it.codEnabled !== false),
@@ -816,13 +826,20 @@ export async function createBuyNowCheckoutAttempt(
     orderDiscountTotal = Math.round(orderDiscountTotal * 100) / 100;
 
     const storeSettings = await getStoreSettings();
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
+    const netSubtotal = Math.max(0, Math.round((orderSubtotal - orderDiscountTotal) * 100) / 100);
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
+
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
     const totalAmount = Math.max(
       0,
-      Math.round((orderSubtotal - orderDiscountTotal + shippingAmount) * 100) / 100
+      Math.round((netSubtotal + shippingAmount) * 100) / 100
     );
 
     const retentionUntil = new Date(
@@ -835,6 +852,8 @@ export async function createBuyNowCheckoutAttempt(
       discountAmount: orderDiscountTotal,
       shippingAmount,
       totalAmount,
+      shippingRateSource: shippingQuote.rateSource,
+      shippingCourierName: shippingQuote.courierName,
       isBuyNow: true,
       isCodEligible:
         preparedItems.length > 0 &&

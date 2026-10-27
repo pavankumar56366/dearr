@@ -37,6 +37,20 @@ export interface AdminSettings {
   codEnabled: boolean;
   prepaidEnabled: boolean;
 
+  // Logistics & Shipping Settings (Shiprocket & Courier Controls)
+  codMinimumFee: number;
+  codMaxOrderValue: number;
+  fallbackShippingFee: number;
+  shippingMarkupType: "fixed" | "percentage";
+  shippingMarkupValue: number;
+  shippingMarkupCap: number;
+  courierStrategy: "recommended" | "cheapest" | "fastest";
+  defaultPackageLength: number;
+  defaultPackageWidth: number;
+  defaultPackageHeight: number;
+  defaultPackageWeightKg: number;
+  dispatchTimeText: string;
+
   // Order Settings
   autoConfirmOrders: boolean;
   allowOrderCancellation: boolean;
@@ -115,6 +129,20 @@ export const DEFAULT_ADMIN_SETTINGS: AdminSettings = {
   defaultShippingFee: 50,
   codEnabled: false,
   prepaidEnabled: true,
+
+  // Logistics & Shipping Settings
+  codMinimumFee: 50,
+  codMaxOrderValue: 1500,
+  fallbackShippingFee: 50,
+  shippingMarkupType: "fixed",
+  shippingMarkupValue: 10,
+  shippingMarkupCap: 50,
+  courierStrategy: "recommended",
+  defaultPackageLength: 15,
+  defaultPackageWidth: 10,
+  defaultPackageHeight: 5,
+  defaultPackageWeightKg: 0.5,
+  dispatchTimeText: "Crafted & dispatched in 2–3 business days",
 
   // Order Settings
   autoConfirmOrders: false,

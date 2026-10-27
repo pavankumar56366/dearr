@@ -125,6 +125,66 @@ export async function updateStoreSettings(
     }
   }
 
+  // Logistics & Shipping Controls Validation
+  if (updates.codMinimumFee !== undefined && updates.codMinimumFee < 0) {
+    throw new Error("COD minimum fee cannot be negative");
+  }
+
+  if (updates.codMaxOrderValue !== undefined && updates.codMaxOrderValue < 0) {
+    throw new Error("Maximum COD order value cannot be negative");
+  }
+
+  if (updates.fallbackShippingFee !== undefined && updates.fallbackShippingFee < 0) {
+    throw new Error("Fallback shipping fee cannot be negative");
+  }
+
+  if (
+    updates.shippingMarkupType !== undefined &&
+    updates.shippingMarkupType !== "fixed" &&
+    updates.shippingMarkupType !== "percentage"
+  ) {
+    throw new Error("Shipping markup type must be either 'fixed' or 'percentage'");
+  }
+
+  if (updates.shippingMarkupValue !== undefined && updates.shippingMarkupValue < 0) {
+    throw new Error("Shipping markup value cannot be negative");
+  }
+
+  if (updates.shippingMarkupCap !== undefined && updates.shippingMarkupCap < 0) {
+    throw new Error("Shipping markup cap cannot be negative");
+  }
+
+  if (
+    updates.courierStrategy !== undefined &&
+    updates.courierStrategy !== "recommended" &&
+    updates.courierStrategy !== "cheapest" &&
+    updates.courierStrategy !== "fastest"
+  ) {
+    throw new Error("Courier selection strategy must be 'recommended', 'cheapest', or 'fastest'");
+  }
+
+  if (updates.defaultPackageLength !== undefined && updates.defaultPackageLength <= 0) {
+    throw new Error("Default package length must be greater than zero");
+  }
+
+  if (updates.defaultPackageWidth !== undefined && updates.defaultPackageWidth <= 0) {
+    throw new Error("Default package width must be greater than zero");
+  }
+
+  if (updates.defaultPackageHeight !== undefined && updates.defaultPackageHeight <= 0) {
+    throw new Error("Default package height must be greater than zero");
+  }
+
+  if (updates.defaultPackageWeightKg !== undefined && updates.defaultPackageWeightKg <= 0) {
+    throw new Error("Default package weight must be greater than zero kg");
+  }
+
+  if (updates.dispatchTimeText !== undefined) {
+    if (typeof updates.dispatchTimeText !== "string" || updates.dispatchTimeText.trim().length > 120) {
+      throw new Error("Dispatch time wording cannot exceed 120 characters");
+    }
+  }
+
   const nextSettings: AdminSettings = {
     ...current,
     ...updates,
@@ -141,6 +201,54 @@ export async function updateStoreSettings(
       updates.defaultShippingFee !== undefined
         ? Number(updates.defaultShippingFee)
         : current.defaultShippingFee,
+    codMinimumFee:
+      updates.codMinimumFee !== undefined
+        ? Number(updates.codMinimumFee)
+        : current.codMinimumFee ?? DEFAULT_ADMIN_SETTINGS.codMinimumFee,
+    codMaxOrderValue:
+      updates.codMaxOrderValue !== undefined
+        ? Number(updates.codMaxOrderValue)
+        : current.codMaxOrderValue ?? DEFAULT_ADMIN_SETTINGS.codMaxOrderValue,
+    fallbackShippingFee:
+      updates.fallbackShippingFee !== undefined
+        ? Number(updates.fallbackShippingFee)
+        : current.fallbackShippingFee ?? DEFAULT_ADMIN_SETTINGS.fallbackShippingFee,
+    shippingMarkupType:
+      updates.shippingMarkupType !== undefined
+        ? updates.shippingMarkupType
+        : current.shippingMarkupType ?? DEFAULT_ADMIN_SETTINGS.shippingMarkupType,
+    shippingMarkupValue:
+      updates.shippingMarkupValue !== undefined
+        ? Number(updates.shippingMarkupValue)
+        : current.shippingMarkupValue ?? DEFAULT_ADMIN_SETTINGS.shippingMarkupValue,
+    shippingMarkupCap:
+      updates.shippingMarkupCap !== undefined
+        ? Number(updates.shippingMarkupCap)
+        : current.shippingMarkupCap ?? DEFAULT_ADMIN_SETTINGS.shippingMarkupCap,
+    courierStrategy:
+      updates.courierStrategy !== undefined
+        ? updates.courierStrategy
+        : current.courierStrategy ?? DEFAULT_ADMIN_SETTINGS.courierStrategy,
+    defaultPackageLength:
+      updates.defaultPackageLength !== undefined
+        ? Number(updates.defaultPackageLength)
+        : current.defaultPackageLength ?? DEFAULT_ADMIN_SETTINGS.defaultPackageLength,
+    defaultPackageWidth:
+      updates.defaultPackageWidth !== undefined
+        ? Number(updates.defaultPackageWidth)
+        : current.defaultPackageWidth ?? DEFAULT_ADMIN_SETTINGS.defaultPackageWidth,
+    defaultPackageHeight:
+      updates.defaultPackageHeight !== undefined
+        ? Number(updates.defaultPackageHeight)
+        : current.defaultPackageHeight ?? DEFAULT_ADMIN_SETTINGS.defaultPackageHeight,
+    defaultPackageWeightKg:
+      updates.defaultPackageWeightKg !== undefined
+        ? Number(updates.defaultPackageWeightKg)
+        : current.defaultPackageWeightKg ?? DEFAULT_ADMIN_SETTINGS.defaultPackageWeightKg,
+    dispatchTimeText:
+      updates.dispatchTimeText !== undefined
+        ? updates.dispatchTimeText.trim()
+        : current.dispatchTimeText ?? DEFAULT_ADMIN_SETTINGS.dispatchTimeText,
     cancellationWindowHours:
       updates.cancellationWindowHours !== undefined
         ? Number(updates.cancellationWindowHours)

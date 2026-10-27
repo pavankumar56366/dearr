@@ -6,6 +6,7 @@ import {
   computeDiscountAmount,
 } from "./discount";
 import { getStoreSettings, checkRateLimit } from "./settings";
+import { getShippingQuote } from "./shipping-quote";
 import {
   resolveAuthoritativeUnitPrice,
   resolveAuthoritativeEffectiveStock,
@@ -638,13 +639,25 @@ export async function createOrderFromCart(
     orderDiscountTotal = roundToTwo(orderDiscountTotal);
 
     const storeSettings = await getStoreSettings();
+    const netSubtotal = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal));
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
 
-    // Feature #11: No minimum purchase/order value requirement
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
-    const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: isCod ? "cod" : "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    if (isCod && !shippingQuote.isCodEligible) {
+      throw new OrderValidationError(
+        shippingQuote.ineligibilityReason || "Cash on Delivery is not available for this order.",
+        400
+      );
+    }
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
+    const totalAmount = Math.max(0, roundToTwo(netSubtotal + shippingAmount));
 
     const addressEditDeadline = storeSettings.allowAddressChange
       ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)
@@ -970,11 +983,25 @@ export async function createOrderFromBuyNow(
     orderSubtotal = roundToTwo(orderSubtotal);
     orderDiscountTotal = roundToTwo(orderDiscountTotal);
 
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
-    const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
+    const netSubtotal = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal));
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
+
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: isCod ? "cod" : "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    if (isCod && !shippingQuote.isCodEligible) {
+      throw new OrderValidationError(
+        shippingQuote.ineligibilityReason || "Cash on Delivery is not available for this order.",
+        400
+      );
+    }
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
+    const totalAmount = Math.max(0, roundToTwo(netSubtotal + shippingAmount));
 
     const addressEditDeadline = storeSettings.allowAddressChange
       ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)

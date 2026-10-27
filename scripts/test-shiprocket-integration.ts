@@ -319,6 +319,91 @@ async function runTests() {
     );
 
     // -------------------------------------------------------------------------
+    // Test Group 7: Shipping Quote Engine (Task S-02)
+    // -------------------------------------------------------------------------
+    console.log("\n[Test Group 7: Shipping Quote Calculation Engine]");
+
+    const { getShippingQuote } = await import("../src/lib/server/shipping-quote");
+
+    // 7.1 Invalid PIN code validation
+    let pincodeThrew = false;
+    try {
+      await getShippingQuote({
+        deliveryPincode: "12345",
+        subtotal: 500,
+        paymentMethod: "prepaid",
+      });
+    } catch {
+      pincodeThrew = true;
+    }
+    assert(pincodeThrew, "getShippingQuote throws on invalid 5-digit PIN code");
+
+    // 7.2 Prepaid order reaching free shipping threshold (₹999) -> ₹0 shipping
+    const freePrepaidQuote = await getShippingQuote({
+      deliveryPincode: "560038",
+      subtotal: 1200,
+      paymentMethod: "prepaid",
+    });
+    assert(
+      freePrepaidQuote.finalCustomerShippingFee === 0 &&
+      freePrepaidQuote.rateSource === "free_threshold" &&
+      freePrepaidQuote.breakdown.isFreeShippingEligible === true,
+      "Prepaid order >= ₹999 gets 100% free shipping (₹0 charged)"
+    );
+
+    // 7.3 COD order reaching free shipping threshold (₹999) -> pays minimum COD fee (₹50)
+    const freeCodQuote = await getShippingQuote({
+      deliveryPincode: "560038",
+      subtotal: 1200,
+      paymentMethod: "cod",
+    });
+    assert(
+      freeCodQuote.finalCustomerShippingFee === 50 &&
+      freeCodQuote.codFeeAmount === 50 &&
+      freeCodQuote.rateSource === "cod_fee_only",
+      "COD order >= ₹999 waives courier fee but charges admin COD handling fee (₹50)"
+    );
+
+    // 7.4 Prepaid order below threshold -> pays fallback rate (₹50)
+    process.env.SHIPROCKET_ENABLED = "false";
+    const belowPrepaidQuote = await getShippingQuote({
+      deliveryPincode: "560038",
+      subtotal: 499,
+      paymentMethod: "prepaid",
+    });
+    assert(
+      belowPrepaidQuote.finalCustomerShippingFee === 50 &&
+      belowPrepaidQuote.baseCourierAmount === 50 &&
+      belowPrepaidQuote.codFeeAmount === 0,
+      "Prepaid order < ₹999 charges fallback rate (₹50)"
+    );
+
+    // 7.5 COD order below threshold -> pays fallback rate + COD fee (₹50 + ₹50 = ₹100)
+    const belowCodQuote = await getShippingQuote({
+      deliveryPincode: "560038",
+      subtotal: 499,
+      paymentMethod: "cod",
+    });
+    assert(
+      belowCodQuote.finalCustomerShippingFee === 100 &&
+      belowCodQuote.baseCourierAmount === 50 &&
+      belowCodQuote.codFeeAmount === 50,
+      "COD order < ₹999 charges fallback rate + COD handling fee (₹100 total)"
+    );
+
+    // 7.6 COD max order value cap (₹1500)
+    const overMaxCodQuote = await getShippingQuote({
+      deliveryPincode: "560038",
+      subtotal: 1800,
+      paymentMethod: "cod",
+    });
+    assert(
+      overMaxCodQuote.isCodEligible === false &&
+      overMaxCodQuote.ineligibilityReason !== undefined,
+      "COD order exceeding max order value (₹1500) is marked ineligible"
+    );
+
+    // -------------------------------------------------------------------------
     // Results
     // -------------------------------------------------------------------------
     console.log("\n=======================================================");
@@ -341,7 +426,11 @@ async function runTests() {
   }
 }
 
-runTests().catch((err) => {
-  console.error("Test execution failed:", err);
-  process.exit(1);
-});
+runTests()
+  .then(() => {
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error("Test execution failed:", err);
+    process.exit(1);
+  });
