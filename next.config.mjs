@@ -6,6 +6,13 @@ const __dirname = path.dirname(__filename);
 
 const isProd = process.env.NODE_ENV === "production";
 
+if (!process.env.TOKIO_WORKER_THREADS) {
+  process.env.TOKIO_WORKER_THREADS = "1";
+}
+if (!process.env.UV_THREADPOOL_SIZE) {
+  process.env.UV_THREADPOOL_SIZE = "4";
+}
+
 const securityHeaders = [
   {
     key: "X-Content-Type-Options",
@@ -53,6 +60,10 @@ const nextConfig = {
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920],
     imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+  },
+  experimental: {
+    cpus: 1,
+    workerThreads: false,
   },
   async headers() {
     return [
