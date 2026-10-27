@@ -235,6 +235,8 @@ export interface ShiprocketWebhookPayload {
     activity?: string;
     location?: string;
     status?: string;
+    "sr-status"?: string;
+    [key: string]: unknown;
   }>;
   etd?: string;
   delivered_date?: string;

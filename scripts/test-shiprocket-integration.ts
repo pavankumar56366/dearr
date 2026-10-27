@@ -404,8 +404,36 @@ async function runTests() {
     );
 
     // -------------------------------------------------------------------------
-    // Results
+    // Test Group 8: Customer Tracking & Scan Events (Task S-06)
     // -------------------------------------------------------------------------
+    console.log("\n[Test Group 8: Customer Tracking & Milestone Processing]");
+
+    // 8.1 In-transit sub-status mapping
+    const inTransitResult = mapShiprocketStatusToTracking("IN TRANSIT");
+    assert(
+      inTransitResult.stageId === "delivered" &&
+      inTransitResult.isDispatched === true &&
+      inTransitResult.isDelivered === false,
+      "Live IN TRANSIT status maps to customer stage with isDispatched=true"
+    );
+
+    // 8.2 Out for delivery sub-status mapping
+    const outForDeliveryResult = mapShiprocketStatusToTracking("OUT FOR DELIVERY");
+    assert(
+      outForDeliveryResult.stageId === "delivered" &&
+      outForDeliveryResult.badge === "Out for Delivery" &&
+      outForDeliveryResult.isDispatched === true,
+      "Live OUT FOR DELIVERY status maps with correct customer badge"
+    );
+
+    // 8.3 Delivered sub-status mapping
+    const deliveredResult = mapShiprocketStatusToTracking("DELIVERED");
+    assert(
+      deliveredResult.stageId === "delivered" &&
+      deliveredResult.isDelivered === true,
+      "Live DELIVERED status maps to customer stage with isDelivered=true"
+    );
+
     console.log("\n=======================================================");
     console.log(` Test Summary: ${testsPassed}/${testsRun} passed (${testsFailed} failed)`);
     console.log("=======================================================\n");

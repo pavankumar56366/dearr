@@ -173,6 +173,54 @@ export async function POST(request: NextRequest) {
       // Keep going if order_shipments table is not yet present
     }
 
+    // 7. Upsert individual tracking scan milestones into shipment_tracking_events
+    if (awbCode) {
+      try {
+        const rawScans =
+          Array.isArray(payload.scans) && payload.scans.length > 0
+            ? payload.scans
+            : [
+                {
+                  activity: currentStatus || "Shipment milestone update",
+                  location: payload.destination || null,
+                  date: new Date().toISOString(),
+                  "sr-status": currentStatus,
+                },
+              ];
+
+        for (const rawScan of rawScans) {
+          const scan = rawScan as Record<string, unknown>;
+          const activity = String(scan.activity || currentStatus || "Milestone update").slice(0, 255);
+          const location = scan.location ? String(scan.location).slice(0, 150) : null;
+          const parsedDate = scan.date ? new Date(String(scan.date)) : new Date();
+          const eventTimestamp = isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+          const rawSrStatus = scan["sr-status"] ?? scan.status ?? currentStatus;
+          const srStatus = rawSrStatus ? String(rawSrStatus).slice(0, 50) : null;
+
+          await query(
+            `INSERT INTO shipment_tracking_events
+               (id, order_id, awb_code, activity, location, event_timestamp, sr_status, raw_scan, created_at)
+             VALUES
+               (UUID(), ?, ?, ?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+               location = IFNULL(VALUES(location), location),
+               sr_status = IFNULL(VALUES(sr_status), sr_status)`,
+            [
+              orderId,
+              awbCode,
+              activity,
+              location,
+              eventTimestamp,
+              srStatus,
+              JSON.stringify(scan),
+            ]
+          );
+        }
+      } catch (err: any) {
+        console.warn("[Courier Webhook] Non-blocking scan event upsert notice:", err?.message);
+      }
+    }
+
     return NextResponse.json({
       ok: true,
       message: "Courier update event processed successfully",
