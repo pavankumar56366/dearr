@@ -93,6 +93,83 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   const [submitError, setSubmitError] = React.useState<string | null>(null);
   const [successBanner, setSuccessBanner] = React.useState<string | null>(null);
 
+  // Live Shipment Tracking state
+  const [trackingData, setTrackingData] = React.useState<{
+    awbCode: string | null;
+    courierName: string | null;
+    courierStatus: string | null;
+    etd: string | null;
+    trackingUrl: string | null;
+    lastActivity: string | null;
+    lastActivityAt?: string | null;
+    scanEvents: Array<{
+      id: string;
+      activity: string;
+      location: string | null;
+      timestamp: string;
+      status: string | null;
+    }>;
+  } | null>(null);
+  const [showAllScans, setShowAllScans] = React.useState(false);
+  const [isCopiedAwb, setIsCopiedAwb] = React.useState(false);
+  const [isRefreshingTracking, setIsRefreshingTracking] = React.useState(false);
+  const [trackingNotice, setTrackingNotice] = React.useState<string | null>(null);
+
+  const handleRefreshTracking = async () => {
+    try {
+      setIsRefreshingTracking(true);
+      setTrackingNotice(null);
+      const orderIdentifier = order.id || order.orderNumber;
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderIdentifier)}/tracking`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        if (data.tracking) {
+          setTrackingData(data.tracking);
+        }
+        if (data.fallback) {
+          setTrackingNotice(
+            `Shiprocket unreachable. Showing saved data from ${
+              data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : "earlier"
+            }.`
+          );
+        } else {
+          setTrackingNotice("Tracking refreshed successfully.");
+        }
+      } else if (res.status === 429) {
+        setTrackingNotice(data.error || "Tracking can only be refreshed once every 10 minutes.");
+      } else {
+        setTrackingNotice(data.error || "Failed to refresh tracking.");
+      }
+    } catch {
+      setTrackingNotice("Network error while refreshing tracking.");
+    } finally {
+      setIsRefreshingTracking(false);
+      setTimeout(() => setTrackingNotice(null), 8000);
+    }
+  };
+
+  React.useEffect(() => {
+    let isMounted = true;
+    async function fetchTracking() {
+      try {
+        const orderIdentifier = order.id || order.orderNumber;
+        const res = await fetch(`/api/orders/${encodeURIComponent(orderIdentifier)}/tracking`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.ok && data.tracking) {
+            setTrackingData(data.tracking);
+          }
+        }
+      } catch {}
+    }
+    fetchTracking();
+    return () => {
+      isMounted = false;
+    };
+  }, [order.id, order.orderNumber]);
+
   const fetchEligibility = React.useCallback(async () => {
     try {
       const orderIdentifier = order.id || order.orderNumber;
@@ -398,6 +475,135 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                 );
               })}
             </ol>
+
+            {/* Live Courier Details & Scan Milestones */}
+            {trackingData && (trackingData.awbCode || trackingData.scanEvents.length > 0) && (
+              <div className="mt-5 pt-4 border-t border-neutral-100 space-y-3">
+                <div className="p-3.5 rounded-xl bg-canvas border border-neutral-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <TruckIcon size={16} className="text-primary-dark shrink-0" />
+                      <span className="font-bold text-neutral-900">
+                        {trackingData.courierName || "Courier Partner"}
+                      </span>
+                      {trackingData.courierStatus && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-neutral-200 text-neutral-800">
+                          {trackingData.courierStatus}
+                        </span>
+                      )}
+                    </div>
+                    {trackingData.awbCode && (
+                      <div className="flex items-center gap-2 text-neutral-600 font-mono text-[11px]">
+                        <span>AWB: {trackingData.awbCode}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof navigator !== "undefined" && navigator.clipboard) {
+                              navigator.clipboard.writeText(trackingData.awbCode!);
+                              setIsCopiedAwb(true);
+                              setTimeout(() => setIsCopiedAwb(false), 2000);
+                            }
+                          }}
+                          className="text-neutral-500 hover:text-neutral-900 font-sans text-[10px] underline cursor-pointer"
+                        >
+                          {isCopiedAwb ? "Copied!" : "Copy"}
+                        </button>
+                      </div>
+                    )}
+                    {trackingData.etd && (
+                      <p className="text-[11px] text-neutral-500">
+                        Estimated Delivery: <strong className="text-neutral-800">{trackingData.etd}</strong>
+                      </p>
+                    )}
+                    {trackingData.lastActivityAt && (
+                      <p className="text-[10px] text-neutral-400">
+                        Last updated {new Date(trackingData.lastActivityAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
+                    {trackingNotice && (
+                      <p className="text-[11px] text-amber-800 bg-amber-50 px-2 py-1 rounded border border-amber-200 mt-1">
+                        {trackingNotice}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleRefreshTracking}
+                      disabled={isRefreshingTracking}
+                      data-testid="refresh-tracking-button"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 font-semibold text-neutral-800 text-[11px] transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
+                    >
+                      <span>{isRefreshingTracking ? "Refreshing..." : "↻ Refresh"}</span>
+                    </button>
+                    {trackingData.trackingUrl && (
+                      <a
+                        href={trackingData.trackingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 font-semibold text-neutral-800 text-[11px] transition-colors shrink-0"
+                      >
+                        <span>Carrier Tracking</span>
+                        <span aria-hidden="true">&rarr;</span>
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Granular Scan Milestones */}
+                {trackingData.scanEvents.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold text-neutral-800">
+                        Courier Scans &amp; Milestone History ({trackingData.scanEvents.length})
+                      </h3>
+                      {trackingData.scanEvents.length > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllScans(!showAllScans)}
+                          className="text-[11px] font-semibold text-primary-dark hover:underline cursor-pointer"
+                        >
+                          {showAllScans ? "Show Recent Scans" : `View All (${trackingData.scanEvents.length})`}
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      {(showAllScans
+                        ? trackingData.scanEvents
+                        : trackingData.scanEvents.slice(0, 3)
+                      ).map((scan, idx) => (
+                        <div
+                          key={scan.id || idx}
+                          className="p-2.5 rounded-xl border border-neutral-100 bg-neutral-50/80 text-xs flex items-start justify-between gap-3"
+                        >
+                          <div className="space-y-0.5 min-w-0">
+                            <p className="font-semibold text-neutral-900 truncate">
+                              {scan.activity}
+                            </p>
+                            {scan.location && (
+                              <p className="text-[11px] text-neutral-500 flex items-center gap-1">
+                                <MapPinIcon size={11} className="text-neutral-400 shrink-0" />
+                                <span>{scan.location}</span>
+                              </p>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-neutral-400 font-mono shrink-0">
+                            {new Date(scan.timestamp).toLocaleString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>

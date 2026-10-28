@@ -20,6 +20,8 @@ interface CheckoutSummaryProps {
   hasUnavailableItems: boolean;
   actionLabel?: string;
   shippingFee?: number;
+  codFee?: number;
+  courierName?: string;
   freeShippingThreshold?: number;
   totalPayable?: number;
   discount?: number;
@@ -37,6 +39,8 @@ export default function CheckoutSummary({
   hasUnavailableItems,
   actionLabel,
   shippingFee,
+  codFee,
+  courierName,
   freeShippingThreshold,
   totalPayable,
   discount = 0,
@@ -171,7 +175,7 @@ export default function CheckoutSummary({
         )}
 
         <div className="flex items-center justify-between text-neutral-600">
-          <span>Standard Shipping</span>
+          <span>{courierName ? `Delivery (${courierName})` : "Shipping & Delivery"}</span>
           {effectiveShipping === 0 ? (
             <span className="text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">
               Free Shipping
@@ -182,6 +186,15 @@ export default function CheckoutSummary({
             </span>
           )}
         </div>
+
+        {typeof codFee === "number" && codFee > 0 && (
+          <div className="flex items-center justify-between text-neutral-600">
+            <span>Cash on Delivery Handling</span>
+            <span className="text-xs font-bold text-amber-900 bg-amber-50 px-2 py-0.5 rounded font-mono">
+              +₹{codFee.toLocaleString("en-IN")}
+            </span>
+          </div>
+        )}
 
         {effectiveShipping > 0 && freeShippingThreshold && subtotal < freeShippingThreshold && (
           <p className="text-[11px] text-neutral-500 -mt-1">

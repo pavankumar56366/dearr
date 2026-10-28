@@ -13,11 +13,9 @@ import {
   getCheckoutAttemptById,
   CheckoutAttemptError,
 } from "@/lib/server/checkout-attempt";
-import {
-  getCustomerAddressById,
-  createCustomerAddress,
-} from "@/lib/server/address";
+import { getCustomerAddressById, createCustomerAddress } from "@/lib/server/address";
 import { getStoreSettings } from "@/lib/server/settings";
+import { getShippingQuote } from "@/lib/server/shipping-quote";
 
 export const dynamic = "force-dynamic";
 
@@ -108,10 +106,13 @@ export async function POST(request: NextRequest) {
       // Check if this is Buy Now vs Cart
       const isBuyNow = Boolean(body.isBuyNow && Array.isArray(body.items) && body.items.length > 0);
       if (isBuyNow) {
+        let buyNowSubtotal = 0;
+        const codFees: number[] = [];
+
         // Server-authoritative check for each product in Buy Now items
         for (const it of body.items) {
           const pRows = await query<any[]>(
-            "SELECT id, name, cod_enabled, is_active FROM products WHERE id = ? LIMIT 1",
+            "SELECT id, name, price, cod_enabled, cod_fee, is_active FROM products WHERE id = ? LIMIT 1",
             [it.productId]
           );
           if (!pRows || pRows.length === 0) {
@@ -131,6 +132,67 @@ export async function POST(request: NextRequest) {
                 error: "One or more items in your order are not eligible for Cash on Delivery. Online payment is required.",
               },
               { status: 400 }
+            );
+          }
+          if (p.cod_fee != null) codFees.push(Number(p.cod_fee));
+          buyNowSubtotal += Number(p.price || 0) * Number(it.quantity || 1);
+        }
+
+        const highestCodFee = codFees.length > 0 ? Math.max(...codFees) : undefined;
+        const shippingQuote = await getShippingQuote({
+          deliveryPincode: shippingData.shippingPostalCode,
+          subtotal: buyNowSubtotal,
+          paymentMethod: "cod",
+          productCodFeeOverride: highestCodFee,
+        });
+
+        if (!shippingQuote.serviceable) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "The delivery pincode is not serviceable by courier. Please change your delivery address.",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (!shippingQuote.isCodEligible) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                shippingQuote.ineligibilityReason ||
+                "Cash on Delivery is not available for this delivery pincode or order value. Online payment is required.",
+            },
+            { status: 400 }
+          );
+        }
+
+        const finalOrderTotal = buyNowSubtotal + shippingQuote.finalCustomerShippingFee;
+        if (storeSettings.codMaxOrderValue && finalOrderTotal > storeSettings.codMaxOrderValue) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `Order total of ₹${finalOrderTotal} exceeds the maximum Cash on Delivery limit of ₹${storeSettings.codMaxOrderValue}. Online payment is required.`,
+            },
+            { status: 400 }
+          );
+        }
+
+        if (body.expectedShippingFee !== undefined && body.expectedShippingFee !== null) {
+          if (Number(body.expectedShippingFee) !== shippingQuote.finalCustomerShippingFee) {
+            console.error(`[API /orders 409 BuyNow] body.expectedShippingFee=${body.expectedShippingFee} (${typeof body.expectedShippingFee}) vs shippingQuote=${shippingQuote.finalCustomerShippingFee}`);
+            return NextResponse.json(
+              {
+                ok: false,
+                code: "SHIPPING_PRICE_CHANGED",
+                error: "shipping price changed",
+                message: "Shipping fee has changed since you reviewed your order. Please review the updated total and confirm.",
+                newShippingFee: shippingQuote.finalCustomerShippingFee,
+                newTotal: finalOrderTotal,
+                quote: shippingQuote,
+              },
+              { status: 409 }
             );
           }
         }
@@ -164,10 +226,11 @@ export async function POST(request: NextRequest) {
       } else {
         // Cart Checkout: query user's active cart joined with products to verify COD eligibility
         const activeItems = await query<any[]>(
-          `SELECT p.id, p.name, p.cod_enabled
+          `SELECT p.id, p.name, p.cod_enabled, p.cod_fee, ci.quantity, COALESCE(pv.price, p.price) as unit_price
            FROM cart_items ci
            INNER JOIN carts c ON ci.cart_id = c.id
            INNER JOIN products p ON ci.product_id = p.id
+           LEFT JOIN product_variants pv ON ci.variant_id = pv.id
            WHERE c.user_id = ? AND c.status = 'active'`,
           [user.id]
         );
@@ -190,6 +253,74 @@ export async function POST(request: NextRequest) {
             },
             { status: 400 }
           );
+        }
+
+        const cartSubtotal = activeItems.reduce(
+          (sum, it) => sum + Number(it.unit_price || 0) * Number(it.quantity || 1),
+          0
+        );
+        const codFees = activeItems
+          .map((p) => p.cod_fee)
+          .filter((f) => f != null)
+          .map((f) => Number(f));
+        const highestCodFee = codFees.length > 0 ? Math.max(...codFees) : undefined;
+
+        const shippingQuote = await getShippingQuote({
+          deliveryPincode: shippingData.shippingPostalCode,
+          subtotal: cartSubtotal,
+          paymentMethod: "cod",
+          productCodFeeOverride: highestCodFee,
+        });
+
+        if (!shippingQuote.serviceable) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: "The delivery pincode is not serviceable by courier. Please change your delivery address.",
+            },
+            { status: 400 }
+          );
+        }
+
+        if (!shippingQuote.isCodEligible) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                shippingQuote.ineligibilityReason ||
+                "Cash on Delivery is not available for this delivery pincode or order value. Online payment is required.",
+            },
+            { status: 400 }
+          );
+        }
+
+        const finalOrderTotal = cartSubtotal + shippingQuote.finalCustomerShippingFee;
+        if (storeSettings.codMaxOrderValue && finalOrderTotal > storeSettings.codMaxOrderValue) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `Order total of ₹${finalOrderTotal} exceeds the maximum Cash on Delivery limit of ₹${storeSettings.codMaxOrderValue}. Online payment is required.`,
+            },
+            { status: 400 }
+          );
+        }
+
+        if (body.expectedShippingFee !== undefined && body.expectedShippingFee !== null) {
+          if (Number(body.expectedShippingFee) !== shippingQuote.finalCustomerShippingFee) {
+            console.error(`[API /orders 409 Cart] body.expectedShippingFee=${body.expectedShippingFee} (${typeof body.expectedShippingFee}) vs shippingQuote=${shippingQuote.finalCustomerShippingFee}`);
+            return NextResponse.json(
+              {
+                ok: false,
+                code: "SHIPPING_PRICE_CHANGED",
+                error: "shipping price changed",
+                message: "Shipping fee has changed since you reviewed your cart. Please review the updated total and confirm.",
+                newShippingFee: shippingQuote.finalCustomerShippingFee,
+                newTotal: finalOrderTotal,
+                quote: shippingQuote,
+              },
+              { status: 409 }
+            );
+          }
         }
 
         const order = await createOrderFromCart(
@@ -244,6 +375,25 @@ export async function POST(request: NextRequest) {
       attempt = await createBuyNowCheckoutAttempt(user.id, shippingData, body.items);
     } else if (!attempt) {
       attempt = await createCheckoutAttemptFromCart(user.id, shippingData);
+    }
+
+    // 409 Check for Prepaid Online Checkout: never silently charge a different shipping amount
+    if (body.expectedShippingFee !== undefined && body.expectedShippingFee !== null) {
+      const attemptShipping = Number(attempt.checkoutData?.shippingAmount || 0);
+      if (Number(body.expectedShippingFee) !== attemptShipping) {
+        console.error(`[API /orders 409 PrepaidAttempt] body.expectedShippingFee=${body.expectedShippingFee} (${typeof body.expectedShippingFee}) vs attemptShipping=${attemptShipping}`);
+        return NextResponse.json(
+          {
+            ok: false,
+            code: "SHIPPING_PRICE_CHANGED",
+            error: "shipping price changed",
+            message: "Shipping fee has changed since you reviewed your checkout. Please review the updated total and confirm.",
+            newShippingFee: attemptShipping,
+            newTotal: attempt.amount,
+          },
+          { status: 409 }
+        );
+      }
     }
 
     return NextResponse.json(

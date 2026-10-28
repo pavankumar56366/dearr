@@ -159,11 +159,26 @@ export default function CheckoutPageClient() {
     freeShippingThreshold: number;
     defaultShippingFee: number;
     codEnabled?: boolean;
+    codMaxOrderValue?: number;
+    codMinimumFee?: number;
     recoverySheetEnabled?: boolean;
     alternativesEnabled?: boolean;
     feedbackEnabled?: boolean;
     feedbackReasons?: string[];
-  }>({ freeShippingThreshold: 999, defaultShippingFee: 50 });
+  }>({ freeShippingThreshold: 0, defaultShippingFee: 50, codMaxOrderValue: 1500, codMinimumFee: 50 });
+
+  const [shippingQuote, setShippingQuote] = useState<{
+    serviceable: boolean;
+    finalCustomerShippingFee: number;
+    baseCourierAmount: number;
+    codFeeAmount: number;
+    markupAmount: number;
+    rateSource: string;
+    courierName?: string;
+    estimatedDeliveryText?: string;
+    isCodEligible?: boolean;
+    ineligibilityReason?: string;
+  } | null>(null);
 
   // Recovery sheet state
   const [showRecoverySheet, setShowRecoverySheet] = useState(false);
@@ -226,9 +241,11 @@ export default function CheckoutPageClient() {
           const data = await res.json();
           if (isMounted && data.ok && data.settings) {
             setStoreSettings({
-              freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 999),
+              freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 0),
               defaultShippingFee: Number(data.settings.defaultShippingFee ?? 50),
               codEnabled: Boolean(data.settings.codEnabled),
+              codMaxOrderValue: Number(data.settings.codMaxOrderValue ?? 1500),
+              codMinimumFee: Number(data.settings.codMinimumFee ?? 50),
               recoverySheetEnabled: data.settings.recoverySheetEnabled !== false,
               alternativesEnabled: data.settings.alternativesEnabled !== false,
               feedbackEnabled: data.settings.feedbackEnabled !== false,
@@ -278,9 +295,46 @@ export default function CheckoutPageClient() {
   const activeTotalCount = intentData
     ? (intentData.items || []).reduce((count: number, it: any) => count + it.quantity, 0)
     : totalCount;
+
+  // Real-time server quote fetch based on delivery PIN code & payment method
+  useEffect(() => {
+    const pincode = (address.postalCode || "").trim().replace(/\D/g, "");
+    if (pincode.length !== 6 || !/^[1-9][0-9]{5}$/.test(pincode)) {
+      setShippingQuote(null);
+      return;
+    }
+
+    let isCurrent = true;
+    const netAmount = Math.max(0, activeSubtotal - activeDiscount);
+    fetch("/api/shipping/quote", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deliveryPincode: pincode,
+        paymentMethod,
+        subtotal: netAmount,
+      }),
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!isCurrent) return;
+        if (data.ok && data.quote) {
+          setShippingQuote(data.quote);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [address.postalCode, paymentMethod, activeSubtotal, activeDiscount]);
+
   const activeShippingFee = intentData
     ? intentData.shippingAmount
-    : (activeSubtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee);
+    : shippingQuote
+    ? shippingQuote.finalCustomerShippingFee
+    : (paymentMethod !== "cod" && activeSubtotal >= storeSettings.freeShippingThreshold ? 0 : storeSettings.defaultShippingFee);
+
   const activeTotalPayable = intentData
     ? intentData.totalAmount
     : Math.max(0, activeSubtotal - activeDiscount + activeShippingFee);
@@ -296,7 +350,14 @@ export default function CheckoutPageClient() {
     return items.length > 0 && items.every((it) => it.codEnabled !== false);
   }, [intentData, items]);
 
-  const isCodAvailable = isCodMasterEnabled && areItemsCodEligible;
+  const maxCodLimit = storeSettings.codMaxOrderValue ?? 1500;
+  const exceedsCodMax = (activeSubtotal - activeDiscount) > maxCodLimit;
+
+  const isCodAvailable =
+    isCodMasterEnabled &&
+    areItemsCodEligible &&
+    !exceedsCodMax &&
+    (shippingQuote ? shippingQuote.isCodEligible !== false : true);
 
   const codUnavailableReason = useMemo(() => {
     if (!isCodMasterEnabled) {
@@ -305,8 +366,14 @@ export default function CheckoutPageClient() {
     if (!areItemsCodEligible) {
       return "One or more items in your cart are not eligible for Cash on Delivery. Online payment is required.";
     }
+    if (exceedsCodMax) {
+      return `Cash on Delivery is limited to orders up to ₹${maxCodLimit.toLocaleString("en-IN")}. Please select online payment.`;
+    }
+    if (shippingQuote && shippingQuote.isCodEligible === false) {
+      return shippingQuote.ineligibilityReason || "Cash on Delivery is not available for this delivery pincode.";
+    }
     return undefined;
-  }, [isCodMasterEnabled, areItemsCodEligible]);
+  }, [isCodMasterEnabled, areItemsCodEligible, exceedsCodMax, maxCodLimit, shippingQuote]);
 
   useEffect(() => {
     if (paymentMethod === "cod" && !isCodAvailable) {
@@ -490,6 +557,12 @@ export default function CheckoutPageClient() {
       return;
     }
 
+    if (shippingQuote && shippingQuote.serviceable === false) {
+      setAlertNotice("Delivery is not available to this pincode. Please change your delivery address to proceed.");
+      setCurrentStep("delivery");
+      return;
+    }
+
     // 4. Server-authoritative Order API call
     setIsProcessing(true);
 
@@ -498,6 +571,7 @@ export default function CheckoutPageClient() {
         const currentAttempt = activeAttemptId || intentId || undefined;
         const orderPayload: any = {
           paymentMethod,
+          expectedShippingFee: activeShippingFee,
           ...(selectedAddressId !== "new"
             ? { addressId: selectedAddressId }
             : {
@@ -821,6 +895,37 @@ export default function CheckoutPageClient() {
           return;
         }
 
+        // If 409 Shipping price changed
+        if (res.status === 409 && (data.code === "SHIPPING_PRICE_CHANGED" || data.error === "shipping price changed")) {
+          setIsProcessing(false);
+          if (typeof data.newShippingFee === "number") {
+            setShippingQuote((prev) =>
+              prev
+                ? { ...prev, finalCustomerShippingFee: data.newShippingFee }
+                : {
+                    serviceable: true,
+                    finalCustomerShippingFee: data.newShippingFee,
+                    baseCourierAmount: data.newShippingFee,
+                    codFeeAmount: 0,
+                    markupAmount: 0,
+                    rateSource: "updated",
+                  }
+            );
+          }
+          setAlertNotice(
+            `Shipping rate has changed to ₹${data.newShippingFee}. Your new order total is ₹${data.newTotal}. Please review and click Place Order to confirm.`
+          );
+          return;
+        }
+
+        // Unserviceable pincode error from server
+        if (!res.ok && data.error && /unserviceable|not available to pincode|not serviceable/i.test(data.error)) {
+          setIsProcessing(false);
+          setAlertNotice(`${data.error} Please change your delivery address to proceed.`);
+          setCurrentStep("delivery");
+          return;
+        }
+
         // If guest/unauthenticated (401), redirect to login with cart preserved
         if (res.status === 401) {
           setIsProcessing(false);
@@ -850,6 +955,9 @@ export default function CheckoutPageClient() {
     router,
     activeAttemptId,
     intentId,
+    intentData,
+    activeShippingFee,
+    shippingQuote,
   ]);
 
   // Reset to delivery step
@@ -1055,6 +1163,7 @@ export default function CheckoutPageClient() {
                   onSelectMethod={setPaymentMethod}
                   codAvailable={isCodAvailable}
                   codUnavailableReason={codUnavailableReason}
+                  codFee={shippingQuote?.codFeeAmount || 0}
                 />
               </div>
             )}
@@ -1073,6 +1182,8 @@ export default function CheckoutPageClient() {
               isAddressValid={isAddressValidated}
               hasUnavailableItems={hasUnavailableItems}
               shippingFee={activeShippingFee}
+              codFee={shippingQuote?.codFeeAmount || 0}
+              courierName={shippingQuote?.courierName}
               freeShippingThreshold={storeSettings.freeShippingThreshold}
               totalPayable={activeTotalPayable}
               discount={activeDiscount}

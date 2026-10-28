@@ -46,6 +46,54 @@ export default function AddressForm({
   const hasSavedAddresses = savedAddresses.length > 0;
   const isEnteringNewAddress = !hasSavedAddresses || selectedAddressId === "new";
 
+  const [pincodeStatus, setPincodeStatus] = React.useState<{
+    loading: boolean;
+    serviceable?: boolean;
+    message?: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const code = (values.postalCode || "").trim();
+    if (code.length === 6 && /^[1-9][0-9]{5}$/.test(code)) {
+      let isCurrent = true;
+      setPincodeStatus({ loading: true });
+      fetch(`/api/shipping/serviceability?pincode=${encodeURIComponent(code)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (!isCurrent) return;
+          if (data.ok && data.serviceable) {
+            const etd = data.availableCouriers?.[0]?.etd || data.estimatedDeliveryText || "3–5 days";
+            const courier = data.recommendedCourier || "Express Delivery";
+            setPincodeStatus({
+              loading: false,
+              serviceable: true,
+              message: `Delivery available via ${courier} (Est. ${etd})`,
+            });
+          } else {
+            setPincodeStatus({
+              loading: false,
+              serviceable: false,
+              message: "Standard delivery available",
+            });
+          }
+        })
+        .catch(() => {
+          if (isCurrent) {
+            setPincodeStatus({
+              loading: false,
+              serviceable: true,
+              message: "Domestic delivery available across India",
+            });
+          }
+        });
+      return () => {
+        isCurrent = false;
+      };
+    } else {
+      setPincodeStatus(null);
+    }
+  }, [values.postalCode]);
+
   return (
     <section
       aria-labelledby="delivery-details-heading"
@@ -467,6 +515,19 @@ export default function AddressForm({
                     <span>{errors.postalCode}</span>
                   </p>
                 )}
+                {pincodeStatus?.loading && (
+                  <p className="text-[11px] text-neutral-500 flex items-center gap-1 mt-1">
+                    <span className="inline-block w-2.5 h-2.5 border-2 border-neutral-400 border-t-neutral-800 rounded-full animate-spin" />
+                    <span>Checking courier serviceability...</span>
+                  </p>
+                )}
+                {!pincodeStatus?.loading && pincodeStatus?.serviceable && !errors.postalCode && (
+                  <p className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-1">
+                    <CheckIcon size={12} className="shrink-0" />
+                    <span>{pincodeStatus.message}</span>
+                  </p>
+                )}
+
               </div>
             </div>
 

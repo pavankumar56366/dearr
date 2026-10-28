@@ -54,6 +54,20 @@ export function AdminSettingsPage() {
   // Modals state
   const [showResetModal, setShowResetModal] = useState(false);
   const [showDiscardModal, setShowDiscardModal] = useState(false);
+  const [previewBaseRate, setPreviewBaseRate] = useState<number>(50);
+
+  const previewMarkup = useMemo(() => {
+    const type = formData.shippingMarkupType || "fixed";
+    const val = Number(formData.shippingMarkupValue ?? 10);
+    const cap = Number(formData.shippingMarkupCap ?? 50);
+    let rawMarkup = type === "percentage" ? (previewBaseRate * val) / 100 : val;
+    if (cap > 0) rawMarkup = Math.min(rawMarkup, cap);
+    return Math.round(rawMarkup * 100) / 100;
+  }, [formData.shippingMarkupType, formData.shippingMarkupValue, formData.shippingMarkupCap, previewBaseRate]);
+
+  const previewFinalPrice = useMemo(() => {
+    return Math.round((previewBaseRate + previewMarkup) * 100) / 100;
+  }, [previewBaseRate, previewMarkup]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -775,6 +789,377 @@ export function AdminSettingsPage() {
               (v) => updateField("prepaidEnabled", v),
               "toggle-prepaidEnabled"
             )}
+          </div>
+        </div>
+
+        {/* ====================================================================
+            SECTION C.2 — LOGISTICS & LIVE COURIER CONTROLS (SHIPROCKET)
+            ==================================================================== */}
+        <div className="p-6 rounded-2xl bg-surface border border-neutral-200/80 shadow-2xs space-y-5">
+          <div className="border-b border-neutral-100 pb-3 flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-bold text-neutral-900 flex items-center gap-2">
+                <PackageIcon size={16} className="text-primary" />
+                <span>Section C.2 — Logistics &amp; Live Courier Controls</span>
+              </h2>
+              <p className="text-xs text-neutral-500 mt-0.5">
+                Shiprocket live rate routing, cash on delivery parameters, shipping markups, and default parcel dimensions.
+              </p>
+            </div>
+          </div>
+
+          {/* COD Rules & Caps */}
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+              Cash on Delivery (COD) Rules
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="codMinimumFee"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Minimum COD Handling Fee (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                    ₹
+                  </span>
+                  <input
+                    id="codMinimumFee"
+                    type="number"
+                    min={0}
+                    value={formData.codMinimumFee ?? 50}
+                    onChange={(e) =>
+                      updateField("codMinimumFee", Math.max(0, Number(e.target.value)))
+                    }
+                    className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Mandatory handling fee charged to COD buyers. (Prepaid orders meeting the threshold get 100% free delivery).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="codMaxOrderValue"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Maximum COD Order Value Cap (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                    ₹
+                  </span>
+                  <input
+                    id="codMaxOrderValue"
+                    type="number"
+                    min={0}
+                    value={formData.codMaxOrderValue ?? 1500}
+                    onChange={(e) =>
+                      updateField("codMaxOrderValue", Math.max(0, Number(e.target.value)))
+                    }
+                    className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Orders exceeding this value require online prepaid payment to prevent RTO courier fraud.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Courier Strategy & Markups */}
+          <div className="space-y-3 pt-3 border-t border-neutral-100">
+            <h3 className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+              Courier Selection Strategy &amp; Pricing Markup
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="courierStrategy"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Carrier Routing Strategy
+                </label>
+                <select
+                  id="courierStrategy"
+                  value={formData.courierStrategy || "recommended"}
+                  onChange={(e) =>
+                    updateField(
+                      "courierStrategy",
+                      e.target.value as "recommended" | "cheapest" | "fastest"
+                    )
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary cursor-pointer"
+                >
+                  <option value="recommended">Shiprocket Smart / AI (Recommended)</option>
+                  <option value="cheapest">Cheapest Rate (Lowest Freight)</option>
+                  <option value="fastest">Fastest ETD (Quickest Delivery)</option>
+                </select>
+                <p className="text-[11px] text-neutral-500">
+                  Algorithm used to select live carrier rates.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="shippingMarkupType"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Shipping Markup Type
+                </label>
+                <select
+                  id="shippingMarkupType"
+                  value={formData.shippingMarkupType || "fixed"}
+                  onChange={(e) =>
+                    updateField(
+                      "shippingMarkupType",
+                      e.target.value as "fixed" | "percentage"
+                    )
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary cursor-pointer"
+                >
+                  <option value="fixed">Fixed Flat Markup (₹)</option>
+                  <option value="percentage">Percentage Margin (%)</option>
+                </select>
+                <p className="text-[11px] text-neutral-500">
+                  How packaging &amp; handling margin is computed.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="shippingMarkupValue"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Markup Value {formData.shippingMarkupType === "percentage" ? "(%)" : "(₹)"}
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                    {formData.shippingMarkupType === "percentage" ? "%" : "₹"}
+                  </span>
+                  <input
+                    id="shippingMarkupValue"
+                    type="number"
+                    min={0}
+                    value={formData.shippingMarkupValue ?? 10}
+                    onChange={(e) =>
+                      updateField("shippingMarkupValue", Math.max(0, Number(e.target.value)))
+                    }
+                    className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Added on top of live courier quote (Default: ₹10).
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="shippingMarkupCap"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Maximum Markup Cap (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                    ₹
+                  </span>
+                  <input
+                    id="shippingMarkupCap"
+                    type="number"
+                    min={0}
+                    value={formData.shippingMarkupCap ?? 50}
+                    onChange={(e) =>
+                      updateField("shippingMarkupCap", Math.max(0, Number(e.target.value)))
+                    }
+                    className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Upper ceiling cap for percentage markups to prevent overcharging.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="fallbackShippingFee"
+                  className="block text-xs font-bold text-neutral-800"
+                >
+                  Fallback Shipping Fee (₹)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                    ₹
+                  </span>
+                  <input
+                    id="fallbackShippingFee"
+                    type="number"
+                    min={0}
+                    value={formData.fallbackShippingFee ?? 50}
+                    onChange={(e) =>
+                      updateField("fallbackShippingFee", Math.max(0, Number(e.target.value)))
+                    }
+                    className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
+                <p className="text-[11px] text-neutral-500">
+                  Charged if Shiprocket live rate API is unreachable or integration is offline.
+                </p>
+              </div>
+            </div>
+
+            {/* Interactive Admin Pricing Preview (D1 requirement) */}
+            <div className="p-4 rounded-xl bg-canvas border border-neutral-200/80 space-y-3" data-testid="shipping-pricing-preview">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-neutral-800 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>📐</span> Shipping Pricing Simulator (Preview)
+                </span>
+                <span className="text-[10px] font-bold text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full">
+                  Live Calculation
+                </span>
+              </div>
+              <p className="text-[11px] text-neutral-500">
+                Preview how your markup settings affect customer shipping rates: <strong>Base Rate + Markup = Final Price</strong>.
+              </p>
+              <div className="flex flex-wrap items-center gap-4 text-xs pt-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-500 font-medium">Sample Base Rate:</span>
+                  <div className="relative w-24">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">₹</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={previewBaseRate}
+                      onChange={(e) => setPreviewBaseRate(Math.max(0, Number(e.target.value)))}
+                      aria-label="Sample Base Rate"
+                      data-testid="preview-base-rate-input"
+                      className="w-full h-8 pl-6 pr-2 rounded-lg border border-neutral-300 text-xs text-neutral-900 font-mono bg-white"
+                    />
+                  </div>
+                </div>
+                <div className="text-neutral-400 font-bold">+</div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-neutral-500 font-medium">Markup ({formData.shippingMarkupType === "percentage" ? `${formData.shippingMarkupValue}%` : "Fixed"}):</span>
+                  <span className="font-mono font-bold text-neutral-900" data-testid="preview-markup-amount">₹{previewMarkup.toFixed(2)}</span>
+                </div>
+                <div className="text-neutral-400 font-bold">=</div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
+                  <span className="text-emerald-900 font-bold">Final Customer Price:</span>
+                  <span className="font-mono font-black text-sm text-emerald-950" data-testid="preview-final-price">₹{previewFinalPrice.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Default Parcel Dimensions */}
+          <div className="space-y-3 pt-3 border-t border-neutral-100">
+            <h3 className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+              Default Parcel Dimensions &amp; Volumetric Weight
+            </h3>
+            <p className="text-[11px] text-neutral-500">
+              Used by Shiprocket rate calculator when products do not specify individual package sizes.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label
+                  htmlFor="defaultPackageLength"
+                  className="block text-[11px] font-semibold text-neutral-700"
+                >
+                  Length (cm)
+                </label>
+                <input
+                  id="defaultPackageLength"
+                  type="number"
+                  min={1}
+                  value={formData.defaultPackageLength ?? 15}
+                  onChange={(e) =>
+                    updateField("defaultPackageLength", Math.max(1, Number(e.target.value)))
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label
+                  htmlFor="defaultPackageWidth"
+                  className="block text-[11px] font-semibold text-neutral-700"
+                >
+                  Width (cm)
+                </label>
+                <input
+                  id="defaultPackageWidth"
+                  type="number"
+                  min={1}
+                  value={formData.defaultPackageWidth ?? 10}
+                  onChange={(e) =>
+                    updateField("defaultPackageWidth", Math.max(1, Number(e.target.value)))
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label
+                  htmlFor="defaultPackageHeight"
+                  className="block text-[11px] font-semibold text-neutral-700"
+                >
+                  Height (cm)
+                </label>
+                <input
+                  id="defaultPackageHeight"
+                  type="number"
+                  min={1}
+                  value={formData.defaultPackageHeight ?? 5}
+                  onChange={(e) =>
+                    updateField("defaultPackageHeight", Math.max(1, Number(e.target.value)))
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label
+                  htmlFor="defaultPackageWeightKg"
+                  className="block text-[11px] font-semibold text-neutral-700"
+                >
+                  Weight (kg)
+                </label>
+                <input
+                  id="defaultPackageWeightKg"
+                  type="number"
+                  step="0.1"
+                  min={0.1}
+                  value={formData.defaultPackageWeightKg ?? 0.5}
+                  onChange={(e) =>
+                    updateField("defaultPackageWeightKg", Math.max(0.1, Number(e.target.value)))
+                  }
+                  className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Default Dispatch Timeline Wording */}
+          <div className="space-y-2 pt-3 border-t border-neutral-100">
+            <h3 className="text-xs font-bold text-neutral-800 uppercase tracking-wider">
+              Default Dispatch Timeline Wording
+            </h3>
+            <p className="text-[11px] text-neutral-500">
+              Customer-facing estimated dispatch wording shown on product pages and pincode check when no custom product wording is provided.
+            </p>
+            <input
+              id="dispatchTimeText"
+              type="text"
+              value={formData.dispatchTimeText || "Crafted & dispatched in 2–3 business days"}
+              onChange={(e) => updateField("dispatchTimeText", e.target.value)}
+              className="w-full h-10 px-3.5 rounded-xl border border-neutral-200 bg-canvas text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+              placeholder="Crafted &amp; dispatched in 2–3 business days"
+            />
           </div>
         </div>
 

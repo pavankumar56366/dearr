@@ -70,6 +70,9 @@ export interface Product {
   isActive: boolean;
   hasColors: boolean;
   codEnabled: boolean;
+  codFee?: number | null;
+  dispatchLeadDays?: number;
+  dispatchTimelineText?: string | null;
   image?: string;
   images: ProductImage[];
   variants: ProductVariant[];
@@ -122,6 +125,9 @@ export interface CreateProductInput {
   isActive?: boolean;
   hasColors?: boolean;
   codEnabled?: boolean;
+  codFee?: number | null;
+  dispatchLeadDays?: number;
+  dispatchTimelineText?: string | null;
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
@@ -148,6 +154,9 @@ export interface UpdateProductInput {
   isActive?: boolean;
   hasColors?: boolean;
   codEnabled?: boolean;
+  codFee?: number | null;
+  dispatchLeadDays?: number;
+  dispatchTimelineText?: string | null;
   images?: CreateProductImageInput[];
   variants?: Array<{
     id?: string;
@@ -380,6 +389,9 @@ function toProduct(
     isActive: Boolean(row.is_active),
     hasColors,
     codEnabled: Boolean(row.cod_enabled !== undefined && row.cod_enabled !== null ? row.cod_enabled : 1),
+    codFee: row.cod_fee !== null && row.cod_fee !== undefined ? Number(row.cod_fee) : null,
+    dispatchLeadDays: Number(row.dispatch_lead_days ?? 2),
+    dispatchTimelineText: row.dispatch_timeline_text ?? null,
     image: primaryImageUrl,
     images,
     variants,
@@ -1004,13 +1016,17 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
 
     const hasColors = Boolean(input.hasColors);
     const codEnabled = input.codEnabled !== undefined ? Boolean(input.codEnabled) : true;
+    const codFee = input.codFee !== undefined && input.codFee !== null ? Number(input.codFee) : null;
+    const dispatchLeadDays = input.dispatchLeadDays !== undefined ? Number(input.dispatchLeadDays) : 2;
+    const dispatchTimelineText = input.dispatchTimelineText?.trim() || null;
 
     // Insert Product row
     const insertProductSql = `
       INSERT INTO products (
         id, category_id, name, slug, description, price, compare_at_price,
-        stock_quantity, is_featured, is_active, has_colors, cod_enabled
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        stock_quantity, is_featured, is_active, has_colors, cod_enabled,
+        cod_fee, dispatch_lead_days, dispatch_timeline_text
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     await conn.execute(insertProductSql, [
       id,
@@ -1025,6 +1041,9 @@ export async function createProduct(input: CreateProductInput): Promise<Product>
       isActive ? 1 : 0,
       hasColors ? 1 : 0,
       codEnabled ? 1 : 0,
+      codFee,
+      dispatchLeadDays,
+      dispatchTimelineText,
     ]);
 
     // Insert Colors if provided and hasColors is enabled
@@ -1363,6 +1382,21 @@ export async function updateProduct(
     if (input.codEnabled !== undefined) {
       fields.push("cod_enabled = ?");
       values.push(input.codEnabled ? 1 : 0);
+    }
+
+    if (input.codFee !== undefined) {
+      fields.push("cod_fee = ?");
+      values.push(input.codFee !== null ? Number(input.codFee) : null);
+    }
+
+    if (input.dispatchLeadDays !== undefined) {
+      fields.push("dispatch_lead_days = ?");
+      values.push(Number(input.dispatchLeadDays));
+    }
+
+    if (input.dispatchTimelineText !== undefined) {
+      fields.push("dispatch_timeline_text = ?");
+      values.push(input.dispatchTimelineText?.trim() || null);
     }
 
     if (fields.length > 0) {

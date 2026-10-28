@@ -65,6 +65,11 @@ export interface AdminOrder {
   paymentStatus: PaymentStatus;
   orderStatus: OrderStatus;
   paymentMethod?: string;
+  shippingBaseAmount?: number;
+  shippingMarkupAmount?: number;
+  shippingCourierName?: string | null;
+  codFeeAmount?: number;
+  codCollectedAt?: string | null;
   shippingAddress: ShippingAddress;
   createdAt: string; // ISO string
   updatedAt: string; // ISO string

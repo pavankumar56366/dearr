@@ -70,6 +70,7 @@ async function runL08AdminVerification() {
   const cleanupProductIds: string[] = [];
   const cleanupCategoryIds: string[] = [];
   const cleanupDiscountIds: string[] = [];
+  const cleanupOrderIds: string[] = [];
 
   let testNum = 1;
 
@@ -689,6 +690,39 @@ async function runL08AdminVerification() {
     // =========================================================================
     console.log("\n--- Section 10: Admin Order Management & Fulfillment Protection ---");
 
+    // Ensure at least one transitionable order exists
+    const [existTransOrder] = (await pool.execute(
+      "SELECT id FROM orders WHERE status IN ('pending', 'confirmed', 'processing', 'shipped') LIMIT 1"
+    )) as any[];
+    if (existTransOrder.length === 0) {
+      const transOrderId = `ord_l08_trans_${timestamp}`;
+      const [usrRows] = (await pool.execute("SELECT id FROM profiles LIMIT 1")) as any[];
+      const [prdRows] = (await pool.execute("SELECT id, name, price FROM products LIMIT 1")) as any[];
+      await pool.execute(
+        `INSERT INTO orders (
+          id, order_number, user_id, status, payment_status,
+          subtotal, discount_amount, shipping_amount, total_amount, currency,
+          shipping_full_name, shipping_phone, shipping_address_line_1, shipping_city, shipping_state, shipping_postal_code,
+          created_at, updated_at
+        ) VALUES (
+          ?, 'DEAR-81205', ?, 'confirmed', 'paid',
+          499.00, 0.00, 0.00, 499.00, 'INR',
+          'QA Tester', '9876543210', '123 Test St', 'Hyderabad', 'Telangana', '500001',
+          NOW(), NOW()
+        )`,
+        [transOrderId, usrRows[0]?.id || 'usr_seed']
+      );
+      await pool.execute(
+        `INSERT INTO order_items (
+          id, order_id, product_id, product_name, unit_price, quantity, line_total, created_at
+        ) VALUES (
+          ?, ?, ?, ?, 499.00, 1, 499.00, NOW()
+        )`,
+        [`itm_l08_trans_${timestamp}`, transOrderId, prdRows[0]?.id || 'prod', prdRows[0]?.name || 'Product']
+      );
+      cleanupOrderIds.push(transOrderId);
+    }
+
     const resAdminOrders = await fetch(`${baseUrl}/api/admin/orders`, {
       headers: { Cookie: cookieAdmin! },
     });
@@ -879,6 +913,11 @@ async function runL08AdminVerification() {
     // Clean up synthetic discounts created in this run
     for (const did of cleanupDiscountIds) {
       await pool.execute("DELETE FROM discounts WHERE id = ?", [did]);
+    }
+    // Clean up synthetic orders created in this run
+    for (const oid of cleanupOrderIds) {
+      await pool.execute("DELETE FROM order_items WHERE order_id = ?", [oid]).catch(() => {});
+      await pool.execute("DELETE FROM orders WHERE id = ?", [oid]).catch(() => {});
     }
     // Clean up synthetic QA users created in this run
     for (const uid of cleanupUserIds) {

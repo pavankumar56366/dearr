@@ -55,6 +55,9 @@ function mapApiProductToSampleProduct(p: any): SampleProduct {
         : undefined,
     hasColors: Boolean(p.hasColors ?? p.has_colors),
     codEnabled: Boolean(p.codEnabled ?? p.cod_enabled ?? true),
+    codFee: p.codFee !== undefined && p.codFee !== null ? Number(p.codFee) : (p.cod_fee !== undefined && p.cod_fee !== null ? Number(p.cod_fee) : null),
+    dispatchLeadDays: Number(p.dispatchLeadDays ?? p.dispatch_lead_days ?? 2),
+    dispatchTimelineText: p.dispatchTimelineText ?? p.dispatch_timeline_text ?? null,
     colors: Array.isArray(p.colors) && p.colors.length > 0
       ? p.colors.map((c: any) => ({
           id: c.id,

@@ -6,6 +6,7 @@ import {
   computeDiscountAmount,
 } from "./discount";
 import { getStoreSettings, checkRateLimit } from "./settings";
+import { getShippingQuote } from "./shipping-quote";
 import {
   resolveAuthoritativeUnitPrice,
   resolveAuthoritativeEffectiveStock,
@@ -82,11 +83,25 @@ export interface OrderRecord {
   shippingPostalCode: string;
   shippingCountry: string;
   items: OrderItemSnapshot[];
+  paymentMethod?: string;
+  shippingBaseAmount?: number;
+  shippingMarkupAmount?: number;
+  shippingCourierId?: number | null;
+  shippingCourierName?: string | null;
+  shippingEstimatedDays?: number | null;
+  shippingRateSource?: string | null;
+  codFeeAmount?: number;
+  codCollectedAt?: Date | null;
+  awbCode?: string | null;
+  courierName?: string | null;
+  courierStatus?: string | null;
   addressEditDeadline?: Date | null;
   addressChangeCount?: number;
   dispatchedAt?: Date | null;
   deliveredAt?: Date | null;
   cancelledAt?: Date | null;
+  stockRestoredAt?: Date | null;
+  rtoAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -307,9 +322,23 @@ function mapOrderRow(row: any): Omit<OrderRecord, "items"> {
     shippingCountry: row.shipping_country,
     addressEditDeadline: row.address_edit_deadline ? new Date(row.address_edit_deadline) : null,
     addressChangeCount: Number(row.address_change_count ?? 0),
+    paymentMethod: row.payment_method || "prepaid",
+    shippingBaseAmount: Number(row.shipping_base_amount || 0),
+    shippingMarkupAmount: Number(row.shipping_markup_amount || 0),
+    shippingCourierId: row.shipping_courier_id ? Number(row.shipping_courier_id) : null,
+    shippingCourierName: row.shipping_courier_name || null,
+    shippingEstimatedDays: row.shipping_estimated_days ? Number(row.shipping_estimated_days) : null,
+    shippingRateSource: row.shipping_rate_source || "standard",
+    codFeeAmount: Number(row.cod_fee_amount || 0),
+    codCollectedAt: row.cod_collected_at ? new Date(row.cod_collected_at) : null,
+    awbCode: row.awb_code || null,
+    courierName: row.courier_name || null,
+    courierStatus: row.courier_status || null,
     dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at) : null,
     deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
     cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : null,
+    stockRestoredAt: row.stock_restored_at ? new Date(row.stock_restored_at) : null,
+    rtoAt: row.rto_at ? new Date(row.rto_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -638,13 +667,25 @@ export async function createOrderFromCart(
     orderDiscountTotal = roundToTwo(orderDiscountTotal);
 
     const storeSettings = await getStoreSettings();
+    const netSubtotal = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal));
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
 
-    // Feature #11: No minimum purchase/order value requirement
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
-    const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: isCod ? "cod" : "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    if (isCod && !shippingQuote.isCodEligible) {
+      throw new OrderValidationError(
+        shippingQuote.ineligibilityReason || "Cash on Delivery is not available for this order.",
+        400
+      );
+    }
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
+    const totalAmount = Math.max(0, roundToTwo(netSubtotal + shippingAmount));
 
     const addressEditDeadline = storeSettings.allowAddressChange
       ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)
@@ -653,15 +694,17 @@ export async function createOrderFromCart(
     // 4. Insert order
     await conn.execute(
       `INSERT INTO orders (
-         id, order_number, user_id, status, payment_status,
+         id, order_number, user_id, status, payment_status, payment_method,
          subtotal, discount_amount, shipping_amount, total_amount, currency,
+         shipping_base_amount, shipping_markup_amount, shipping_courier_name, shipping_rate_source, cod_fee_amount,
          shipping_full_name, shipping_phone,
          shipping_address_line_1, shipping_address_line_2,
          shipping_city, shipping_state, shipping_postal_code, shipping_country,
          address_edit_deadline, address_change_count,
          created_at, updated_at
-       ) VALUES (?, ?, ?, 'pending', 'pending',
+       ) VALUES (?, ?, ?, 'pending', 'pending', ?,
                  ?, ?, ?, ?, 'INR',
+                 ?, ?, ?, ?, ?,
                  ?, ?,
                  ?, ?,
                  ?, ?, ?, ?,
@@ -671,10 +714,16 @@ export async function createOrderFromCart(
         orderId,
         orderNumber,
         cleanUserId,
+        isCod ? "Cash on Delivery" : "prepaid",
         orderSubtotal,
         orderDiscountTotal,
         shippingAmount,
         totalAmount,
+        shippingQuote.baseCourierAmount || 0,
+        shippingQuote.markupAmount || 0,
+        shippingQuote.courierName || null,
+        shippingQuote.rateSource || null,
+        shippingQuote.codFeeAmount || 0,
         validatedAddress.shippingFullName,
         validatedAddress.shippingPhone,
         validatedAddress.shippingAddressLine1,
@@ -716,9 +765,53 @@ export async function createOrderFromCart(
       );
     }
 
-    // 6. Stock: In B-17, stock is strictly validated above (sufficient quantity required),
-    // but NOT decremented here. Stock decrement belongs to the payment verification flow (B-18 / Razorpay).
-    // An unpaid pending order must not silently consume inventory.
+    // 6. Stock: For COD orders, decrement inventory atomically inside this transaction.
+    // For prepaid (Razorpay) orders, stock deduction occurs upon payment verification (B-18).
+    if (isCod) {
+      for (const item of preparedItems) {
+        const qty = Number(item.quantity);
+        if (item.variantId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_variants 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.variantId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for variant of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.colorId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_colors
+             SET stock = stock - ?, updated_at = NOW()
+             WHERE id = ? AND stock >= ?`,
+            [qty, item.colorId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for color of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.productId) {
+          const [result]: any = await conn.execute(
+            `UPDATE products 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.productId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        }
+      }
+    }
 
     // 7. Mark cart as converted and clear items
     await conn.execute(
@@ -970,11 +1063,25 @@ export async function createOrderFromBuyNow(
     orderSubtotal = roundToTwo(orderSubtotal);
     orderDiscountTotal = roundToTwo(orderDiscountTotal);
 
-    const shippingAmount =
-      orderSubtotal >= storeSettings.freeShippingThreshold
-        ? 0
-        : storeSettings.defaultShippingFee;
-    const totalAmount = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal + shippingAmount));
+    const netSubtotal = Math.max(0, roundToTwo(orderSubtotal - orderDiscountTotal));
+    const totalWeightKg = Math.max(0.5, preparedItems.reduce((w, it) => w + (it.quantity * 0.3), 0));
+
+    const shippingQuote = await getShippingQuote({
+      deliveryPincode: validatedAddress.shippingPostalCode,
+      subtotal: netSubtotal,
+      paymentMethod: isCod ? "cod" : "prepaid",
+      weightKg: totalWeightKg,
+    });
+
+    if (isCod && !shippingQuote.isCodEligible) {
+      throw new OrderValidationError(
+        shippingQuote.ineligibilityReason || "Cash on Delivery is not available for this order.",
+        400
+      );
+    }
+
+    const shippingAmount = shippingQuote.finalCustomerShippingFee;
+    const totalAmount = Math.max(0, roundToTwo(netSubtotal + shippingAmount));
 
     const addressEditDeadline = storeSettings.allowAddressChange
       ? new Date(Date.now() + storeSettings.addressChangeWindowHours * 3600 * 1000)
@@ -982,15 +1089,17 @@ export async function createOrderFromBuyNow(
 
     await conn.execute(
       `INSERT INTO orders (
-         id, order_number, user_id, status, payment_status,
+         id, order_number, user_id, status, payment_status, payment_method,
          subtotal, discount_amount, shipping_amount, total_amount, currency,
+         shipping_base_amount, shipping_markup_amount, shipping_courier_name, shipping_rate_source, cod_fee_amount,
          shipping_full_name, shipping_phone,
          shipping_address_line_1, shipping_address_line_2,
          shipping_city, shipping_state, shipping_postal_code, shipping_country,
          address_edit_deadline, address_change_count,
          created_at, updated_at
-       ) VALUES (?, ?, ?, 'pending', 'pending',
+       ) VALUES (?, ?, ?, 'pending', 'pending', ?,
                  ?, ?, ?, ?, 'INR',
+                 ?, ?, ?, ?, ?,
                  ?, ?,
                  ?, ?,
                  ?, ?, ?, ?,
@@ -1000,10 +1109,16 @@ export async function createOrderFromBuyNow(
         orderId,
         orderNumber,
         cleanUserId,
+        isCod ? "Cash on Delivery" : "prepaid",
         orderSubtotal,
         orderDiscountTotal,
         shippingAmount,
         totalAmount,
+        shippingQuote.baseCourierAmount || 0,
+        shippingQuote.markupAmount || 0,
+        shippingQuote.courierName || null,
+        shippingQuote.rateSource || null,
+        shippingQuote.codFeeAmount || 0,
         validatedAddress.shippingFullName,
         validatedAddress.shippingPhone,
         validatedAddress.shippingAddressLine1,
@@ -1042,6 +1157,53 @@ export async function createOrderFromBuyNow(
           item.lineTotal,
         ] as any[]
       );
+    }
+
+    // For COD orders, decrement inventory atomically inside this transaction.
+    if (isCod) {
+      for (const item of preparedItems) {
+        const qty = Number(item.quantity);
+        if (item.variantId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_variants 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.variantId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for variant of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.colorId) {
+          const [result]: any = await conn.execute(
+            `UPDATE product_colors
+             SET stock = stock - ?, updated_at = NOW()
+             WHERE id = ? AND stock >= ?`,
+            [qty, item.colorId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for color of "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        } else if (item.productId) {
+          const [result]: any = await conn.execute(
+            `UPDATE products 
+             SET stock_quantity = stock_quantity - ?, updated_at = NOW() 
+             WHERE id = ? AND stock_quantity >= ?`,
+            [qty, item.productId, qty]
+          );
+          if (result.affectedRows === 0) {
+            throw new OrderValidationError(
+              `Insufficient stock available for "${item.productName || "product"}". Cannot place COD order.`,
+              409
+            );
+          }
+        }
+      }
     }
 
     // Customer's cart is untouched!
@@ -1494,7 +1656,7 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
 
   await withTransaction(async (conn) => {
     const orderRows = await conn.execute(
-      "SELECT id, status, payment_status, dispatched_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, status, payment_status, dispatched_at, stock_restored_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
       [cleanOrderId]
     );
     const orders = (orderRows as any)[0] as any[];
@@ -1512,9 +1674,9 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       throw new OrderValidationError("Order is already cancelled", 400);
     }
 
-    // Restore stock ONLY if order had inventory deducted (paid or confirmed) and was NOT already dispatched
+    // Restore stock ONLY if order had inventory deducted (paid or confirmed) and was NOT already dispatched or previously restored
     const isDispatched = Boolean(orders[0].dispatched_at || currentStatus === "shipped");
-    const shouldRestoreStock = (currentPaymentStatus === "paid" || currentStatus === "confirmed") && !isDispatched;
+    const shouldRestoreStock = (currentPaymentStatus === "paid" || currentStatus === "confirmed") && !isDispatched && !orders[0].stock_restored_at;
     if (shouldRestoreStock) {
       const itemRows = await conn.execute(
         "SELECT product_id, variant_id, color_id, quantity FROM order_items WHERE order_id = ?",
@@ -1548,9 +1710,10 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
         `UPDATE orders
          SET status = 'cancelled',
              cancelled_at = COALESCE(cancelled_at, NOW()),
+             stock_restored_at = IF(?, NOW(), stock_restored_at),
              updated_at = NOW()
          WHERE id = ?`,
-        [cleanOrderId]
+        [shouldRestoreStock ? 1 : 0, cleanOrderId]
       );
     } catch {
       await conn.execute(
@@ -2240,3 +2403,128 @@ export async function getOrderAddressHistory(
     };
   });
 }
+
+/**
+ * Marks a Cash on Delivery order as collected (paid in cash) by the admin/courier.
+ * Records cod_collected_at timestamp and updates payment_status to 'paid'.
+ */
+export async function markOrderCodCollected(orderId: string): Promise<OrderRecord> {
+  const cleanId = orderId.trim();
+  if (!cleanId) {
+    throw new OrderValidationError("Order ID is required", 400);
+  }
+
+  return await withTransaction(async (conn) => {
+    const [rows]: any = await conn.execute(
+      "SELECT id, order_number, payment_status, payment_method, total_amount FROM orders WHERE id = ? FOR UPDATE",
+      [cleanId]
+    );
+    if (!rows || rows.length === 0) {
+      throw new OrderValidationError("Order not found", 404);
+    }
+    const order = rows[0];
+    const isCod =
+      (order.payment_method || "").toLowerCase().includes("cash on delivery") ||
+      (order.payment_method || "").toLowerCase() === "cod";
+
+    if (!isCod) {
+      throw new OrderValidationError(
+        "Cannot collect COD cash on a prepaid or online order",
+        400
+      );
+    }
+
+    if (order.payment_status === "paid") {
+      return await getOrderByIdInternal(cleanId, conn);
+    }
+
+    await conn.execute(
+      "UPDATE orders SET payment_status = 'paid', cod_collected_at = NOW(), updated_at = NOW() WHERE id = ?",
+      [cleanId]
+    );
+
+    const paymentId = crypto.randomUUID();
+    await conn.execute(
+      `INSERT INTO payments (
+         id, order_id, provider, provider_order_id, provider_payment_id,
+         amount, currency, status, paid_at, created_at, updated_at
+       ) VALUES (?, ?, 'cod_cash', ?, ?, ?, 'INR', 'paid', NOW(), NOW(), NOW())
+       ON DUPLICATE KEY UPDATE status = 'paid', paid_at = NOW(), updated_at = NOW()`,
+      [paymentId, cleanId, `COD_ORD_${order.order_number}`, `COD_CASH_${order.order_number}`, order.total_amount]
+    );
+
+    return await getOrderByIdInternal(cleanId, conn);
+  });
+}
+
+/**
+ * Restores inventory when a courier reports Return to Origin (RTO).
+ * Strictly idempotent: Can only restore stock once per order (stock_restored_at guard + FOR UPDATE row lock).
+ */
+export async function restoreOrderStockOnRto(orderId: string): Promise<boolean> {
+  const cleanOrderId = validateId(orderId, "Order ID");
+
+  return await withTransaction(async (conn) => {
+    const [orders]: any = await conn.execute(
+      "SELECT id, status, payment_status, payment_method, stock_restored_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      [cleanOrderId]
+    );
+
+    if (!orders || orders.length === 0) {
+      return false;
+    }
+
+    const order = orders[0];
+    // Idempotency: If stock already restored, do not restore again
+    if (order.stock_restored_at) {
+      return false;
+    }
+
+    // Retrieve order items
+    const [items]: any = await conn.execute(
+      "SELECT product_id, variant_id, color_id, quantity FROM order_items WHERE order_id = ?",
+      [cleanOrderId]
+    );
+
+    for (const item of items || []) {
+      const qty = Number(item.quantity);
+      if (item.variant_id) {
+        await conn.execute(
+          "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.variant_id]
+        );
+      } else if (item.color_id) {
+        await conn.execute(
+          "UPDATE product_colors SET stock = stock + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.color_id]
+        );
+      } else if (item.product_id) {
+        await conn.execute(
+          "UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.product_id]
+        );
+      }
+    }
+
+    await conn.execute(
+      `UPDATE orders 
+       SET stock_restored_at = NOW(), 
+           rto_at = COALESCE(rto_at, NOW()), 
+           courier_status = 'RTO / RETURN INITIATED',
+           updated_at = NOW() 
+       WHERE id = ?`,
+      [cleanOrderId]
+    );
+
+    try {
+      await conn.execute(
+        `INSERT INTO order_status_history (id, order_id, previous_status, new_status, notes, created_at)
+         VALUES (UUID(), ?, ?, ?, 'Stock automatically restored on courier RTO event', NOW())`,
+        [cleanOrderId, order.status, order.status]
+      );
+    } catch {}
+
+    return true;
+  });
+}
+

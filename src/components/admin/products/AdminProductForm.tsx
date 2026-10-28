@@ -212,6 +212,19 @@ export function AdminProductForm({
       ? Boolean(initialProduct.codEnabled)
       : true
   );
+  const [codFee, setCodFee] = useState<string>(
+    initialProduct && initialProduct.codFee !== undefined && initialProduct.codFee !== null
+      ? String(initialProduct.codFee)
+      : ""
+  );
+  const [dispatchLeadDays, setDispatchLeadDays] = useState<number>(
+    initialProduct && initialProduct.dispatchLeadDays !== undefined
+      ? Number(initialProduct.dispatchLeadDays)
+      : 2
+  );
+  const [dispatchTimelineText, setDispatchTimelineText] = useState<string>(
+    initialProduct?.dispatchTimelineText || ""
+  );
 
   // Images & Variants State
   const [images, setImages] = useState<ProductImageItem[]>(initialImages);
@@ -811,6 +824,9 @@ export function AdminProductForm({
           isFeatured: isFeatured,
           hasColors: hasColors,
           codEnabled: codEnabled,
+          codFee: codFee.trim() !== "" ? parseFloat(codFee) : null,
+          dispatchLeadDays: Number(dispatchLeadDays) || 2,
+          dispatchTimelineText: dispatchTimelineText.trim() || null,
           colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
           variants: formattedVariants,
@@ -835,6 +851,9 @@ export function AdminProductForm({
           isFeatured: isFeatured,
           hasColors: hasColors,
           codEnabled: codEnabled,
+          codFee: codFee.trim() !== "" ? parseFloat(codFee) : null,
+          dispatchLeadDays: Number(dispatchLeadDays) || 2,
+          dispatchTimelineText: dispatchTimelineText.trim() || null,
           colors: hasColors ? finalColorsPayload : [],
           images: finalImages,
           variants: formattedVariants,
@@ -910,6 +929,9 @@ export function AdminProductForm({
         hasColors: Boolean(returnedProduct.hasColors ?? returnedProduct.has_colors ?? hasColors),
         colors: returnedProduct.colors || (hasColors ? finalColorsPayload : undefined),
         codEnabled: Boolean(returnedProduct.codEnabled ?? returnedProduct.cod_enabled ?? codEnabled),
+        codFee: returnedProduct.codFee !== undefined ? returnedProduct.codFee : (returnedProduct.cod_fee !== undefined ? returnedProduct.cod_fee : null),
+        dispatchLeadDays: Number(returnedProduct.dispatchLeadDays ?? returnedProduct.dispatch_lead_days ?? 2),
+        dispatchTimelineText: returnedProduct.dispatchTimelineText ?? returnedProduct.dispatch_timeline_text ?? null,
       };
 
       setSavedProduct(mappedSuccessProduct);
@@ -939,6 +961,9 @@ export function AdminProductForm({
     setIsActive(true);
     setIsFeatured(false);
     setCodEnabled(true);
+    setCodFee("");
+    setDispatchLeadDays(2);
+    setDispatchTimelineText("");
     setErrors({});
     setTouched({});
     setSavedProduct(null);
@@ -1766,6 +1791,86 @@ export function AdminProductForm({
                     }`}
                   />
                 </button>
+              </div>
+
+              {/* Product COD Handling Fee Override */}
+              {codEnabled && (
+                <div className="p-3.5 rounded-xl border border-neutral-200 bg-canvas space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label
+                      htmlFor="product-cod-fee"
+                      className="text-xs font-bold text-neutral-800"
+                    >
+                      COD Minimum Handling Fee (₹)
+                    </label>
+                    <span className="text-[10px] text-neutral-400 font-medium">
+                      Optional Override
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-neutral-500">
+                    Set a custom minimum COD handling fee for this product. If left blank, the global store setting (₹50) applies.
+                  </p>
+                  <div className="relative max-w-xs">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400 font-bold text-xs">
+                      ₹
+                    </span>
+                    <input
+                      id="product-cod-fee"
+                      type="number"
+                      min={0}
+                      value={codFee}
+                      onChange={(e) => setCodFee(e.target.value)}
+                      placeholder="e.g. 50 (Store default)"
+                      className="w-full h-10 pl-7 pr-3 rounded-xl border border-neutral-200 bg-white text-xs text-neutral-900 font-mono focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Dispatch Timeline Controls */}
+              <div className="p-3.5 rounded-xl border border-neutral-200 bg-canvas space-y-3">
+                <div className="space-y-1">
+                  <label
+                    htmlFor="product-dispatch-days"
+                    className="text-xs font-bold text-neutral-800 block"
+                  >
+                    Dispatch Lead Time (Days to Deliver / Prepare)
+                  </label>
+                  <p className="text-[11px] text-neutral-500">
+                    How many business days this product takes to prepare and dispatch.
+                  </p>
+                  <div className="w-32">
+                    <input
+                      id="product-dispatch-days"
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={dispatchLeadDays}
+                      onChange={(e) => setDispatchLeadDays(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                      className="w-full h-10 px-3 rounded-xl border border-neutral-200 bg-white text-xs text-neutral-900 font-mono text-center focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1 pt-1 border-t border-neutral-200/60">
+                  <label
+                    htmlFor="product-dispatch-text"
+                    className="text-xs font-bold text-neutral-800 block"
+                  >
+                    Custom Dispatch Wording (Optional)
+                  </label>
+                  <p className="text-[11px] text-neutral-500">
+                    Customer-facing timeline wording shown on product details &amp; pincode widget.
+                  </p>
+                  <input
+                    id="product-dispatch-text"
+                    type="text"
+                    value={dispatchTimelineText}
+                    onChange={(e) => setDispatchTimelineText(e.target.value)}
+                    placeholder="e.g. Crafted & dispatched in 2–3 business days"
+                    className="w-full h-10 px-3.5 rounded-xl border border-neutral-200 bg-white text-xs text-neutral-900 focus:outline-none focus:ring-2 focus:ring-primary/40 focus:border-primary"
+                  />
+                </div>
               </div>
             </div>
           </div>
