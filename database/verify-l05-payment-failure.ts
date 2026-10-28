@@ -177,12 +177,34 @@ async function runAudit() {
       role: "customer",
     });
 
+    async function insertTestOrder(
+      id: string,
+      orderNumber: string,
+      userId: string,
+      amount: number,
+      status = "pending",
+      paymentStatus = "pending"
+    ) {
+      await pool.execute(
+        `INSERT INTO orders (
+           id, order_number, user_id, status, payment_status,
+           total_amount, currency, subtotal, discount_amount, shipping_amount,
+           shipping_full_name, shipping_phone, shipping_address_line_1,
+           shipping_city, shipping_state, shipping_postal_code, shipping_country,
+           created_at, updated_at
+         ) VALUES (
+           ?, ?, ?, ?, ?,
+           ?, 'INR', ?, 0, 0,
+           'Customer Test', '9876543210', '123 Test Street',
+           'Mumbai', 'Maharashtra', '400001', 'India',
+           NOW(), NOW()
+         )`,
+        [id, orderNumber, userId, status, paymentStatus, amount, amount]
+      );
+    }
+
     // Insert Order 1: pending with created payment
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 499.00, 'INR', 499.00, 0, 0, NOW(), NOW())`,
-      [order1Id, order1Number, customerA_Id]
-    );
+    await insertTestOrder(order1Id, order1Number, customerA_Id, 499.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 499.00, 'INR', NOW(), NOW())`,
@@ -190,11 +212,7 @@ async function runAudit() {
     );
 
     // Insert Order 2: pending with created payment
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 699.00, 'INR', 699.00, 0, 0, NOW(), NOW())`,
-      [order2Id, order2Number, customerA_Id]
-    );
+    await insertTestOrder(order2Id, order2Number, customerA_Id, 699.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 699.00, 'INR', NOW(), NOW())`,
@@ -202,11 +220,7 @@ async function runAudit() {
     );
 
     // Insert Order 3: pending with created payment
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 799.00, 'INR', 799.00, 0, 0, NOW(), NOW())`,
-      [order3Id, order3Number, customerA_Id]
-    );
+    await insertTestOrder(order3Id, order3Number, customerA_Id, 799.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 799.00, 'INR', NOW(), NOW())`,
@@ -214,11 +228,7 @@ async function runAudit() {
     );
 
     // Insert Order 4: pending for retry flow
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 899.00, 'INR', 899.00, 0, 0, NOW(), NOW())`,
-      [order4Id, order4Number, customerA_Id]
-    );
+    await insertTestOrder(order4Id, order4Number, customerA_Id, 899.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 899.00, 'INR', NOW(), NOW())`,
@@ -226,11 +236,7 @@ async function runAudit() {
     );
 
     // Insert Order 5: already paid with captured payment
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'processing', 'paid', 999.00, 'INR', 999.00, 0, 0, NOW(), NOW())`,
-      [order5Id, order5Number, customerA_Id]
-    );
+    await insertTestOrder(order5Id, order5Number, customerA_Id, 999.00, "processing", "paid");
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, provider_payment_id, status, amount, currency, paid_at, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, ?, 'captured', 999.00, 'INR', NOW(), NOW(), NOW())`,
@@ -238,11 +244,7 @@ async function runAudit() {
     );
 
     // Insert Order 6: pending with verified payment (ready for L-04 settlement)
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 350.00, 'INR', 350.00, 0, 0, NOW(), NOW())`,
-      [order6Id, order6Number, customerA_Id]
-    );
+    await insertTestOrder(order6Id, order6Number, customerA_Id, 350.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, provider_payment_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, ?, 'verified', 350.00, 'INR', NOW(), NOW())`,
@@ -250,11 +252,7 @@ async function runAudit() {
     );
 
     // Insert Order 7: customer B order
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, ?, ?, 'pending', 'pending', 550.00, 'INR', 550.00, 0, 0, NOW(), NOW())`,
-      [order7Id, order7Number, customerB_Id]
-    );
+    await insertTestOrder(order7Id, order7Number, customerB_Id, 550.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 550.00, 'INR', NOW(), NOW())`,
@@ -504,11 +502,7 @@ async function runAudit() {
     const order12Id = crypto.randomUUID();
     const rzpOrder12 = `order_l05_amt_mismatch_${testRunId}`;
     const rzpPay12 = `pay_l05_amt_mismatch_${testRunId}`;
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, 'ORD-L05-AMT', ?, 'pending', 'pending', 500.00, 'INR', 500.00, 0, 0, NOW(), NOW())`,
-      [order12Id, customerA_Id]
-    );
+    await insertTestOrder(order12Id, "ORD-L05-AMT", customerA_Id, 500.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, provider_payment_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, ?, 'verified', 250.00, 'INR', NOW(), NOW())`,
@@ -813,11 +807,7 @@ async function runAudit() {
       .update(sigPayload)
       .digest("hex");
 
-    await pool.execute(
-      `INSERT INTO orders (id, order_number, user_id, status, payment_status, total_amount, currency, subtotal, discount_amount, shipping_amount, created_at, updated_at)
-       VALUES (?, 'ORD-L05-L03', ?, 'pending', 'pending', 320.00, 'INR', 320.00, 0, 0, NOW(), NOW())`,
-      [order25Id, customerA_Id]
-    );
+    await insertTestOrder(order25Id, "ORD-L05-L03", customerA_Id, 320.00);
     await pool.execute(
       `INSERT INTO payments (id, order_id, provider, provider_order_id, status, amount, currency, created_at, updated_at)
        VALUES (?, ?, 'razorpay', ?, 'created', 320.00, 'INR', NOW(), NOW())`,

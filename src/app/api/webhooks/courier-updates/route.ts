@@ -5,6 +5,7 @@ import {
   type ShiprocketWebhookPayload,
 } from "@/lib/server/shiprocket";
 import { query } from "@/lib/server/db";
+import { restoreOrderStockOnRto } from "@/lib/server/order";
 
 // Fulfillment status progression hierarchy to prevent backwards regression
 const STATUS_HIERARCHY: Record<string, number> = {
@@ -83,8 +84,12 @@ export async function POST(request: NextRequest) {
 
     if (!orderRow && awbCode) {
       const orders = await query<any[]>(
-        "SELECT id, order_number, status, dispatched_at, delivered_at FROM orders WHERE awb_code = ? LIMIT 1",
-        [awbCode]
+        `SELECT o.id, o.order_number, o.status, o.dispatched_at, o.delivered_at 
+         FROM orders o 
+         LEFT JOIN order_shipments os ON os.order_id = o.id 
+         WHERE o.awb_code = ? OR os.awb_code = ? 
+         LIMIT 1`,
+        [awbCode, awbCode]
       );
       if (orders.length > 0) orderRow = orders[0];
     }
@@ -122,9 +127,14 @@ export async function POST(request: NextRequest) {
 
     // 5. Apply forward-only fulfillment transition (never backwards, never touch payment_status)
     if (isReturn) {
-      // RTO or return: never mark delivered; record courier status
+      // RTO or return: never mark delivered; record courier status and restore stock idempotently
       updates.push("courier_status = ?");
       values.push("RTO / RETURN INITIATED");
+      try {
+        await restoreOrderStockOnRto(orderId);
+      } catch (rtoErr) {
+        console.warn("[Webhook RTO] Failed to restore stock:", rtoErr);
+      }
     } else if (statusMapping.isDelivered && currentRank < STATUS_HIERARCHY["delivered"]) {
       updates.push("status = 'delivered'", "delivered_at = NOW()");
     } else if (

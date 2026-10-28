@@ -100,6 +100,8 @@ export interface OrderRecord {
   dispatchedAt?: Date | null;
   deliveredAt?: Date | null;
   cancelledAt?: Date | null;
+  stockRestoredAt?: Date | null;
+  rtoAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -335,6 +337,8 @@ function mapOrderRow(row: any): Omit<OrderRecord, "items"> {
     dispatchedAt: row.dispatched_at ? new Date(row.dispatched_at) : null,
     deliveredAt: row.delivered_at ? new Date(row.delivered_at) : null,
     cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : null,
+    stockRestoredAt: row.stock_restored_at ? new Date(row.stock_restored_at) : null,
+    rtoAt: row.rto_at ? new Date(row.rto_at) : null,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };
@@ -690,15 +694,17 @@ export async function createOrderFromCart(
     // 4. Insert order
     await conn.execute(
       `INSERT INTO orders (
-         id, order_number, user_id, status, payment_status,
+         id, order_number, user_id, status, payment_status, payment_method,
          subtotal, discount_amount, shipping_amount, total_amount, currency,
+         shipping_base_amount, shipping_markup_amount, shipping_courier_name, shipping_rate_source, cod_fee_amount,
          shipping_full_name, shipping_phone,
          shipping_address_line_1, shipping_address_line_2,
          shipping_city, shipping_state, shipping_postal_code, shipping_country,
          address_edit_deadline, address_change_count,
          created_at, updated_at
-       ) VALUES (?, ?, ?, 'pending', 'pending',
+       ) VALUES (?, ?, ?, 'pending', 'pending', ?,
                  ?, ?, ?, ?, 'INR',
+                 ?, ?, ?, ?, ?,
                  ?, ?,
                  ?, ?,
                  ?, ?, ?, ?,
@@ -708,10 +714,16 @@ export async function createOrderFromCart(
         orderId,
         orderNumber,
         cleanUserId,
+        isCod ? "Cash on Delivery" : "prepaid",
         orderSubtotal,
         orderDiscountTotal,
         shippingAmount,
         totalAmount,
+        shippingQuote.baseCourierAmount || 0,
+        shippingQuote.markupAmount || 0,
+        shippingQuote.courierName || null,
+        shippingQuote.rateSource || null,
+        shippingQuote.codFeeAmount || 0,
         validatedAddress.shippingFullName,
         validatedAddress.shippingPhone,
         validatedAddress.shippingAddressLine1,
@@ -1077,15 +1089,17 @@ export async function createOrderFromBuyNow(
 
     await conn.execute(
       `INSERT INTO orders (
-         id, order_number, user_id, status, payment_status,
+         id, order_number, user_id, status, payment_status, payment_method,
          subtotal, discount_amount, shipping_amount, total_amount, currency,
+         shipping_base_amount, shipping_markup_amount, shipping_courier_name, shipping_rate_source, cod_fee_amount,
          shipping_full_name, shipping_phone,
          shipping_address_line_1, shipping_address_line_2,
          shipping_city, shipping_state, shipping_postal_code, shipping_country,
          address_edit_deadline, address_change_count,
          created_at, updated_at
-       ) VALUES (?, ?, ?, 'pending', 'pending',
+       ) VALUES (?, ?, ?, 'pending', 'pending', ?,
                  ?, ?, ?, ?, 'INR',
+                 ?, ?, ?, ?, ?,
                  ?, ?,
                  ?, ?,
                  ?, ?, ?, ?,
@@ -1095,10 +1109,16 @@ export async function createOrderFromBuyNow(
         orderId,
         orderNumber,
         cleanUserId,
+        isCod ? "Cash on Delivery" : "prepaid",
         orderSubtotal,
         orderDiscountTotal,
         shippingAmount,
         totalAmount,
+        shippingQuote.baseCourierAmount || 0,
+        shippingQuote.markupAmount || 0,
+        shippingQuote.courierName || null,
+        shippingQuote.rateSource || null,
+        shippingQuote.codFeeAmount || 0,
         validatedAddress.shippingFullName,
         validatedAddress.shippingPhone,
         validatedAddress.shippingAddressLine1,
@@ -1636,7 +1656,7 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
 
   await withTransaction(async (conn) => {
     const orderRows = await conn.execute(
-      "SELECT id, status, payment_status, dispatched_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      "SELECT id, status, payment_status, dispatched_at, stock_restored_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
       [cleanOrderId]
     );
     const orders = (orderRows as any)[0] as any[];
@@ -1654,9 +1674,9 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
       throw new OrderValidationError("Order is already cancelled", 400);
     }
 
-    // Restore stock ONLY if order had inventory deducted (paid or confirmed) and was NOT already dispatched
+    // Restore stock ONLY if order had inventory deducted (paid or confirmed) and was NOT already dispatched or previously restored
     const isDispatched = Boolean(orders[0].dispatched_at || currentStatus === "shipped");
-    const shouldRestoreStock = (currentPaymentStatus === "paid" || currentStatus === "confirmed") && !isDispatched;
+    const shouldRestoreStock = (currentPaymentStatus === "paid" || currentStatus === "confirmed") && !isDispatched && !orders[0].stock_restored_at;
     if (shouldRestoreStock) {
       const itemRows = await conn.execute(
         "SELECT product_id, variant_id, color_id, quantity FROM order_items WHERE order_id = ?",
@@ -1690,9 +1710,10 @@ export async function cancelOrder(orderId: string): Promise<OrderRecord> {
         `UPDATE orders
          SET status = 'cancelled',
              cancelled_at = COALESCE(cancelled_at, NOW()),
+             stock_restored_at = IF(?, NOW(), stock_restored_at),
              updated_at = NOW()
          WHERE id = ?`,
-        [cleanOrderId]
+        [shouldRestoreStock ? 1 : 0, cleanOrderId]
       );
     } catch {
       await conn.execute(
@@ -2425,14 +2446,85 @@ export async function markOrderCodCollected(orderId: string): Promise<OrderRecor
     const paymentId = crypto.randomUUID();
     await conn.execute(
       `INSERT INTO payments (
-         id, order_id, provider, amount, currency, status,
-         provider_payment_id, created_at, updated_at
-       ) VALUES (?, ?, 'cod_cash', ?, 'INR', 'paid', ?, NOW(), NOW())
-       ON DUPLICATE KEY UPDATE status = 'paid', updated_at = NOW()`,
-      [paymentId, cleanId, order.total_amount, `COD_CASH_${order.order_number}`]
+         id, order_id, provider, provider_order_id, provider_payment_id,
+         amount, currency, status, paid_at, created_at, updated_at
+       ) VALUES (?, ?, 'cod_cash', ?, ?, ?, 'INR', 'paid', NOW(), NOW(), NOW())
+       ON DUPLICATE KEY UPDATE status = 'paid', paid_at = NOW(), updated_at = NOW()`,
+      [paymentId, cleanId, `COD_ORD_${order.order_number}`, `COD_CASH_${order.order_number}`, order.total_amount]
     );
 
     return await getOrderByIdInternal(cleanId, conn);
+  });
+}
+
+/**
+ * Restores inventory when a courier reports Return to Origin (RTO).
+ * Strictly idempotent: Can only restore stock once per order (stock_restored_at guard + FOR UPDATE row lock).
+ */
+export async function restoreOrderStockOnRto(orderId: string): Promise<boolean> {
+  const cleanOrderId = validateId(orderId, "Order ID");
+
+  return await withTransaction(async (conn) => {
+    const [orders]: any = await conn.execute(
+      "SELECT id, status, payment_status, payment_method, stock_restored_at FROM orders WHERE id = ? LIMIT 1 FOR UPDATE",
+      [cleanOrderId]
+    );
+
+    if (!orders || orders.length === 0) {
+      return false;
+    }
+
+    const order = orders[0];
+    // Idempotency: If stock already restored, do not restore again
+    if (order.stock_restored_at) {
+      return false;
+    }
+
+    // Retrieve order items
+    const [items]: any = await conn.execute(
+      "SELECT product_id, variant_id, color_id, quantity FROM order_items WHERE order_id = ?",
+      [cleanOrderId]
+    );
+
+    for (const item of items || []) {
+      const qty = Number(item.quantity);
+      if (item.variant_id) {
+        await conn.execute(
+          "UPDATE product_variants SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.variant_id]
+        );
+      } else if (item.color_id) {
+        await conn.execute(
+          "UPDATE product_colors SET stock = stock + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.color_id]
+        );
+      } else if (item.product_id) {
+        await conn.execute(
+          "UPDATE products SET stock_quantity = stock_quantity + ?, updated_at = NOW() WHERE id = ?",
+          [qty, item.product_id]
+        );
+      }
+    }
+
+    await conn.execute(
+      `UPDATE orders 
+       SET stock_restored_at = NOW(), 
+           rto_at = COALESCE(rto_at, NOW()), 
+           courier_status = 'RTO / RETURN INITIATED',
+           updated_at = NOW() 
+       WHERE id = ?`,
+      [cleanOrderId]
+    );
+
+    try {
+      await conn.execute(
+        `INSERT INTO order_status_history (id, order_id, previous_status, new_status, notes, created_at)
+         VALUES (UUID(), ?, ?, ?, 'Stock automatically restored on courier RTO event', NOW())`,
+        [cleanOrderId, order.status, order.status]
+      );
+    } catch {}
+
+    return true;
   });
 }
 

@@ -165,7 +165,7 @@ export default function CheckoutPageClient() {
     alternativesEnabled?: boolean;
     feedbackEnabled?: boolean;
     feedbackReasons?: string[];
-  }>({ freeShippingThreshold: 999, defaultShippingFee: 50, codMaxOrderValue: 1500, codMinimumFee: 50 });
+  }>({ freeShippingThreshold: 0, defaultShippingFee: 50, codMaxOrderValue: 1500, codMinimumFee: 50 });
 
   const [shippingQuote, setShippingQuote] = useState<{
     serviceable: boolean;
@@ -241,7 +241,7 @@ export default function CheckoutPageClient() {
           const data = await res.json();
           if (isMounted && data.ok && data.settings) {
             setStoreSettings({
-              freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 999),
+              freeShippingThreshold: Number(data.settings.freeShippingThreshold ?? 0),
               defaultShippingFee: Number(data.settings.defaultShippingFee ?? 50),
               codEnabled: Boolean(data.settings.codEnabled),
               codMaxOrderValue: Number(data.settings.codMaxOrderValue ?? 1500),
@@ -557,6 +557,12 @@ export default function CheckoutPageClient() {
       return;
     }
 
+    if (shippingQuote && shippingQuote.serviceable === false) {
+      setAlertNotice("Delivery is not available to this pincode. Please change your delivery address to proceed.");
+      setCurrentStep("delivery");
+      return;
+    }
+
     // 4. Server-authoritative Order API call
     setIsProcessing(true);
 
@@ -565,6 +571,7 @@ export default function CheckoutPageClient() {
         const currentAttempt = activeAttemptId || intentId || undefined;
         const orderPayload: any = {
           paymentMethod,
+          expectedShippingFee: activeShippingFee,
           ...(selectedAddressId !== "new"
             ? { addressId: selectedAddressId }
             : {
@@ -888,6 +895,37 @@ export default function CheckoutPageClient() {
           return;
         }
 
+        // If 409 Shipping price changed
+        if (res.status === 409 && (data.code === "SHIPPING_PRICE_CHANGED" || data.error === "shipping price changed")) {
+          setIsProcessing(false);
+          if (typeof data.newShippingFee === "number") {
+            setShippingQuote((prev) =>
+              prev
+                ? { ...prev, finalCustomerShippingFee: data.newShippingFee }
+                : {
+                    serviceable: true,
+                    finalCustomerShippingFee: data.newShippingFee,
+                    baseCourierAmount: data.newShippingFee,
+                    codFeeAmount: 0,
+                    markupAmount: 0,
+                    rateSource: "updated",
+                  }
+            );
+          }
+          setAlertNotice(
+            `Shipping rate has changed to ₹${data.newShippingFee}. Your new order total is ₹${data.newTotal}. Please review and click Place Order to confirm.`
+          );
+          return;
+        }
+
+        // Unserviceable pincode error from server
+        if (!res.ok && data.error && /unserviceable|not available to pincode|not serviceable/i.test(data.error)) {
+          setIsProcessing(false);
+          setAlertNotice(`${data.error} Please change your delivery address to proceed.`);
+          setCurrentStep("delivery");
+          return;
+        }
+
         // If guest/unauthenticated (401), redirect to login with cart preserved
         if (res.status === 401) {
           setIsProcessing(false);
@@ -917,6 +955,9 @@ export default function CheckoutPageClient() {
     router,
     activeAttemptId,
     intentId,
+    intentData,
+    activeShippingFee,
+    shippingQuote,
   ]);
 
   // Reset to delivery step

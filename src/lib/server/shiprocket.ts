@@ -283,6 +283,10 @@ function getRawPassword(): string {
 }
 
 export function getShiprocketBaseUrl(): string {
+  // Production security guard: Non-official API URLs are strictly ignored in production
+  if (process.env.NODE_ENV === "production") {
+    return DEFAULT_SHIPROCKET_BASE_URL;
+  }
   return (process.env.SHIPROCKET_API_BASE_URL || DEFAULT_SHIPROCKET_BASE_URL).trim().replace(/\/+$/, "");
 }
 

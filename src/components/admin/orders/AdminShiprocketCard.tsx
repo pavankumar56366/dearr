@@ -66,10 +66,14 @@ interface AvailableCourier {
 
 interface FreightAccounting {
   customerShippingFee: number;
+  customerShippingCharged: number;
   codFeeAmount: number;
+  codFeeCharged: number;
   totalShippingCollected: number;
   actualFreightCost: number | null;
+  actualCourierCost: number | null;
   netFreightMargin: number | null;
+  shippingMargin: number | null;
 }
 
 export function AdminShiprocketCard({
@@ -87,6 +91,7 @@ export function AdminShiprocketCard({
   const [liveTracking, setLiveTracking] = useState<LiveTrackingData | null>(null);
   const [availableCouriers, setAvailableCouriers] = useState<AvailableCourier[]>([]);
   const [selectedCourierId, setSelectedCourierId] = useState<string>("");
+  const [confirmHigherCost, setConfirmHigherCost] = useState(false);
   const [freightAccounting, setFreightAccounting] = useState<FreightAccounting | null>(null);
 
   // Action states
@@ -130,7 +135,22 @@ export function AdminShiprocketCard({
           setAvailableCouriers(data.availableCouriers);
         }
         if (data.freightAccounting) {
-          setFreightAccounting(data.freightAccounting);
+          const customerShipping = Number(data.freightAccounting.customerShippingCharged ?? data.freightAccounting.customerShippingFee ?? 0);
+          const codFee = Number(data.freightAccounting.codFeeCharged ?? data.freightAccounting.codFeeAmount ?? 0);
+          const actualCost = data.freightAccounting.actualCourierCost != null ? Number(data.freightAccounting.actualCourierCost) : (data.freightAccounting.actualFreightCost != null ? Number(data.freightAccounting.actualFreightCost) : null);
+          const margin = data.freightAccounting.shippingMargin != null ? Number(data.freightAccounting.shippingMargin) : (data.freightAccounting.netFreightMargin != null ? Number(data.freightAccounting.netFreightMargin) : null);
+
+          setFreightAccounting({
+            customerShippingFee: customerShipping,
+            customerShippingCharged: customerShipping,
+            codFeeAmount: codFee,
+            codFeeCharged: codFee,
+            totalShippingCollected: customerShipping + codFee,
+            actualFreightCost: actualCost,
+            actualCourierCost: actualCost,
+            netFreightMargin: margin,
+            shippingMargin: margin,
+          });
         }
       }
     } catch (err: any) {
@@ -195,6 +215,15 @@ export function AdminShiprocketCard({
     );
     const courierId = chosenCourier ? chosenCourier.courierCompanyId : undefined;
     const actualCost = chosenCourier ? chosenCourier.rate : undefined;
+    const customerFreight = freightAccounting?.customerShippingCharged ?? 0;
+    const isHigherCost = Boolean(chosenCourier && chosenCourier.rate > customerFreight);
+
+    if (isHigherCost && !confirmHigherCost) {
+      setErrorMessage(
+        `Selected courier costs ₹${chosenCourier?.rate.toFixed(2)}, which is higher than the customer quote of ₹${customerFreight.toFixed(2)}. Please confirm to proceed.`
+      );
+      return;
+    }
 
     setGeneratingAwb(true);
     setErrorMessage(null);
@@ -658,7 +687,10 @@ export function AdminShiprocketCard({
                   </label>
                   <select
                     value={selectedCourierId}
-                    onChange={(e) => setSelectedCourierId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedCourierId(e.target.value);
+                      setConfirmHigherCost(false);
+                    }}
                     disabled={generatingAwb}
                     className="w-full h-8.5 px-2.5 rounded-lg border border-neutral-300 text-xs bg-white text-neutral-900 font-medium focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500"
                   >
@@ -679,6 +711,36 @@ export function AdminShiprocketCard({
                         } freight).`
                       : "Default: Uses Shiprocket Smart AI routing for highest delivery success rate."}
                   </p>
+                  {(() => {
+                    const chosen = availableCouriers.find(
+                      (c) => String(c.courierCompanyId) === selectedCourierId
+                    );
+                    const customerFreight = freightAccounting?.customerShippingCharged ?? 0;
+                    const isHigher = Boolean(chosen && customerFreight > 0 && chosen.rate > customerFreight);
+                    if (!isHigher || !chosen) return null;
+                    const diff = chosen.rate - customerFreight;
+                    return (
+                      <div className="mt-2.5 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs space-y-1.5" data-testid="courier-cost-warning">
+                        <div className="font-semibold flex items-center gap-1.5 text-amber-800">
+                          <span>⚠️</span> Higher Courier Cost Warning
+                        </div>
+                        <p className="text-[11px] leading-relaxed text-amber-700">
+                          Selected courier costs <strong>₹{chosen.rate.toFixed(2)}</strong>, which is{" "}
+                          <strong>₹{diff.toFixed(2)} higher</strong> than the customer quote of ₹{customerFreight.toFixed(2)}.
+                        </p>
+                        <label className="flex items-center gap-2 cursor-pointer pt-1 text-[11px] font-medium text-amber-900">
+                          <input
+                            type="checkbox"
+                            checked={confirmHigherCost}
+                            onChange={(e) => setConfirmHigherCost(e.target.checked)}
+                            className="rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                            data-testid="confirm-higher-cost-checkbox"
+                          />
+                          <span>I confirm booking this higher-cost courier</span>
+                        </label>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <button

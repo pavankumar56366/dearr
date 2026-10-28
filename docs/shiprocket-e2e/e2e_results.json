@@ -1,0 +1,356 @@
+{
+  "timestamp": "2026-10-28T12:05:05.615Z",
+  "passCount": 32,
+  "failCount": 0,
+  "results": [
+    {
+      "step": "C1",
+      "name": "Product PIN Check Serviceable (1440px)",
+      "status": "PASS",
+      "screenshot": "step-01-pin-check-serviceable-1440.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Serviceable courier and dispatch confirmed"
+    },
+    {
+      "step": "C1",
+      "name": "Product PIN Check Unserviceable",
+      "status": "PASS",
+      "screenshot": "step-01-pin-check-unserviceable.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C1",
+      "name": "Product PIN Check Invalid (5 digits)",
+      "status": "PASS",
+      "screenshot": "step-01-pin-check-invalid.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C1",
+      "name": "Product PIN Check Courier Down",
+      "status": "PASS",
+      "screenshot": "step-01-pin-check-courier-down.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C1",
+      "name": "Product PIN Check Serviceable (375px)",
+      "status": "PASS",
+      "screenshot": "step-01-pin-check-serviceable-375.png",
+      "viewport": "375x667",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Serviceable courier and dispatch confirmed"
+    },
+    {
+      "step": "C2",
+      "name": "Checkout Prepaid Below Threshold (1440px)",
+      "status": "PASS",
+      "screenshot": "step-02-checkout-prepaid-below-threshold-1440.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipping charged (Base + Markup) correctly calculated below ₹999 threshold"
+    },
+    {
+      "step": "C2",
+      "name": "Checkout Prepaid Below Threshold (375px)",
+      "status": "PASS",
+      "screenshot": "step-02-checkout-prepaid-below-threshold-375.png",
+      "viewport": "375x667",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipping charged (Base + Markup) correctly calculated below ₹999 threshold"
+    },
+    {
+      "step": "C3",
+      "name": "Checkout Prepaid Free Shipping (1440px)",
+      "status": "PASS",
+      "screenshot": "step-03-checkout-prepaid-free-shipping-1440.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Free shipping applied above threshold"
+    },
+    {
+      "step": "C3",
+      "name": "Checkout Prepaid Free Shipping (375px)",
+      "status": "PASS",
+      "screenshot": "step-03-checkout-prepaid-free-shipping-375.png",
+      "viewport": "375x667",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Free shipping applied above threshold"
+    },
+    {
+      "step": "C4",
+      "name": "COD Hidden/Disabled: Non-COD Product",
+      "status": "PASS",
+      "screenshot": "step-04a-cod-non-cod-product.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C4",
+      "name": "COD Hidden/Disabled: Mixed Cart",
+      "status": "PASS",
+      "screenshot": "step-04b-cod-mixed-cart.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C4",
+      "name": "COD Hidden/Disabled: Non-COD Pincode",
+      "status": "PASS",
+      "screenshot": "step-04c-cod-unserviceable-pincode.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C4",
+      "name": "COD Hidden/Disabled: Total Over Cap",
+      "status": "PASS",
+      "screenshot": "step-04d-cod-over-cap.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C4",
+      "name": "COD Enabled with Fee Line Item",
+      "status": "PASS",
+      "screenshot": "step-04e-cod-eligible.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C5",
+      "name": "Shipping Price Changed 409 Flow",
+      "status": "PASS",
+      "screenshot": "step-05-shipping-price-changed-409.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 409 (Conflict)"
+      ],
+      "failedRequests": [],
+      "details": "Server returned 409, UI updated quote to new total without silently overcharging"
+    },
+    {
+      "step": "C6",
+      "name": "Unserviceable Pincode Blocks Order",
+      "status": "PASS",
+      "screenshot": "step-06a-unserviceable-blocks-order.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C6",
+      "name": "Courier Down Uses Fallback Fee",
+      "status": "PASS",
+      "screenshot": "step-06b-courier-down-fallback-allowed.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Fallback shipping applied gracefully when courier API is down"
+    },
+    {
+      "step": "C7",
+      "name": "Prepaid Order End-to-End Razorpay Settlement",
+      "status": "PASS",
+      "screenshot": "step-07c-prepaid-order-confirmed.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "Refused to get unsafe header \"x-rtb-fingerprint-id\"",
+        "Refused to get unsafe header \"request-id\"",
+        "Permissions policy violation: accelerometer is not allowed in this document.",
+        "Permissions policy violation: accelerometer is not allowed in this document.",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED",
+        "Failed to load resource: net::ERR_CONNECTION_REFUSED"
+      ],
+      "failedRequests": [
+        "GET http://localhost:37857/3855466.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:7070/6014038.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:37857/0029620.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:7070/4230677.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:37857/9494054.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:7071/6561498.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:37857/4849002.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:7071/9521310.png - net::ERR_CONNECTION_REFUSED",
+        "GET http://localhost:3000/order-confirmed?orderNumber=DEAR-66131&_rsc=_Ur6TcTfQMwVGIhT - net::ERR_ABORTED"
+      ],
+      "details": "Order DEAR-66131 confirmed with verified payment"
+    },
+    {
+      "step": "C8",
+      "name": "COD Order End-to-End Atomic Stock Deduction",
+      "status": "PASS",
+      "screenshot": "step-08-cod-order-confirmed.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [
+        "GET http://localhost:3000/order-confirmed?orderNumber=DEAR-38864&_rsc=_Ur6TcTfQMwVGIhT - net::ERR_ABORTED"
+      ],
+      "details": "Order DEAR-38864 confirmed. Stock decremented from 50 to 49"
+    },
+    {
+      "step": "C9",
+      "name": "Tracking State: Confirmed / Unshipped",
+      "status": "PASS",
+      "screenshot": "step-09a-tracking-not-shipped.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:\n\n- A server/client branch `if (typeof window !== 'undefined')`.\n- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.\n- Date formatting in a user's locale which doesn't match the server.\n- External changing data without sending a snapshot of it along with the HTML.\n- Invalid HTML tag nesting.\n\nIt can also happen if the client has a browser extension installed which messes with the HTML before React loaded.\n\n%s%s https://react.dev/link/hydration-mismatch \n\n  ...\n    <RootLayout>\n      <html lang=\"en\" className=\"inter_5558...\">\n        ...\n          <CartProvider>\n            <WishlistProvider>\n              <StorefrontShell>\n                <CustomerHeader>\n                  <DesktopHeader data={{...}} categories={[...]} onOpenSearch={function onOpenSearch}>\n                    <header className=\"hidden md:...\">\n                      <div className=\"mx-auto ma...\">\n                        <div>\n                        <form role=\"search\" onSubmit={function handleSearchSubmit} className=\"flex-1 max...\">\n                          <div onClick={function handleSearchClick} className=\"relative f...\">\n                            <SearchIcon>\n                            <input\n                              type=\"search\"\n                              value=\"\"\n                              onChange={function onChange}\n                              onClick={function handleSearchClick}\n                              onFocus={function handleSearchClick}\n                              placeholder=\"Search 3D printed products, keychains, decor...\"\n                              aria-label=\"Search for products\"\n                              className=\"w-full bg-transparent text-neutral-900 text-sm placeholder:text-neutral-500 f...\"\n-                             style={{caret-color:\"transparent\"}}\n                            >\n                            ...\n                        ...\n                  ...\n                ...\n"
+      ],
+      "failedRequests": []
+    },
+    {
+      "step": "C9",
+      "name": "Tracking States (In Transit, OFD, Delivered, RTO, Throttle)",
+      "status": "PASS",
+      "screenshot": "step-09d-tracking-delivered.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:\n\n- A server/client branch `if (typeof window !== 'undefined')`.\n- Variable input such as `Date.now()` or `Math.random()` which changes each time it's called.\n- Date formatting in a user's locale which doesn't match the server.\n- External changing data without sending a snapshot of it along with the HTML.\n- Invalid HTML tag nesting.\n\nIt can also happen if the client has a browser extension installed which messes with the HTML before React loaded.\n\n%s%s https://react.dev/link/hydration-mismatch \n\n  ...\n    <RootLayout>\n      <html lang=\"en\" className=\"inter_5558...\">\n        ...\n          <CartProvider>\n            <WishlistProvider>\n              <StorefrontShell>\n                <CustomerHeader>\n                  <DesktopHeader data={{...}} categories={[...]} onOpenSearch={function onOpenSearch}>\n                    <header className=\"hidden md:...\">\n                      <div className=\"mx-auto ma...\">\n                        <div>\n                        <form role=\"search\" onSubmit={function handleSearchSubmit} className=\"flex-1 max...\">\n                          <div onClick={function handleSearchClick} className=\"relative f...\">\n                            <SearchIcon>\n                            <input\n                              type=\"search\"\n                              value=\"\"\n                              onChange={function onChange}\n                              onClick={function handleSearchClick}\n                              onFocus={function handleSearchClick}\n                              placeholder=\"Search 3D printed products, keychains, decor...\"\n                              aria-label=\"Search for products\"\n                              className=\"w-full bg-transparent text-neutral-900 text-sm placeholder:text-neutral-500 f...\"\n-                             style={{caret-color:\"transparent\"}}\n                            >\n                            ...\n                        ...\n                  ...\n                ...\n"
+      ],
+      "failedRequests": [],
+      "details": "Live tracking states updated via mock webhooks, 10-min refresh throttle verified"
+    },
+    {
+      "step": "C10",
+      "name": "IDOR Blocked: Customer B Opening Customer A Order",
+      "status": "PASS",
+      "screenshot": "step-10a-customer-b-blocked-idor.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": []
+    },
+    {
+      "step": "C10",
+      "name": "Customer Admin Access Blocked",
+      "status": "PASS",
+      "screenshot": "step-10b-customer-admin-access-denied.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+      ],
+      "failedRequests": []
+    },
+    {
+      "step": "C10",
+      "name": "Zero Markup/Base Rate Leakage Verification",
+      "status": "PASS",
+      "screenshot": "step-10c-zero-markup-leakage-audit.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)",
+        "Failed to load resource: the server responded with a status of 403 (Forbidden)"
+      ],
+      "failedRequests": [],
+      "details": "No raw_response, baseRate, or markup leakage in customer network responses"
+    },
+    {
+      "step": "C11",
+      "name": "Responsive (320-1440px) & Keyboard Accessibility",
+      "status": "PASS",
+      "screenshot": "step-11g-keyboard-navigation.png",
+      "viewport": "320-1440px",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Zero horizontal overflow across all breakpoints, keyboard submit functional"
+    },
+    {
+      "step": "D1",
+      "name": "Admin Settings Shipping Controls (1440px)",
+      "status": "PASS",
+      "screenshot": "step-d1-admin-settings-1440.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipping markups, preview simulator, COD limits, and persistence verified"
+    },
+    {
+      "step": "D1",
+      "name": "Admin Settings Shipping Controls (375px)",
+      "status": "PASS",
+      "screenshot": "step-d1-admin-settings-375.png",
+      "viewport": "375x667",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipping markups, preview simulator, COD limits, and persistence verified"
+    },
+    {
+      "step": "D2",
+      "name": "Admin Product Form COD & Dispatch Controls",
+      "status": "PASS",
+      "screenshot": "step-d2-admin-product-form-cod-dispatch.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "COD toggle, COD fee override, dispatch lead days verified in product form"
+    },
+    {
+      "step": "D3",
+      "name": "Admin Order Fulfillment & Freight Accounting",
+      "status": "PASS",
+      "screenshot": "step-d3e-admin-freight-accounting-card.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipment created, higher-cost warning verified, AWB assigned, freight margin displayed"
+    },
+    {
+      "step": "D4",
+      "name": "Shipment Creation Blocked for Unpaid Order",
+      "status": "PASS",
+      "screenshot": "step-d4-admin-shipment-blocked.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Shipment creation safely blocked for unpaid prepaid order"
+    },
+    {
+      "step": "D5",
+      "name": "COD Order Lifecycle, Mark Collected & Idempotent RTO Stock Restoration",
+      "status": "PASS",
+      "screenshot": "step-d5b-admin-stock-restoration.png",
+      "viewport": "1440x900",
+      "consoleErrors": [
+        "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+      ],
+      "failedRequests": [],
+      "details": "RTO stock restored from 49 to 50. Replay maintained exact stock at 50"
+    },
+    {
+      "step": "D6",
+      "name": "Low Wallet Balance & Courier Down Safe Messages",
+      "status": "PASS",
+      "screenshot": "step-d6a-admin-low-wallet.png",
+      "viewport": "1440x900",
+      "consoleErrors": [],
+      "failedRequests": [],
+      "details": "Clear user-friendly messages shown without raw stack traces or internal secrets"
+    }
+  ]
+}

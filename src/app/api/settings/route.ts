@@ -16,7 +16,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       settings: {
-        freeShippingThreshold: Number(settings.freeShippingThreshold ?? 999),
+        freeShippingThreshold: Number(settings.freeShippingThreshold ?? 0),
         defaultShippingFee: Number(settings.defaultShippingFee ?? 50),
         codEnabled: Boolean(settings.codEnabled),
         prepaidEnabled: Boolean(settings.prepaidEnabled),
@@ -33,7 +33,7 @@ export async function GET() {
     return NextResponse.json({
       ok: true,
       settings: {
-        freeShippingThreshold: 999,
+        freeShippingThreshold: 0,
         defaultShippingFee: 50,
         codEnabled: false,
         prepaidEnabled: true,

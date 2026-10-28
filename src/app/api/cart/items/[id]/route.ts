@@ -116,12 +116,13 @@ export async function DELETE(
       );
     }
 
-    const updatedCart = await removeCartItem(user.id, cleanItemId);
+    const result = await removeCartItem(user.id, cleanItemId);
 
     return jsonPrivate({
       ok: true,
-      message: "Item removed from cart",
-      cart: updatedCart,
+      removed: result.removed,
+      message: result.removed ? "Item removed from cart" : "Item not found in cart",
+      cart: result.cart,
     });
   } catch (err: unknown) {
     if (err instanceof CartValidationError) {

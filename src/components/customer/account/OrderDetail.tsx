@@ -101,6 +101,7 @@ export default function OrderDetail({ order }: OrderDetailProps) {
     etd: string | null;
     trackingUrl: string | null;
     lastActivity: string | null;
+    lastActivityAt?: string | null;
     scanEvents: Array<{
       id: string;
       activity: string;
@@ -111,6 +112,43 @@ export default function OrderDetail({ order }: OrderDetailProps) {
   } | null>(null);
   const [showAllScans, setShowAllScans] = React.useState(false);
   const [isCopiedAwb, setIsCopiedAwb] = React.useState(false);
+  const [isRefreshingTracking, setIsRefreshingTracking] = React.useState(false);
+  const [trackingNotice, setTrackingNotice] = React.useState<string | null>(null);
+
+  const handleRefreshTracking = async () => {
+    try {
+      setIsRefreshingTracking(true);
+      setTrackingNotice(null);
+      const orderIdentifier = order.id || order.orderNumber;
+      const res = await fetch(`/api/orders/${encodeURIComponent(orderIdentifier)}/tracking`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (res.ok && data.ok) {
+        if (data.tracking) {
+          setTrackingData(data.tracking);
+        }
+        if (data.fallback) {
+          setTrackingNotice(
+            `Shiprocket unreachable. Showing saved data from ${
+              data.lastUpdated ? new Date(data.lastUpdated).toLocaleTimeString() : "earlier"
+            }.`
+          );
+        } else {
+          setTrackingNotice("Tracking refreshed successfully.");
+        }
+      } else if (res.status === 429) {
+        setTrackingNotice(data.error || "Tracking can only be refreshed once every 10 minutes.");
+      } else {
+        setTrackingNotice(data.error || "Failed to refresh tracking.");
+      }
+    } catch {
+      setTrackingNotice("Network error while refreshing tracking.");
+    } finally {
+      setIsRefreshingTracking(false);
+      setTimeout(() => setTrackingNotice(null), 8000);
+    }
+  };
 
   React.useEffect(() => {
     let isMounted = true;
@@ -477,19 +515,40 @@ export default function OrderDetail({ order }: OrderDetailProps) {
                         Estimated Delivery: <strong className="text-neutral-800">{trackingData.etd}</strong>
                       </p>
                     )}
+                    {trackingData.lastActivityAt && (
+                      <p className="text-[10px] text-neutral-400">
+                        Last updated {new Date(trackingData.lastActivityAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                      </p>
+                    )}
+                    {trackingNotice && (
+                      <p className="text-[11px] text-amber-800 bg-amber-50 px-2 py-1 rounded border border-amber-200 mt-1">
+                        {trackingNotice}
+                      </p>
+                    )}
                   </div>
 
-                  {trackingData.trackingUrl && (
-                    <a
-                      href={trackingData.trackingUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 font-semibold text-neutral-800 text-[11px] transition-colors shrink-0"
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleRefreshTracking}
+                      disabled={isRefreshingTracking}
+                      data-testid="refresh-tracking-button"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 font-semibold text-neutral-800 text-[11px] transition-colors shrink-0 disabled:opacity-50 cursor-pointer"
                     >
-                      <span>Carrier Tracking</span>
-                      <span aria-hidden="true">&rarr;</span>
-                    </a>
-                  )}
+                      <span>{isRefreshingTracking ? "Refreshing..." : "↻ Refresh"}</span>
+                    </button>
+                    {trackingData.trackingUrl && (
+                      <a
+                        href={trackingData.trackingUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-neutral-300 bg-white hover:bg-neutral-50 font-semibold text-neutral-800 text-[11px] transition-colors shrink-0"
+                      >
+                        <span>Carrier Tracking</span>
+                        <span aria-hidden="true">&rarr;</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {/* Granular Scan Milestones */}

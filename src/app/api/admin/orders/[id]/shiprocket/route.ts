@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, handleAuthError } from "@/lib/server/auth";
 import { getOrderById, OrderValidationError } from "@/lib/server/order";
-import { query } from "@/lib/server/db";
+import { query, withTransaction } from "@/lib/server/db";
 import {
   isShiprocketConfigured,
   isShiprocketEnabled,
@@ -25,6 +25,11 @@ interface RouteContext {
 /**
  * GET /api/admin/orders/[id]/shiprocket
  * Fetches current Shiprocket shipment details & live courier tracking for an order.
+ *
+ * Security:
+ * - Admin-only endpoint (verified via requireAdmin).
+ * - raw_response is EXCLUDED to prevent customer PII leakage.
+ * - Pickup pincode is derived from env/settings.
  */
 export async function GET(
   request: NextRequest,
@@ -36,7 +41,7 @@ export async function GET(
 
     const order = await getOrderById(id, { isAdmin: true });
 
-    // Look for shipment record in database (excluding raw_response to prevent PII leakage)
+    // Look for shipment record in database (strictly excluding raw_response)
     let shipmentRecord: any = null;
     try {
       const shipments = await query<any[]>(
@@ -78,6 +83,12 @@ export async function GET(
       rating?: number;
     }> = [];
 
+    const pickupPincode = (
+      process.env.SHIPROCKET_PICKUP_PINCODE ||
+      process.env.DEFAULT_STORE_PINCODE ||
+      "560001"
+    ).trim();
+
     if (
       isShiprocketConfigured() &&
       isShiprocketEnabled() &&
@@ -90,7 +101,7 @@ export async function GET(
           (order as any).paymentMethod?.toLowerCase().includes("cash on delivery")
         );
         const serviceability = await checkCourierServiceability({
-          pickupPincode: "560038",
+          pickupPincode,
           deliveryPincode: order.shippingPostalCode,
           weightKg: 0.5,
           cod: isCod,
@@ -113,30 +124,41 @@ export async function GET(
 
     const customerShipping = Number(order.shippingAmount || 0);
     const codFee = Number((order as any).codFeeAmount || 0);
-    const totalShippingRevenue = customerShipping + codFee;
-    const actualFreightCost =
-      shipmentRecord?.shipment_actual_cost != null
-        ? Number(shipmentRecord.shipment_actual_cost)
-        : null;
-
-    const netFreightMargin =
-      actualFreightCost != null ? totalShippingRevenue - actualFreightCost : null;
+    const actualCost = shipmentRecord?.shipment_actual_cost != null ? Number(shipmentRecord.shipment_actual_cost) : null;
+    const shippingMargin = actualCost != null ? Number((customerShipping - actualCost).toFixed(2)) : null;
 
     return NextResponse.json({
       ok: true,
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      orderStatus: order.status,
+      paymentStatus: order.paymentStatus,
       isConfigured: isShiprocketConfigured(),
       isEnabled: isShiprocketEnabled(),
       shipment: shipmentRecord,
-      orderAwb: awbCode || null,
-      courierName: shipmentRecord?.courier_name || (order as any).courier_name || null,
-      liveTracking,
+      orderAwb: (order as any).awb_code || null,
+      courierName: (order as any).courier_name || null,
+      courierStatus: (order as any).courier_status || null,
+      liveTracking: liveTracking
+        ? {
+            trackStatus: liveTracking.trackStatus,
+            shipmentStatus: liveTracking.shipmentStatus,
+            currentStatus: liveTracking.currentStatus,
+            courierName: liveTracking.courierName,
+            awbCode: liveTracking.awbCode,
+            edd: liveTracking.edd,
+            deliveredDate: liveTracking.deliveredDate,
+            scans: liveTracking.scans || [],
+          }
+        : null,
       availableCouriers,
       freightAccounting: {
-        customerShippingFee: customerShipping,
-        codFeeAmount: codFee,
-        totalShippingCollected: totalShippingRevenue,
-        actualFreightCost,
-        netFreightMargin,
+        customerShippingCharged: customerShipping,
+        codFeeCharged: codFee,
+        actualCourierCost: actualCost,
+        shippingMargin,
+        baseRate: Number((order as any).shippingBaseAmount || 0),
+        markupAmount: Number((order as any).shippingMarkupAmount || 0),
       },
     });
   } catch (err: any) {
@@ -146,7 +168,7 @@ export async function GET(
         { status: err.statusCode }
       );
     }
-    return handleAuthError(err, "Failed to fetch order shipment details");
+    return handleAuthError(err, "Failed to retrieve Shiprocket shipment details");
   }
 }
 
@@ -155,9 +177,9 @@ export async function GET(
  * Dispatches logistics management actions to Shiprocket.
  *
  * Supported Actions:
- *  - "create_order": Create custom order on Shiprocket
- *  - "generate_awb": Assign courier and generate AWB
- *  - "request_pickup": Schedule courier pickup
+ *  - "create_order": Create custom order on Shiprocket (atomic row lock + UNIQUE(order_id) enforcement)
+ *  - "generate_awb": Assign courier and generate AWB (idempotent on already assigned)
+ *  - "request_pickup": Schedule courier pickup (idempotent on already scheduled)
  *  - "generate_label": Generate shipping label PDF URL
  *  - "generate_manifest": Generate manifest PDF URL
  */
@@ -231,25 +253,47 @@ export async function POST(
 
     switch (action) {
       case "create_order": {
-        // Prevent duplicate shipment creation for the same order
-        try {
-          const existingShipment = await query<any[]>(
-            "SELECT id, shiprocket_shipment_id, awb_code, status FROM order_shipments WHERE order_id = ? LIMIT 1",
+        // Enforce authoritative pickup location and pincode from env/settings (never free text)
+        const authoritativePickupLocation = (
+          process.env.SHIPROCKET_PICKUP_LOCATION || "Primary"
+        ).trim();
+
+        // 1. Row lock on orders table and check existing shipment to prevent double clicks
+        let hasExisting = false;
+        let existingId: string | null = null;
+        let existingAwb: string | null = null;
+
+        await withTransaction(async (conn) => {
+          const [orderRows] = await conn.query<any[]>(
+            "SELECT id, status FROM orders WHERE id = ? FOR UPDATE",
             [order.id]
           );
-          if (existingShipment.length > 0 && existingShipment[0].shiprocket_shipment_id) {
-            return NextResponse.json(
-              {
-                ok: false,
-                error: `A shipment already exists for this order (Shipment ID: ${existingShipment[0].shiprocket_shipment_id}).`,
-                shipmentId: existingShipment[0].shiprocket_shipment_id,
-                awbCode: existingShipment[0].awb_code,
-              },
-              { status: 409 }
-            );
+          if (orderRows.length === 0) {
+            throw new OrderValidationError("Order not found", 404);
           }
-        } catch {
-          // Table might not exist yet in unmigrated environment
+
+          const [shipmentRows] = await conn.query<any[]>(
+            "SELECT id, shiprocket_shipment_id, awb_code, status FROM order_shipments WHERE order_id = ? FOR UPDATE",
+            [order.id]
+          );
+
+          if (shipmentRows.length > 0 && shipmentRows[0].shiprocket_shipment_id) {
+            hasExisting = true;
+            existingId = shipmentRows[0].shiprocket_shipment_id;
+            existingAwb = shipmentRows[0].awb_code;
+          }
+        });
+
+        if (hasExisting) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error: `A shipment already exists for this order (Shipment ID: ${existingId}).`,
+              shipmentId: existingId,
+              awbCode: existingAwb,
+            },
+            { status: 409 }
+          );
         }
 
         const payload = mapDearrOrderToShiprocketPayload(
@@ -282,7 +326,7 @@ export async function POST(
           },
           {
             weightKg: body.weightKg || 0.5,
-            pickupLocation: body.pickupLocation,
+            pickupLocation: authoritativePickupLocation,
             dimensions: body.dimensions,
           }
         );
@@ -291,7 +335,6 @@ export async function POST(
         try {
           srResponse = await createShiprocketOrder(payload);
         } catch (apiErr: any) {
-          // Handle wallet balance or Shiprocket quota errors gracefully
           const errMsg = apiErr?.message || "";
           if (/wallet|insufficient|balance|credit/i.test(errMsg)) {
             return NextResponse.json(
@@ -302,10 +345,19 @@ export async function POST(
               { status: 402 }
             );
           }
+          if (/duplicate|already exists/i.test(errMsg)) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "Order already registered with Shiprocket.",
+              },
+              { status: 409 }
+            );
+          }
           throw apiErr;
         }
 
-        // Record in order_shipments
+        // Record in order_shipments table with unique constraint protection
         try {
           await query(
             `INSERT INTO order_shipments
@@ -319,11 +371,20 @@ export async function POST(
               srResponse.awb_code || null,
               srResponse.courier_name || null,
               srResponse.status || "NEW",
-              payload.pickup_location,
+              authoritativePickupLocation,
               JSON.stringify(srResponse),
             ]
           );
         } catch (dbErr: any) {
+          if (dbErr?.code === "ER_DUP_ENTRY" || dbErr?.errno === 1062) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error: "A shipment has already been created for this order by another session.",
+              },
+              { status: 409 }
+            );
+          }
           console.warn("[Admin Shiprocket] order_shipments insert skipped:", dbErr?.message);
         }
 
@@ -356,6 +417,14 @@ export async function POST(
           });
         } catch (awbErr: any) {
           const errMsg = awbErr?.message || "";
+          if (/already assigned|already generated|awb already exists/i.test(errMsg)) {
+            // Idempotent success: AWB was already assigned
+            return NextResponse.json({
+              ok: true,
+              message: "AWB was already assigned for this shipment.",
+              alreadyAssigned: true,
+            });
+          }
           if (/wallet|insufficient|balance|credit/i.test(errMsg)) {
             return NextResponse.json(
               {
@@ -523,8 +592,14 @@ export async function POST(
     }
   } catch (err: any) {
     if (err instanceof ShiprocketError || err instanceof ShiprocketConfigError) {
+      const msg = err.message || "Shiprocket service error";
+      const safeMsg = /wallet|balance|credit/i.test(msg)
+        ? "Insufficient Shiprocket wallet balance. Please recharge your wallet."
+        : /connect|econnrefused|timeout|500|502|503/i.test(msg)
+        ? "Courier service is temporarily unavailable. Please try again shortly."
+        : msg;
       return NextResponse.json(
-        { ok: false, error: err.message, data: err.data },
+        { ok: false, error: safeMsg },
         { status: err.statusCode || 500 }
       );
     }

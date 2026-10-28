@@ -22,6 +22,17 @@ import {
  * =============================================================================
  */
 
+export interface ShippingCartItem {
+  productId?: string;
+  quantity?: number;
+  codEnabled?: boolean;
+  cod_enabled?: boolean | number;
+  cod_available?: boolean | number;
+  codFee?: number;
+  cod_fee?: number;
+  price?: number;
+}
+
 export interface ShippingQuoteRequest {
   deliveryPincode: string;
   subtotal: number;
@@ -29,6 +40,7 @@ export interface ShippingQuoteRequest {
   weightKg?: number;
   declaredValue?: number;
   productCodFeeOverride?: number;
+  cartItems?: ShippingCartItem[];
 }
 
 export interface ShippingQuote {
@@ -143,27 +155,49 @@ export async function getShippingQuote(
     String(req.paymentMethod || "").toLowerCase().includes("cash");
   const canonicalPaymentMethod: "prepaid" | "cod" = isCod ? "cod" : "prepaid";
 
-  const effectiveCodFee =
-    typeof req.productCodFeeOverride === "number" && req.productCodFeeOverride >= 0
-      ? req.productCodFeeOverride
-      : (settings.codMinimumFee ?? 50);
-
-  // COD Eligibility checks
+  let highestProductCodFee = 0;
   let isCodEligible = true;
   let ineligibilityReason: string | undefined;
+
+  if (req.cartItems && req.cartItems.length > 0) {
+    for (const item of req.cartItems) {
+      const itemCodFee = Number(item.codFee ?? item.cod_fee ?? 0);
+      if (itemCodFee > highestProductCodFee) {
+        highestProductCodFee = itemCodFee;
+      }
+      const isItemCodAllowed =
+        item.codEnabled !== false &&
+        item.cod_enabled !== 0 &&
+        item.cod_enabled !== false &&
+        item.cod_available !== 0 &&
+        item.cod_available !== false;
+      if (!isItemCodAllowed) {
+        isCodEligible = false;
+        ineligibilityReason = "One or more items in your cart are not eligible for Cash on Delivery.";
+      }
+    }
+  }
+
+  const effectiveCodFee = Math.max(
+    settings.codMinimumFee ?? 50,
+    highestProductCodFee,
+    req.productCodFeeOverride ?? 0
+  );
 
   if (isCod) {
     if (!settings.codEnabled) {
       isCodEligible = false;
       ineligibilityReason = "Cash on Delivery is currently disabled by store policy.";
-    } else if (settings.codMaxOrderValue && subtotal > settings.codMaxOrderValue) {
+    } else if (settings.codMaxOrderValue && (subtotal + effectiveCodFee) > settings.codMaxOrderValue) {
       isCodEligible = false;
-      ineligibilityReason = `Order subtotal exceeds the maximum Cash on Delivery limit of ₹${settings.codMaxOrderValue}.`;
+      ineligibilityReason = `Order total with fees exceeds the maximum Cash on Delivery limit of ₹${settings.codMaxOrderValue}.`;
     }
   }
 
-  const freeShippingThreshold = Number(settings.freeShippingThreshold ?? 999);
-  const isFreeShippingEligible = subtotal >= freeShippingThreshold;
+  const freeShippingThreshold = typeof settings.freeShippingThreshold === "number"
+    ? settings.freeShippingThreshold
+    : (settings.freeShippingThreshold ? Number(settings.freeShippingThreshold) : 0);
+  const isFreeShippingEligible = freeShippingThreshold > 0 && subtotal >= freeShippingThreshold;
 
   // Case 1: Prepaid order qualifies for free shipping
   if (isFreeShippingEligible && !isCod) {
@@ -171,7 +205,8 @@ export async function getShippingQuote(
       serviceable: true,
       deliveryPincode: cleanPincode,
       paymentMethod: "prepaid",
-      isCodEligible: true,
+      isCodEligible,
+      ineligibilityReason,
       baseCourierAmount: 0,
       markupAmount: 0,
       codFeeAmount: 0,
@@ -227,9 +262,12 @@ export async function getShippingQuote(
 
   let selectedCourier: ShiprocketCourierCompany | null = null;
   let recommendedName: string | undefined;
+  let apiAttempted = false;
+  let apiFailed = false;
   let isLiveServiceable = true;
 
   if (isShiprocketConfigured() && isShiprocketEnabled()) {
+    apiAttempted = true;
     try {
       const cached = getCachedCouriers(cacheKey);
       if (cached) {
@@ -238,6 +276,7 @@ export async function getShippingQuote(
           settings.courierStrategy || "recommended",
           cached.recommendedName
         );
+        isLiveServiceable = cached.couriers.length > 0;
       } else {
         const pickupPincode = (
           process.env.SHIPROCKET_PICKUP_PINCODE ||
@@ -254,7 +293,7 @@ export async function getShippingQuote(
           declaredValue: req.declaredValue || subtotal,
         });
 
-        isLiveServiceable = serviceability.isServiceable;
+        isLiveServiceable = Boolean(serviceability.isServiceable && serviceability.availableCouriers.length > 0);
         recommendedName = serviceability.recommendedCourierName;
 
         setCachedCouriers(cacheKey, {
@@ -270,29 +309,67 @@ export async function getShippingQuote(
       }
     } catch (err: unknown) {
       console.warn("[getShippingQuote] Shiprocket lookup failed, falling back to static rate:", err);
+      apiFailed = true;
       selectedCourier = null;
     }
   }
 
+  // Rule A2: If live Shiprocket lookup was successful and reports unserviceable,
+  // we must BLOCK checkout (serviceable: false). Fallback rate applies ONLY on API failure/timeout/disabled.
+  if (apiAttempted && !apiFailed && (!isLiveServiceable || !selectedCourier || selectedCourier.rate <= 0)) {
+    return {
+      serviceable: false,
+      deliveryPincode: cleanPincode,
+      paymentMethod: canonicalPaymentMethod,
+      isCodEligible: false,
+      ineligibilityReason: "Delivery is not serviceable for this pincode by available couriers. Please provide a different delivery address.",
+      baseCourierAmount: 0,
+      markupAmount: 0,
+      codFeeAmount: 0,
+      finalCustomerShippingFee: 0,
+      rateSource: "live_shiprocket",
+      courierName: "Unserviceable",
+      estimatedDeliveryDays: 0,
+      estimatedDeliveryText: "Not Serviceable",
+      breakdown: {
+        subtotal,
+        freeShippingThreshold,
+        isFreeShippingEligible: false,
+        courierFee: 0,
+        markupFee: 0,
+        codFee: 0,
+        totalShippingCharged: 0,
+      },
+    };
+  }
+
   // If live courier rate obtained
   if (selectedCourier && selectedCourier.rate > 0) {
-    const baseCourierAmount = Math.round(Number(selectedCourier.rate));
+    const baseCourierAmount = Math.max(0, Math.round(Number(selectedCourier.rate)));
+
+    // Check if courier supports COD for this specific route
+    if (selectedCourier.cod === 0) {
+      isCodEligible = false;
+      if (!ineligibilityReason) {
+        ineligibilityReason = "Cash on Delivery is not serviceable for this delivery pincode by available couriers. Online payment is required.";
+      }
+    }
 
     // Calculate admin markup
     let markupAmount = 0;
     if (settings.shippingMarkupType === "percentage") {
-      markupAmount = Math.round((baseCourierAmount * (settings.shippingMarkupValue || 0)) / 100);
+      markupAmount = Math.max(0, Math.round((baseCourierAmount * Math.max(0, Number(settings.shippingMarkupValue || 0))) / 100));
     } else {
-      markupAmount = Math.round(settings.shippingMarkupValue ?? 10);
+      markupAmount = Math.max(0, Math.round(Number(settings.shippingMarkupValue ?? 10)));
     }
 
     if (settings.shippingMarkupCap !== undefined && settings.shippingMarkupCap >= 0) {
-      markupAmount = Math.min(markupAmount, settings.shippingMarkupCap);
+      markupAmount = Math.min(markupAmount, Math.max(0, Math.round(Number(settings.shippingMarkupCap))));
     }
 
     const courierWithMarkup = baseCourierAmount + markupAmount;
     const codFee = isCod ? effectiveCodFee : 0;
-    const finalCustomerShippingFee = courierWithMarkup + codFee;
+    const finalCustomerShippingFee = Math.max(0, courierWithMarkup + codFee);
 
     return {
       serviceable: isLiveServiceable,
